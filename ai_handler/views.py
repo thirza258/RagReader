@@ -21,22 +21,19 @@ from langchain_core.messages.tool import ToolMessage
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from ai_handler.models import ChatResponse, File
+import logging
+import PyPDF2
+from io import BytesIO
 
+logger = logging.getLogger(__name__)
 # Create your views here.
 llm = ChatOpenAI(model="gpt-4o-mini")
 embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
 vector_store = InMemoryVectorStore(embeddings)
 
-# Load and chunk contents of the blog
-loader = WebBaseLoader(
-    web_paths=("https://lilianweng.github.io/posts/2023-06-23-agent/",),
-    bs_kwargs=dict(
-        parse_only=bs4.SoupStrainer(
-            class_=("post-content", "post-title", "post-header")
-        )
-    ),
-)
-docs = loader.load()
+docs = ""
 
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 all_splits = text_splitter.split_documents(docs)
@@ -117,37 +114,6 @@ graph_builder.add_edge("generate", END)
 
 graph = graph_builder.compile()
 
-input_message = "What is Task Decomposition?"
-
-# Define variables to store messages
-human_message = None
-ai_message_1 = None
-tool_message = None
-ai_message_2 = None
-
-for step in graph.stream(
-    {"messages": [HumanMessage(content=input_message)]},
-    stream_mode="values",
-):
-    messages = step["messages"]
-
-    # Extract messages based on their class type
-    for message in messages:
-        if isinstance(message, HumanMessage):
-            human_message = message.content
-        elif isinstance(message, AIMessage) and ai_message_1 is None:
-            ai_message_1 = message.content
-        elif isinstance(message, ToolMessage):
-            tool_message = message.content
-        elif isinstance(message, AIMessage):
-            ai_message_2 = message.content
-
-# Print extracted messages
-print("Human Message:", human_message)
-print("AI Message 1:", ai_message_1)
-print("Tool Message:", tool_message)
-print("AI Message 2:", ai_message_2)
-
 class GenerateChat(APIView):
     def post(self, request):
         try:
@@ -187,41 +153,86 @@ class GenerateChat(APIView):
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-
+        
 class FileSubmit(APIView):
     def post(self, request):
         try:
+            # Check if 'file' is present in the request
+            if "file" not in request.FILES:
+                logger.error("No file found in the request.")
+                return Response({"error": "No file found in the request"}, status=status.HTTP_400_BAD_REQUEST)
+
             file_uploaded = request.FILES["file"]
+            file = File(file=file_uploaded)
+            try:
+                file.save()  # Attempt to save the file to the database
+            except Exception as e:
+                logger.error(f"Error saving file: {e}")
+                return Response({"error": "Error saving file"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
             file_extension = os.path.splitext(file_uploaded.name)[1].lower()
-            if file_extension == ".pdf":
-                # Handle PDF file
-                # Add your PDF processing code here
-                print("PDF file uploaded")
-                pass
-            elif file_extension == ".txt":
-                # Handle TXT file
-                # Add your TXT processing code here
-                print("TXT file uploaded")
-                pass
-            elif file_extension == ".csv":
-                # Handle CSV file
-                # Add your CSV processing code here
-                print("CSV file uploaded")
-                pass
-            else:
+            
+            # Handle different file types
+            try:
+                all_text = self.extract_text(file_uploaded, file_extension)
+            except Exception as e:
+                logger.error(f"Error extracting text: {e}")
                 return Response(
-                    {"error": "Unsupported file type"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": f"Error processing file: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
-                
+
+            # Prepare the response data
+            data = {
+                "file": file_uploaded.name,
+                "file_type": file_extension,
+                "file_content": all_text
+            }
+
             return Response(
-                {"status": 200, "message": "File uploaded successfully"},
+                {
+                    "status": 200,
+                    "message": "File uploaded successfully",
+                    "data": data
+                },
                 status=status.HTTP_200_OK,
             )
+
         except Exception as e:
+            logger.error(f"Error during file upload process: {e}")
             return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "An unexpected error occurred"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-            
+
+    def extract_text(self, file_uploaded, file_extension):
+        """Extract text content from different file types."""
+        file_uploaded.seek(0)  # Reset file pointer
+
+        if file_extension == ".pdf":
+            try:
+                # Create a PDF reader object
+                pdf_reader = PyPDF2.PdfReader(BytesIO(file_uploaded.read()))
+                
+                # Extract text from all pages
+                text = []
+                for page in pdf_reader.pages:
+                    text.append(page.extract_text())
+                
+                return "\n".join(text)
+            except Exception as e:
+                raise Exception(f"Error reading PDF: {str(e)}")
+
+        elif file_extension in [".txt", ".csv"]:
+            try:
+                return file_uploaded.read().decode("utf-8")
+            except UnicodeDecodeError:
+                # If UTF-8 fails, try ISO-8859-1
+                file_uploaded.seek(0)
+                try:
+                    return file_uploaded.read().decode("ISO-8859-1")
+                except UnicodeDecodeError as e:
+                    raise Exception("File encoding is not supported")
+
+        else:
+            raise Exception("Unsupported file type")
