@@ -325,14 +325,6 @@ class FileSubmit(APIView):
                 {"error": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-            
-import re
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-import logging
-
-logger = logging.getLogger(__name__)
 
 class GenerateChat(APIView):
     def post(self, request):
