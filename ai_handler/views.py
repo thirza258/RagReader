@@ -47,6 +47,7 @@ class ChatSystem:
         self.vector_store = None
         self.graph = None
         self.vector_number = None
+        self.length_of_chunk = 0
         
     def initialize_system(self, model_name, vector_number):
         if(model_name == "OpenAI"):
@@ -81,6 +82,8 @@ class ChatSystem:
 
         else:
             raise Exception("Unsupported document type")
+        
+        self.length_of_chunk = len(docs)
         self.vector_store.add_documents(docs)
         self.setup_graph()
 
@@ -102,6 +105,8 @@ class ChatSystem:
                 str: A formatted string containing retrieved document contents.
                 list: A list of retrieved documents.
             """
+            if self.length_of_chunk < self.vector_number:
+                self.vector_number = 1
             retrieved_docs = self.vector_store.similarity_search(query, k=self.vector_number)
             serialized = "\n\n".join(
                 f"Source: {doc.metadata}\nContent: {doc.page_content}"
@@ -284,17 +289,13 @@ class FileSubmit(APIView):
         """
         try:
             # Check if 'file' is present in the request
-            if "file" not in request.FILES:
-                logger.error("No file found in the request.")
-                return Response(
-                    {"error": "No file found in the request"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
             if "file" in request.FILES:
                 file_uploaded = request.FILES["file"]
             elif "file" in request.data:
-                file_uploaded = BytesIO(request.data["file"].encode())
+                if isinstance(request.data["file"], str):
+                    file_uploaded = BytesIO(request.data["file"].encode())
+                else:
+                    file_uploaded = BytesIO(request.data["file"])
             else:
                 logger.error("No file found in the request.")
                 return Response(
@@ -339,18 +340,26 @@ class FileSubmit(APIView):
                     )
             elif "file" in request.data:
                 file_extension = ".url"
-                loader = WebBaseLoader(
-                    web_paths=(file_uploaded)  # Replace with any URL
-                )
+                web_url = request.data["file"]  # Ensure this is a URL string
+
+                if isinstance(web_url, bytes):
+                    web_url = web_url.decode("utf-8")
+
+                loader = WebBaseLoader(web_paths=(web_url,))
                 document = loader.load()
-                chat_system.process_document(document, file_extension)
+                if not document or len(document) == 0:
+                    raise ValueError("Failed to load content from the URL.")
+
+                text_content = document[0].page_content if hasattr(document[0], "page_content") else ""
+
+                if not text_content.strip():
+                    raise ValueError("Loaded document content is empty.")
+
+                chat_system.process_document(text_content, file_extension)
                 
             # Prepare the response data
             
             data = {
-                "file": file_uploaded.name,
-                "file_type": file_extension,
-                "file_content": all_text,
                 "model_name": model_name,
                 "vector_number": vector_number
             }
