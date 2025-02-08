@@ -1,10 +1,12 @@
 from django.shortcuts import render
 import os
+import pandas as pd
 from langchain_openai import ChatOpenAI
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
 import bs4
 from langchain import hub
+from langchain.chat_models import init_chat_model
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -24,7 +26,10 @@ from rest_framework.response import Response
 from ai_handler.models import ChatResponse, File
 import logging
 import PyPDF2
+import re
 from io import BytesIO
+import json
+
 logger = logging.getLogger(__name__)
 
 class ChatSystem:
@@ -44,10 +49,18 @@ class ChatSystem:
         self.vector_number = None
         
     def initialize_system(self, model_name, vector_number):
-        self.llm = ChatOpenAI(model="gpt-4o-mini")
+        if(model_name == "OpenAI"):
+            self.llm = init_chat_model("gpt-4o-mini", model_provider="openai")
+        elif(model_name == "Mistral"):
+            self.llm = init_chat_model("mistral-large-latest", model_provider="mistralai")
+        elif(model_name == "Claude"):
+            self.llm = init_chat_model("claude-3-5-haiku-20241022", model_provider="anthropic")
+        else:
+            raise Exception("Invalid model name")
+        self.vector_number = vector_number
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
         
-    def process_document(self, text_content):
+    def process_document(self, text_content, document_type):
         """
         Processes the given text content by splitting it into chunks and storing it in a vector database.
 
@@ -55,12 +68,20 @@ class ChatSystem:
             text_content (str): The text content to be processed.
         """
         self.vector_store = InMemoryVectorStore(self.embeddings)
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500, 
-            chunk_overlap=200
-        )
-        docs = text_splitter.split_text(text_content)
-        self.vector_store.add_texts(docs)
+        
+        if document_type in [".pdf", ".txt", ".url"]:
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=min(500, len(text_content) // 2),
+                chunk_overlap=200
+            )
+            docs = [Document(page_content=chunk) for chunk in text_splitter.split_text(text_content)]
+
+        elif document_type == ".csv":
+            docs = [Document(page_content=json.dumps(chunks)) for chunks in text_content]
+
+        else:
+            raise Exception("Unsupported document type")
+        self.vector_store.add_documents(docs)
         self.setup_graph()
 
     def setup_graph(self):
@@ -81,7 +102,7 @@ class ChatSystem:
                 str: A formatted string containing retrieved document contents.
                 list: A list of retrieved documents.
             """
-            retrieved_docs = self.vector_store.similarity_search(query, k=5)
+            retrieved_docs = self.vector_store.similarity_search(query, k=self.vector_number)
             serialized = "\n\n".join(
                 f"Source: {doc.metadata}\nContent: {doc.page_content}"
                 for doc in retrieved_docs
@@ -202,6 +223,7 @@ class ChatSystem:
 
 
 class FileSubmit(APIView):
+    
     @staticmethod
     def extract_text(file_uploaded, file_extension):
         """
@@ -231,7 +253,7 @@ class FileSubmit(APIView):
                 return "\n".join(text)
             except Exception as e:
                 raise Exception(f"Error reading PDF: {str(e)}")
-        elif file_extension in [".txt", ".csv"]:
+        elif file_extension in [".txt"]:
             try:
                 return file_uploaded.read().decode("utf-8")
             except UnicodeDecodeError:
@@ -241,6 +263,12 @@ class FileSubmit(APIView):
                     return file_uploaded.read().decode("ISO-8859-1")
                 except UnicodeDecodeError as e:
                     raise Exception("File encoding is not supported")
+        elif file_extension == ".csv":
+            try:
+                df = pd.read_csv(file_uploaded)
+                return df.to_json(orient="records")
+            except Exception as e:
+                raise Exception(f"Error reading CSV: {str(e)}")
         else:
             raise Exception("Unsupported file type")
 
@@ -263,9 +291,19 @@ class FileSubmit(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            file_uploaded = request.FILES["file"]
+            if "file" in request.FILES:
+                file_uploaded = request.FILES["file"]
+            elif "file" in request.data:
+                file_uploaded = BytesIO(request.data["file"].encode())
+            else:
+                logger.error("No file found in the request.")
+                return Response(
+                    {"error": "No file found in the request"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             model_name = request.data["model_name"]
             vector_number = int(request.data["vector_number"])
+            
             
             # Initialize the chat system
             print("Getting chat system instance...")
@@ -275,31 +313,38 @@ class FileSubmit(APIView):
             print("Chat system initialized")
             
             # Save file
-            file = File(file=file_uploaded)
-            try:
-                file.save()  # Attempt to save the file to the database
-            except Exception as e:
-                logger.error(f"Error saving file: {e}")
-                return Response(
-                    {"error": "Error saving file"}, 
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+            if "file" in request.FILES:
+                file = File(file=file_uploaded)
+                try:
+                    file.save()  # Attempt to save the file to the database
+                except Exception as e:
+                    logger.error(f"Error saving file: {e}")
+                    return Response(
+                        {"error": "Error saving file"}, 
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
 
-            file_extension = os.path.splitext(file_uploaded.name)[1].lower()
-            
-            # Extract and process text
-            try:
-                all_text = self.extract_text(file_uploaded, file_extension)
-                print(all_text)
-                # Process the document for chat system
-                chat_system.process_document(all_text)
-            except Exception as e:
-                logger.error(f"Error processing file: {e}")
-                return Response(
-                    {"error": f"Error processing file: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST
+                file_extension = os.path.splitext(file_uploaded.name)[1].lower()
+                
+                # Extract and process text
+                try:
+                    all_text = self.extract_text(file_uploaded, file_extension)
+                    # Process the document for chat system
+                    chat_system.process_document(all_text, file_extension)
+                except Exception as e:
+                    logger.error(f"Error processing file: {e}")
+                    return Response(
+                        {"error": f"Error processing file: {str(e)}"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            elif "file" in request.data:
+                file_extension = ".url"
+                loader = WebBaseLoader(
+                    web_paths=(file_uploaded)  # Replace with any URL
                 )
-
+                document = loader.load()
+                chat_system.process_document(document, file_extension)
+                
             # Prepare the response data
             
             data = {
@@ -376,7 +421,7 @@ class GenerateChat(APIView):
             data = {
                 "human_message": human_message,
                 "ai_message_1": ai_message_1,
-                "tool_message": tool_message_list,  # Now a list
+                "tool_message": tool_message_list,  
                 "ai_message_2": ai_message_2
             }
 
@@ -393,3 +438,24 @@ class GenerateChat(APIView):
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+class CleanChatSystem(APIView):
+    def get(self, request):
+        try:
+            chat_system = ChatSystem.get_instance()
+            chat_system.llm = None
+            chat_system.embeddings = None
+            chat_system.vector_store = None
+            chat_system.graph = None
+            chat_system.vector_number = None
+            return Response(
+                {"status": 200, "message": "Chat system cleaned successfully"},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logger.error(f"Error cleaning chat system: {e}")
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+            

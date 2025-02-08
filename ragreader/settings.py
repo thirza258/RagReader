@@ -26,6 +26,9 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 os.environ["LANGSMITH_ENDPOINT"] = os.getenv("LANGSMITH_ENDPOINT")
 os.environ["LANGSMITH_PROJECT"] = os.getenv("LANGSMITH_PROJECT")
+os.environ["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
+os.environ["MISTRAL_API_KEY"] = os.getenv("MISTRAL_API_KEY")
+os.environ["USER_AGENT"] = "ragreader"
 
 
 # Quick-start development settings - unsuitable for production
