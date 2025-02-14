@@ -439,7 +439,7 @@ class GenerateChat(APIView):
                             )
                         else:
                             ai_message_1 = message.content  # Directly assign if it's a string
-                        print(ai_message_1)
+                        
                         if chat_system.model_name == "Claude" and "retrieve" in ai_message_1:
                             ai_message_1 = "Warning"
                     elif isinstance(message, ToolMessage):
@@ -476,7 +476,7 @@ class GenerateChat(APIView):
                 "ai_message_2": ai_message_2
             }
 
-            print(data)
+        
             return Response({
                 "status": 200,
                 "message": "Chat generated successfully",
