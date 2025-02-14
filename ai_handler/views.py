@@ -29,6 +29,7 @@ import PyPDF2
 import re
 from io import BytesIO
 import json
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class ChatSystem:
         return cls._instance
     
     def __init__(self):
+        self.model_name = None
         self.llm = None
         self.embeddings = None 
         self.vector_store = None
@@ -50,6 +52,7 @@ class ChatSystem:
         self.length_of_chunk = 0
         
     def initialize_system(self, model_name, vector_number):
+        self.model_name = model_name
         if(model_name == "OpenAI"):
             self.llm = init_chat_model("gpt-4o-mini", model_provider="openai")
         elif(model_name == "Mistral"):
@@ -70,6 +73,8 @@ class ChatSystem:
         """
         self.vector_store = InMemoryVectorStore(self.embeddings)
         
+        self.all_docs = [] 
+        
         if document_type in [".pdf", ".txt", ".url"]:
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=min(500, len(text_content) // 2),
@@ -84,6 +89,7 @@ class ChatSystem:
             raise Exception("Unsupported document type")
         
         self.length_of_chunk = len(docs)
+        self.all_docs.extend(docs)  
         self.vector_store.add_documents(docs)
         self.setup_graph()
 
@@ -106,12 +112,28 @@ class ChatSystem:
                 list: A list of retrieved documents.
             """
             if self.length_of_chunk < self.vector_number:
-                self.vector_number = 1
+                self.vector_number = max(1, self.length_of_chunk)  # Ensure at least 1
+
             retrieved_docs = self.vector_store.similarity_search(query, k=self.vector_number)
-            serialized = "\n\n".join(
-                f"Source: {doc.metadata}\nContent: {doc.page_content}"
-                for doc in retrieved_docs
-            )
+            
+
+            # If retrieval fails, try a generic query
+            if not retrieved_docs:
+                retrieved_docs = self.vector_store.similarity_search("Summarize", k=self.vector_number)
+
+            # Final fallback: return a random document if still empty
+            if not retrieved_docs and self.all_docs:
+                retrieved_docs = [random.choice(self.all_docs)]  # Pick 1 random document
+
+            # Ensure a valid response
+            if retrieved_docs:
+                serialized = "\n\n".join(
+                    f"Source: {doc.metadata}\nContent: {doc.page_content}"
+                    for doc in retrieved_docs
+                )
+            else:
+                serialized = "No relevant documents found."
+
             return serialized, retrieved_docs
 
         graph_builder = StateGraph(MessagesState)
@@ -155,7 +177,7 @@ class ChatSystem:
                 f"""
                 You are a RAG (Retrieval-Augmented Generation) Assistant. Your task is to answer questions based on the provided document content and user prompt. Follow these steps carefully:
 
-                1. First, you will be given a set of document content in the following format:
+                1. You will be given a set of document content in the following format:
 
                 <docs_content>
                 {docs_content}
@@ -163,39 +185,42 @@ class ChatSystem:
 
                 2. Carefully read and analyze the provided document content. This information will be the basis for answering the user's prompt.
 
-                4. Your goal is to answer the prompt using only the information provided in the docs_content. Do not use any external knowledge or information that is not present in the given document content.
+                3. If the user asks **what the file is about** or **what the document is related to**, summarize its main topic concisely in one paragraph. Extract the most relevant portion of the document that gives a clear idea of its subject.
 
-                5. Formulate your answer in Markdown format. Use appropriate Markdown syntax for headings, lists, emphasis, and any other formatting that would enhance the readability and structure of your response.
+                4. If the user asks a specific question, answer using only the information in the `docs_content`. Do not use external knowledge.
 
-                6. Present your final answer within <answer> tags. The opening <answer> tag should be on its own line, followed by your Markdown-formatted response, and then the closing </answer> tag on its own line.
+                5. If the requested information is not available in the document, clearly state that it is not provided.
 
-                7. Ensure that your answer is directly relevant to the prompt and based solely on the information provided in the docs_content. If the prompt asks for information that is not available in the given content, state that the information is not provided in the available documents.
+                6. Format your response in Markdown, ensuring clarity with appropriate headings, quotes, or lists when needed.
 
-                8. If appropriate, use quotes from the docs_content to support your answer. Format these quotes using Markdown syntax.
-
-                Here's an example of how your response should be structured:
+                7. Always enclose your response within `<answer>` tags, like this:
 
                 <answer>
 
-                # Main Topic
+                # Document Summary
 
-                ## Subtopic 1
+                This document discusses...
 
-                Information related to subtopic 1...
+                </answer>
 
-                ## Subtopic 2
+                or
+
+                <answer>
+
+                # Response
 
                 As stated in the document:
 
-                > Relevant quote from the docs_content
+                > "Relevant quote from docs_content"
 
                 Further explanation...
 
                 </answer>
 
-                Remember, your entire response should be in Markdown format and enclosed within the <answer> tags.
+                Ensure that responses are always relevant, concise, and well-structured.
                 
-                3. After processing the document content, below is the user prompt you need to answer:
+                After processing the document content, below is the user prompt you need to answer:
+
                 """
             )
 
@@ -406,12 +431,29 @@ class GenerateChat(APIView):
                     if isinstance(message, HumanMessage):
                         human_message = message.content
                     elif isinstance(message, AIMessage) and ai_message_1 is None:
-                        ai_message_1 = message.content
+                        if isinstance(message.content, list):  
+                            # Extract text from list items if it's a list
+                            ai_message_1 = "\n".join(
+                                content["text"] if isinstance(content, dict) and "text" in content else str(content)
+                                for content in message.content
+                            )
+                        else:
+                            ai_message_1 = message.content  # Directly assign if it's a string
+                        print(ai_message_1)
+                        if chat_system.model_name == "Claude" and "retrieve" in ai_message_1:
+                            ai_message_1 = "Warning"
                     elif isinstance(message, ToolMessage):
                         tool_message = message.content
                     elif isinstance(message, AIMessage):
-                        ai_message_2 = message.content
-
+                        if isinstance(message.content, list):  
+                            # Ensure ai_message_2 is also correctly handled
+                            ai_message_2 = "\n".join(
+                                content["text"] if isinstance(content, dict) and "text" in content else str(content)
+                                for content in message.content
+                            )
+                        else:
+                            ai_message_2 = message.content
+                            
             # Remove <answer> and </answer> from AI messages
             def clean_ai_message(message):
                 if message:
