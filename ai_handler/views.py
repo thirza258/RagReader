@@ -46,6 +46,7 @@ class ChatSystem:
         self.embeddings = None 
         self.vector_store = None
         self.graph = None
+        self.documents = []
         self.vector_number = None
         self.length_of_chunk = 0
         
@@ -67,28 +68,103 @@ class ChatSystem:
         Processes the given text content by splitting it into chunks and storing it in a vector database.
 
         Args:
-            text_content (str): The text content to be processed.
+            text_content (str | list): The text content (str for .pdf, .txt, .url) or 
+                                       structured data (list for .csv) to be processed.
+            document_type (str): The type of the document.
         """
-        self.all_docs = [] 
-        
+        self.documents = [] # Initialize/clear documents for this run
+
         if document_type in [".pdf", ".txt", ".url"]:
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=min(500, len(text_content) // 2),
-                chunk_overlap=200
-            )
-            docs = [Document(page_content=chunk) for chunk in text_splitter.split_text(text_content)]
+            if not text_content:
+                print("Warning: Empty text_content for document type", document_type)
+                # self.documents remains empty
+            elif not isinstance(text_content, str):
+                raise TypeError(f"For document type {document_type}, text_content must be a string. Got {type(text_content)}")
+            else:
+                initial_chunk_size = min(500, len(text_content) // 2)
+                actual_chunk_size = max(1, initial_chunk_size) # chunk_size must be > 0
+                desired_chunk_overlap = 200
+                # chunk_overlap must be < chunk_size
+                actual_chunk_overlap = max(0, min(desired_chunk_overlap, actual_chunk_size - 1))
+                
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=actual_chunk_size,
+                    chunk_overlap=actual_chunk_overlap
+                )
+                split_texts = text_splitter.split_text(text_content)
+                self.documents = [Document(page_content=chunk) for chunk in split_texts]
 
         elif document_type == ".csv":
-            docs = [Document(page_content=json.dumps(chunks)) for chunks in text_content]
-
+            if not text_content:
+                print("Warning: Empty text_content for document type .csv")
+                # self.documents remains empty
+            elif not isinstance(text_content, list): # Assuming text_content for CSV is a list of rows (e.g., dicts)
+                raise TypeError(f"For document type .csv, text_content should be a list of rows. Got {type(text_content)}")
+            else:
+                try:
+                    self.documents = [Document(page_content=json.dumps(row_data)) for row_data in text_content]
+                except TypeError as e:
+                    raise ValueError(f"Error serializing CSV row data to JSON: {e}. Ensure rows are JSON serializable.")
         else:
-            raise Exception("Unsupported document type")
+            # Or print a warning and leave self.documents empty
+            # raise Exception(f"Unsupported document type: {document_type}")
+            print(f"Warning: Unsupported document type: {document_type}. No documents processed.")
+            self.vector_store = None
+            return
+
+        # --- Embedding and FAISS part ---
+        if not self.documents:
+            print("No documents were processed or found.")
+            self.vector_store = None
+            return
+
+        # Extract the actual text content from the Document objects
+        texts_to_embed = [doc.page_content for doc in self.documents if doc.page_content]
+
+        if not texts_to_embed:
+            print("All processed documents have empty page_content. Nothing to embed.")
+            self.vector_store = None
+            return
         
-        doc_embeddings = self.embeddings.embed_documents([doc.page_content for doc in docs])
+        try:
+            # Now, texts_to_embed is a List[str], which is what embed_documents expects
+            doc_embeddings = self.embeddings.embed_documents(texts_to_embed)
+        except Exception as e:
+            print(f"Error during self.embeddings.embed_documents: {e}")
+            self.vector_store = None
+            raise # Re-raise the exception to see the full traceback if needed
+
+        if not doc_embeddings or not isinstance(doc_embeddings, list) or len(doc_embeddings) == 0:
+            print("Embeddings generation failed or returned an empty list.")
+            self.vector_store = None
+            return
+        
+        # Check if the embeddings are in the expected format (list of lists of floats)
+        if not isinstance(doc_embeddings[0], list) or not all(isinstance(val, float) for val in doc_embeddings[0]):
+            print(f"Embeddings are not in the expected format (List[List[float]]). Got: {type(doc_embeddings[0])}")
+            self.vector_store = None
+            return
+
         embedding_dim = len(doc_embeddings[0])
+        if embedding_dim == 0:
+            print("Embedding dimension is 0. Cannot create FAISS index.")
+            self.vector_store = None
+            return
+            
         self.vector_store = faiss.IndexFlatL2(embedding_dim)
         
-        self.vector_store.add(np.array(doc_embeddings).astype(np.float32))
+        try:
+            embeddings_np_array = np.array(doc_embeddings).astype(np.float32)
+            if embeddings_np_array.ndim != 2 or embeddings_np_array.shape[1] != embedding_dim:
+                print(f"Embeddings numpy array has unexpected shape: {embeddings_np_array.shape}. Expected (N, {embedding_dim})")
+                self.vector_store = None
+                return
+            self.vector_store.add(embeddings_np_array)
+            print(f"Successfully added {self.vector_store.ntotal} embeddings to FAISS index.")
+        except Exception as e:
+            print(f"Error adding embeddings to FAISS: {e}")
+            self.vector_store = None
+            raise
 
         
     def retrieve(self, query: str):
@@ -103,16 +179,14 @@ class ChatSystem:
             list: A list of retrieved documents.
         """
         if self.length_of_chunk < self.vector_number:
-            self.vector_number = max(1, self.length_of_chunk)  # Ensure at least 1
+            self.vector_number = max(1, self.length_of_chunk)  
 
         query_embedding = self.embeddings.embed_query(query)
         query_embedding = np.array(query_embedding).reshape(1, -1).astype(np.float32)
         
         distances, indices = self.vector_store.search(query_embedding, k=self.vector_number)
         retrieved_docs = [self.documents[i].page_content for i in indices[0] if i != -1]
-        # If retrieval fails, try a generic query
-        
-        # Ensure a valid response
+
         return retrieved_docs
 
     def query_and_respond(self, query: str):
@@ -129,19 +203,73 @@ class ChatSystem:
             raise Exception("Chat system not initialized. Please upload a file first.")
         
         retrieved_docs = self.retrieve(query)
+        print(query)
+        print(retrieved_docs)
         
         prompt = PromptTemplate(
             template="""
-            
-            """
+                You are a RAG (Retrieval-Augmented Generation) Assistant. Your task is to answer questions based on the provided document content and user prompt. Follow these steps carefully:
+
+                1. You will be given a set of document content in the following format:
+
+                <docs_content>
+                {retrieved_docs}
+                </docs_content>
+                
+                User Query:
+                <query>
+                {query}
+                </query>
+
+                2. Carefully read and analyze the provided document content. This information will be the basis for answering the user's prompt.
+
+                3. If the user asks **what the file is about** or **what the document is related to**, summarize its main topic concisely in one paragraph. Extract the most relevant portion of the document that gives a clear idea of its subject.
+
+                4. If the user asks a specific question, answer using only the information in the `docs_content`. Do not use external knowledge.
+
+                5. If the requested information is not available in the document, clearly state that it is not provided.
+
+                6. Format your response in Markdown, ensuring clarity with appropriate headings, quotes, or lists when needed.
+
+                7. Always enclose your response within `<answer>` tags, like this:
+
+                <answer>
+
+                # Document Summary
+
+                This document discusses...
+
+                </answer>
+
+                or
+
+                <answer>
+
+                # Response
+
+                As stated in the document:
+
+                > "Relevant quote from docs_content"
+
+                Further explanation...
+
+                </answer>
+
+                Ensure that responses are always relevant, concise, and well-structured.
+                
+                After processing the document content, below is the user prompt you need to answer:
+
+            """,
+            input_variables=["retrieved_docs", "query"]
         )
         
-        if not retrieved_docs:
-            return "No relevant documents found."
-        
-        
-        
-        return response.content
+        chain = prompt | self.llm
+        response = chain.invoke({
+            "retrieved_docs": "\n".join(retrieved_docs),
+            "query": query
+        })
+    
+        return response
 
 
 class FileSubmit(APIView):
@@ -313,7 +441,7 @@ class GenerateChat(APIView):
     def post(self, request):
         try:
             chat_system = ChatSystem.get_instance()
-            if not chat_system.llm or not chat_system.graph:
+            if not chat_system.llm :
                 logger.error("Chat system not initialized. Please upload a file first.")
                 return Response(
                     {"error": "Chat system not initialized. Please upload a file first."},
@@ -321,70 +449,26 @@ class GenerateChat(APIView):
                 )
                 
             input_message = request.data["input_message"]
-            ai_message_1 = None
-            tool_message = None
-            ai_message_2 = None
-            
-            for step in chat_system.graph.stream(
-                {"messages": [HumanMessage(content=input_message)]},
-                stream_mode="values",
-            ):
-                messages = step["messages"]
-
-                for message in messages:
-                    if isinstance(message, HumanMessage):
-                        human_message = message.content
-                    elif isinstance(message, AIMessage) and ai_message_1 is None:
-                        if isinstance(message.content, list):  
-                            # Extract text from list items if it's a list
-                            ai_message_1 = "\n".join(
-                                content["text"] if isinstance(content, dict) and "text" in content else str(content)
-                                for content in message.content
-                            )
-                        else:
-                            ai_message_1 = message.content  # Directly assign if it's a string
-                        
-                        if chat_system.model_name == "Claude" and "retrieve" in ai_message_1:
-                            ai_message_1 = "Warning"
-                    elif isinstance(message, ToolMessage):
-                        tool_message = message.content
-                    elif isinstance(message, AIMessage):
-                        if isinstance(message.content, list):  
-                            # Ensure ai_message_2 is also correctly handled
-                            ai_message_2 = "\n".join(
-                                content["text"] if isinstance(content, dict) and "text" in content else str(content)
-                                for content in message.content
-                            )
-                        else:
-                            ai_message_2 = message.content
-                            
-            # Remove <answer> and </answer> from AI messages
-            def clean_ai_message(message):
-                if message:
-                    return re.sub(r"</?answer>", "", message).strip()
-                return None
-
-            ai_message_1 = clean_ai_message(ai_message_1)
-            ai_message_2 = clean_ai_message(ai_message_2)
-
-            # Convert tool_message into a list by splitting at 'Source: {}\nContent:' or '\n\nSource: {}\nContent:'
-            tool_message_list = []
-            if tool_message:
-                tool_message_list = re.split(r"\n?\n?Source: {}\nContent:\s*", tool_message.strip())
-                tool_message_list = [msg.strip() for msg in tool_message_list if msg.strip()]
+            ai_message_1 = ""
+            tool_message = ""
+            ai_message_2 = ""
+            human_message = HumanMessage(content=input_message)
 
             data = {
                 "human_message": human_message,
                 "ai_message_1": ai_message_1,
-                "tool_message": tool_message_list,  
+                "tool_message": tool_message,  
                 "ai_message_2": ai_message_2
             }
+            
+            ai_message_2 = chat_system.query_and_respond(input_message)
+            ai_message_1 = ai_message_2
 
         
             return Response({
                 "status": 200,
                 "message": "Chat generated successfully",
-                "data": data
+                "data": ai_message_2,
             }, status=status.HTTP_200_OK)
                         
         except Exception as e:
