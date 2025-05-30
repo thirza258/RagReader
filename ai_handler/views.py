@@ -1,16 +1,11 @@
-from django.shortcuts import render
+from django.core.files.uploadedfile import UploadedFile
 import os
 import pandas as pd
-from langchain_openai import ChatOpenAI
-from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
-import bs4
-from langchain import hub
 from langchain.chat_models import init_chat_model
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from typing_extensions import List, TypedDict
 from langchain_core.tools import tool
 from langgraph.graph import MessagesState, StateGraph
 from langchain_core.messages import SystemMessage
@@ -26,10 +21,13 @@ from rest_framework.response import Response
 from ai_handler.models import ChatResponse, File
 import logging
 import PyPDF2
+from langchain_core.prompts import PromptTemplate
 import re
 from io import BytesIO
 import json
+import faiss
 import random
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +69,6 @@ class ChatSystem:
         Args:
             text_content (str): The text content to be processed.
         """
-        self.vector_store = InMemoryVectorStore(self.embeddings)
-        
         self.all_docs = [] 
         
         if document_type in [".pdf", ".txt", ".url"]:
@@ -88,168 +84,64 @@ class ChatSystem:
         else:
             raise Exception("Unsupported document type")
         
-        self.length_of_chunk = len(docs)
-        self.all_docs.extend(docs)  
-        self.vector_store.add_documents(docs)
-        self.setup_graph()
+        doc_embeddings = self.embeddings.embed_documents([doc.page_content for doc in docs])
+        embedding_dim = len(doc_embeddings[0])
+        self.vector_store = faiss.IndexFlatL2(embedding_dim)
+        
+        self.vector_store.add(np.array(doc_embeddings).astype(np.float32))
 
-    def setup_graph(self):
+        
+    def retrieve(self, query: str):
         """
-        Sets up the retrieval-augmented generation (RAG) graph for handling queries 
-        using a language model and vector search.
+        Retrieves relevant documents from the vector store based on a similarity search.
+
+        Args:
+            query (str): The search query.
+
+        Returns:
+            str: A formatted string containing retrieved document contents.
+            list: A list of retrieved documents.
         """
+        if self.length_of_chunk < self.vector_number:
+            self.vector_number = max(1, self.length_of_chunk)  # Ensure at least 1
 
-        @tool(response_format="content_and_artifact")
-        def retrieve(query: str):
-            """
-            Retrieves relevant documents from the vector store based on a similarity search.
+        query_embedding = self.embeddings.embed_query(query)
+        query_embedding = np.array(query_embedding).reshape(1, -1).astype(np.float32)
+        
+        distances, indices = self.vector_store.search(query_embedding, k=self.vector_number)
+        retrieved_docs = [self.documents[i].page_content for i in indices[0] if i != -1]
+        # If retrieval fails, try a generic query
+        
+        # Ensure a valid response
+        return retrieved_docs
 
-            Args:
-                query (str): The search query.
+    def query_and_respond(self, query: str):
+        """
+        Queries the chat system and returns a response.
 
-            Returns:
-                str: A formatted string containing retrieved document contents.
-                list: A list of retrieved documents.
-            """
-            if self.length_of_chunk < self.vector_number:
-                self.vector_number = max(1, self.length_of_chunk)  # Ensure at least 1
+        Args:
+            query (str): The user's query.
 
-            retrieved_docs = self.vector_store.similarity_search(query, k=self.vector_number)
+        Returns:
+            str: The response from the chat system.
+        """
+        if not self.llm or not self.vector_store:
+            raise Exception("Chat system not initialized. Please upload a file first.")
+        
+        retrieved_docs = self.retrieve(query)
+        
+        prompt = PromptTemplate(
+            template="""
             
-
-            # If retrieval fails, try a generic query
-            if not retrieved_docs:
-                retrieved_docs = self.vector_store.similarity_search("Summarize", k=self.vector_number)
-
-            # Final fallback: return a random document if still empty
-            if not retrieved_docs and self.all_docs:
-                retrieved_docs = [random.choice(self.all_docs)]  # Pick 1 random document
-
-            # Ensure a valid response
-            if retrieved_docs:
-                serialized = "\n\n".join(
-                    f"Source: {doc.metadata}\nContent: {doc.page_content}"
-                    for doc in retrieved_docs
-                )
-            else:
-                serialized = "No relevant documents found."
-
-            return serialized, retrieved_docs
-
-        graph_builder = StateGraph(MessagesState)
-
-        def query_or_respond(state: MessagesState):
             """
-            Handles incoming queries, invoking the language model to generate responses.
-
-            Args:
-                state (MessagesState): The current state of messages in the conversation.
-
-            Returns:
-                dict: A dictionary containing the response messages.
-            """
-            llm_with_tools = self.llm.bind_tools([retrieve])
-            response = llm_with_tools.invoke(state["messages"])
-            return {"messages": [response]}
-
-        tools = ToolNode([retrieve])
-
-        def generate(state: MessagesState):
-            """
-            Generates responses using the language model based on retrieved documents.
-
-            Args:
-                state (MessagesState): The current state of messages.
-
-            Returns:
-                dict: A dictionary containing the AI-generated response.
-            """
-            recent_tool_messages = []
-            for message in reversed(state["messages"]):
-                if message.type == "tool":
-                    recent_tool_messages.append(message)
-                else:
-                    break
-            tool_messages = recent_tool_messages[::-1]
-
-            docs_content = "\n\n".join(doc.content for doc in tool_messages)
-            system_message_content = (
-                f"""
-                You are a RAG (Retrieval-Augmented Generation) Assistant. Your task is to answer questions based on the provided document content and user prompt. Follow these steps carefully:
-
-                1. You will be given a set of document content in the following format:
-
-                <docs_content>
-                {docs_content}
-                </docs_content>
-
-                2. Carefully read and analyze the provided document content. This information will be the basis for answering the user's prompt.
-
-                3. If the user asks **what the file is about** or **what the document is related to**, summarize its main topic concisely in one paragraph. Extract the most relevant portion of the document that gives a clear idea of its subject.
-
-                4. If the user asks a specific question, answer using only the information in the `docs_content`. Do not use external knowledge.
-
-                5. If the requested information is not available in the document, clearly state that it is not provided.
-
-                6. Format your response in Markdown, ensuring clarity with appropriate headings, quotes, or lists when needed.
-
-                7. Always enclose your response within `<answer>` tags, like this:
-
-                <answer>
-
-                # Document Summary
-
-                This document discusses...
-
-                </answer>
-
-                or
-
-                <answer>
-
-                # Response
-
-                As stated in the document:
-
-                > "Relevant quote from docs_content"
-
-                Further explanation...
-
-                </answer>
-
-                Ensure that responses are always relevant, concise, and well-structured.
-                
-                After processing the document content, below is the user prompt you need to answer:
-
-                """
-            )
-
-            conversation_messages = [
-                message
-                for message in state["messages"]
-                if message.type in ("human", "system")
-                or (message.type == "ai" and not message.tool_calls)
-            ]
-            
-            prompt = [SystemMessage(system_message_content)] + conversation_messages
-
-            response = self.llm.invoke(prompt)
-            return {"messages": [response]}
-
-        graph_builder.add_node(query_or_respond)
-        graph_builder.add_node(tools)
-        graph_builder.add_node(generate)
-
-        graph_builder.set_entry_point("query_or_respond")
-        graph_builder.add_conditional_edges(
-            "query_or_respond",
-            tools_condition,
-            {END: END, "tools": "tools"},
         )
-        graph_builder.add_edge("tools", "generate")
-        graph_builder.add_edge("generate", END)
-
-        self.graph = graph_builder.compile()
+        
+        if not retrieved_docs:
+            return "No relevant documents found."
+        
+        
+        
+        return response.content
 
 
 class FileSubmit(APIView):
@@ -330,13 +222,8 @@ class FileSubmit(APIView):
             model_name = request.data["model_name"]
             vector_number = int(request.data["vector_number"])
             
-            
-            # Initialize the chat system
-            print("Getting chat system instance...")
             chat_system = ChatSystem.get_instance()
-            print("Initializing chat system...")
             chat_system.initialize_system(model_name, vector_number)
-            print("Chat system initialized")
             
             # Save file
             if "file" in request.FILES:
@@ -352,9 +239,26 @@ class FileSubmit(APIView):
 
                 file_extension = os.path.splitext(file_uploaded.name)[1].lower()
                 
+                metadata = {}
+                if isinstance(file_uploaded, UploadedFile):
+                    metadata = {
+                        "filename": file_uploaded.name,
+                        "content_type": file_uploaded.content_type,
+                        "size": file_uploaded.size,
+                        "charset": file_uploaded.charset,
+                    }
+                else:
+                    # Fallback for BytesIO or non-UploadedFile objects
+                    metadata = {
+                        "filename": getattr(file_uploaded, 'name', 'unknown'),
+                        "size": file_uploaded.getbuffer().nbytes,
+                        "content_type": "application/octet-stream",
+                    }
+                
                 # Extract and process text
                 try:
-                    all_text = self.extract_text(file_uploaded, file_extension)
+                    all_text = self.extract_text(file_uploaded, file_extension).strip()
+                    all_text += f"\n\nThis Document or File Metadata: {json.dumps(metadata)}" 
                     # Process the document for chat system
                     chat_system.process_document(all_text, file_extension)
                 except Exception as e:
