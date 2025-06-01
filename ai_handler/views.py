@@ -201,8 +201,6 @@ class ChatSystem:
             raise Exception("Chat system not initialized. Please upload a file first.")
         
         retrieved_docs = self.retrieve(query)
-        print(query)
-        print(retrieved_docs)
         
         prompt = PromptTemplate(
             template="""
@@ -241,7 +239,7 @@ class ChatSystem:
             "retrieved_docs": "\n".join(retrieved_docs),
             "query": query
         })
-        print(f"Response: {response}")
+
         return response.content.strip()
 
 
