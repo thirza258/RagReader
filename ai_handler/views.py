@@ -106,8 +106,6 @@ class ChatSystem:
                 except TypeError as e:
                     raise ValueError(f"Error serializing CSV row data to JSON: {e}. Ensure rows are JSON serializable.")
         else:
-            # Or print a warning and leave self.documents empty
-            # raise Exception(f"Unsupported document type: {document_type}")
             print(f"Warning: Unsupported document type: {document_type}. No documents processed.")
             self.vector_store = None
             return
@@ -215,7 +213,7 @@ class ChatSystem:
                 <docs_content>
                 {retrieved_docs}
                 </docs_content>
-                
+
                 User Query:
                 <query>
                 {query}
@@ -229,36 +227,11 @@ class ChatSystem:
 
                 5. If the requested information is not available in the document, clearly state that it is not provided.
 
-                6. Format your response in Markdown, ensuring clarity with appropriate headings, quotes, or lists when needed.
+                6. Format your response in **Markdown**, ensuring clarity using appropriate **headings**, **block quotes**, **bullet points**, or **numbered lists** when needed.
 
-                7. Always enclose your response within `<answer>` tags, like this:
+                7. Do **not** include any `<answer>` or special wrapper tags in the output. Just return the clean Markdown-formatted response directly.
 
-                <answer>
-
-                # Document Summary
-
-                This document discusses...
-
-                </answer>
-
-                or
-
-                <answer>
-
-                # Response
-
-                As stated in the document:
-
-                > "Relevant quote from docs_content"
-
-                Further explanation...
-
-                </answer>
-
-                Ensure that responses are always relevant, concise, and well-structured.
-                
-                After processing the document content, below is the user prompt you need to answer:
-
+                Ensure that responses are always relevant, concise, and well-structured, and use only the information found in the `docs_content`.
             """,
             input_variables=["retrieved_docs", "query"]
         )
@@ -268,8 +241,8 @@ class ChatSystem:
             "retrieved_docs": "\n".join(retrieved_docs),
             "query": query
         })
-    
-        return response
+        print(f"Response: {response}")
+        return response.content.strip()
 
 
 class FileSubmit(APIView):
@@ -449,26 +422,15 @@ class GenerateChat(APIView):
                 )
                 
             input_message = request.data["input_message"]
-            ai_message_1 = ""
-            tool_message = ""
-            ai_message_2 = ""
-            human_message = HumanMessage(content=input_message)
-
-            data = {
-                "human_message": human_message,
-                "ai_message_1": ai_message_1,
-                "tool_message": tool_message,  
-                "ai_message_2": ai_message_2
-            }
+           
             
-            ai_message_2 = chat_system.query_and_respond(input_message)
-            ai_message_1 = ai_message_2
+            response = chat_system.query_and_respond(input_message)
 
         
             return Response({
                 "status": 200,
                 "message": "Chat generated successfully",
-                "data": ai_message_2,
+                "data": response,
             }, status=status.HTTP_200_OK)
                         
         except Exception as e:
