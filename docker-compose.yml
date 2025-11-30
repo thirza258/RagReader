@@ -1,0 +1,43 @@
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile-backend
+    container_name: rag_backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    env_file:
+      - .env
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile-frontend
+    container_name: rag_frontend
+    ports:
+      - "3000:80"
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag_redis
+    ports:
+      - "6379:6379"
+
+  vector_db:
+    image: chromadb/chroma
+    container_name: rag_vectordb
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./vectorstore:/chroma/chroma
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile-backend
+    command: celery -A backend worker -l info
+    depends_on:
+      - redis

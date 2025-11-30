@@ -3,3 +3,18 @@ env/
 __pycache__/
 
 data.ipynb
+venv/
+.DS_Store
+db.sqlite3
+.idea/
+.vscode/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+.coverage.xml
+.coverage.json
+.coverage.yaml
+.coverage.yml
+
