@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class GraphRagConfig(AppConfig):
+class RouterConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "graph_rag"
+    name = "router"

@@ -53,7 +53,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "ai_handler",
+    "router",
     "drf_spectacular",
     "corsheaders",
 ]
