@@ -26,12 +26,14 @@ class Document(models.Model):
         max_length=20,
         choices=[("pdf", "PDF"), ("url", "URL"), ("file", "File")]
     )
-    file = models.FileField(upload_to="documents/", null=True, blank=True)
+    file = models.TextField(null=True, blank=True)
+    extracted_text_path = models.TextField(null=True, blank=True)
     source_url = models.URLField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} - {self.source_type}"
 
 class VectorStore(models.Model):
     base_path = models.TextField(blank=True, null=True)
