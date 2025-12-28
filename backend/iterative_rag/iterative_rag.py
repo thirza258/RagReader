@@ -89,7 +89,7 @@ class IterativeRAG(BaseRAG):
         Reply with JSON: {{"sufficient": true}} or {{"sufficient": false}}.
         """
         
-        try:
+        try:  
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
