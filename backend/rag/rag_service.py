@@ -1,41 +1,70 @@
-
+from backend.pipeline.dense_rag_pipeline import DenseRAGPipeline
+from backend.pipeline.hybrid_rag_pipeline import HybridRAGPipeline
+from backend.pipeline.sparse_rag_pipeline import SparseRAGPipeline
+from backend.pipeline.iterative_rag_pipeline import IterativeRAGPipeline
 
 class RAGRegistry:
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(RAGRegistry, cls).__new__(cls)
-            cls._instance.initialize_engines()
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
 
+    def __init__(self):
+        if self._initialized:
+            return
+        self.engines = {}
+        self.initialize_engines()
+        self._initialized = True
+
     def initialize_engines(self):
-        print("--- LOADING RAG ENGINES ---")
-        # Shared Config
-        config = {
-            "top_k": 3,
-            "llm_model": "gpt-4o",
-            "model": "text-embedding-3-small"
+        configs = [
+            {
+                "llm_model": "gpt",
+                "embedding_model": "text-embedding-3-small",
+                "top_k": 5,
+            },
+            {
+                "llm_model": "gemini",
+                "embedding_model": "text-embedding-3-small",
+                "top_k": 5,
+            },
+            {
+                "llm_model": "claude",
+                "embedding_model": "text-embedding-3-small",
+                "top_k": 5,
+            },
+        ]
+
+        engine_classes = {
+            "dense": DenseRAGPipeline,
+            "sparse": SparseRAGPipeline,
+            "hybrid": HybridRAGPipeline,
+            "iterative": IterativeRAGPipeline,
         }
-        
-        # Initialize all engines and keep them in memory
-        self.engines = {
-            "dense": DenseRAG(config),
-            "sparse": SparseRAG(config),
-            "graph": GraphRAG(config),
-            "hybrid": HybridRAG(config),
-            # "iterative": IterativeRAG(config) # Add if needed
-        }
+
+        for config in configs:
+            llm = config["llm_model"]
+            self.engines[llm] = {}
+
+            for engine_type, engine_cls in engine_classes.items():
+                self.engines[llm][engine_type] = engine_cls(config)
+
         print("--- RAG ENGINES READY ---")
 
-    def get_engine(self, engine_type: str):
-        return self.engines.get(engine_type)
+    def get_engine(self, engine_type: str, llm_model: str):
+        try:
+            return self.engines[llm_model][engine_type]
+        except KeyError:
+            raise ValueError(
+                f"RAG engine not found: engine={engine_type}, llm={llm_model}"
+            )
 
-    def index_all(self, documents):
-        """Helper to update ALL indexes when new data comes in"""
-        for name, engine in self.engines.items():
-            print(f"Indexing data for {name}...")
-            engine.index_documents(documents)
+    def get_document(self, username: str) -> Document:
+        return Document.objects.get(user=username)
+
 
 # Create a global instance
 rag_registry = RAGRegistry()

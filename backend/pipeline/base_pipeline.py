@@ -11,7 +11,7 @@ class BasePipeline(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         # Common state storage
-        self.llm = None         # e.g., OpenAILLM, GeminiLLM
+        self.llm = None         
         self.reranker = None    # e.g., CrossEncoder
 
     # --- Phase 1: Ingestion (Data Loading) ---
