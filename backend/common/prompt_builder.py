@@ -1,28 +1,20 @@
-class PromptBuilder:
-    def __init__(self, system_prompt: str, prompt_template: str):
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
-
-    def agentic_prompt(self) -> str:
-        return f"""
-        
-        """
-
-    def dense_rag(self) -> str:
-        return f"""
-        
-        """
-
-    def sparse_rag(self) -> str:
-        return f"""
-        """
-
-    def graph_rag(self) -> str:
-        return f"""
-        """
+def vote_prompt(query: str, chunk: str, response: str) -> str:
+    return f"""
+    Question: {query}
+    Context Chunk: {chunk}
+    Proposed Answer: {response}
     
-    def hybrid_rag(self) -> str:
-        return f"""
-        """
-        
-        
+    Evaluate if the Proposed Answer makes sense given the Context Chunk.
+    """
+
+def rag_prompt(query: str, context: str) -> str:
+    return f"""
+    Based on the following context, answer the question:
+    Question: {query}
+    Context: {context}
+    """
+
+def prompt_generator(query: str) -> str:
+    return f"""
+    Answer the question: {query}
+    """
