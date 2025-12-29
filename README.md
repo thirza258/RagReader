@@ -59,7 +59,7 @@ graph TD
         EvalMetrics --> VoteGemini[Gemini Vote]
     end
     
-    VoteGPT & VoteClaude & VoteGemini --> Dashboard with Score
+    VoteGPT & VoteClaude & VoteGemini --> Dashboard[Dashboard with Score]
 ```
 
 ## Tech Stack
