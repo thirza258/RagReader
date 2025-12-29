@@ -1,69 +1,83 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import service from "../services/service";
+import FileUploadSection from "./file/FileInput";
+import UrlUploadSection from "./file/URLInput";
+import TextUploadSection from "./file/TextInput";
 
-const AI_MODELS = ["OpenAI", "Mistral", "Claude"];
 
 interface FileSubmitProps {
   setFile: (file: File | null) => void;
   setUrl: (url: string | null) => void;
-  modelName: string;
-  vectorNumber: number;
-  setModelName: (model: string) => void;
-  setVectorNumber: (vectorNumber: number) => void;
 }
 
 const FileSubmit: React.FC<FileSubmitProps> = ({
   setFile,
   setUrl,
-  modelName,
-  setModelName,
-  vectorNumber,
-  setVectorNumber,
 }) => {
   const [fileLocal, setFileLocal] = useState<File | null>(null);
   const [url, setLocalUrl] = useState<string>("");
+  const [textInput, setTextInput] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
-  const [submitType, setSubmitType] = useState<"file" | "url">("file");
 
-  const handleModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setModelName(event.target.value);
-    console.log("Model changed to:", event.target.value);
-  };
-
-  const handleUrlChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setUrl(event.target.value);
-    setLocalUrl(event.target.value);
-  };
-
+  // Reference to the file input element to clear it programmatically
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // --- Handlers ---
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
       const selectedFile = event.target.files[0];
       setFileLocal(selectedFile);
       setFile(selectedFile);
+
+      // Clear other inputs
+      setLocalUrl("");
+      setUrl("");
+      setTextInput("");
+    }
+  };
+
+  const handleUrlChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setLocalUrl(value);
+    setUrl(value);
+
+    // If user starts typing URL, clear other inputs
+    if (value) {
+      setFileLocal(null);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setTextInput("");
+    }
+  };
+
+  const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
+    setTextInput(value);
+
+    // If user starts typing Text, clear other inputs
+    if (value) {
+      setFileLocal(null);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setLocalUrl("");
+      setUrl("");
     }
   };
 
   const handleSubmit = async () => {
-    if (submitType === "file" && !fileLocal) {
-      alert("Please upload a file before submitting.");
-      return;
-    }
-
-    if (submitType === "url" && !url) {
-      alert("Please enter a URL before submitting.");
+    if (!fileLocal && !url && !textInput) {
+      alert("Please upload a file, enter a URL, or paste text.");
       return;
     }
 
     try {
       setIsLoading(true);
-      console.log("Submitting:", submitType, modelName, vectorNumber);
-      const response =
-        submitType === "file"
-          ? await service.submitFile(fileLocal as File, modelName, vectorNumber)
-          : await service.submitURL(url, modelName, vectorNumber);
+
+      let response;
+      
 
       console.log("Submission successful:", response);
       alert("Submitted successfully!");
@@ -76,111 +90,41 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
     }
   };
 
+  // --- Helpers for disabling inputs ---
+  const isFileFilled = !!fileLocal;
+  const isUrlFilled = url.length > 0;
+  const isTextFilled = textInput.length > 0;
+
   return (
-    <div className="card max-w-md mx-auto p-6 border rounded shadow-md">
-      <div className="text-center mb-6">
-        <h2 className="text-xl font-bold">RAGReader Upload</h2>
+    <div className="card w-full mx-auto p-6">
+
+      <div className="space-y-4 w-full">
+       
+        <FileUploadSection
+          inputRef={fileInputRef}
+          onChange={handleFileChange}
+          disabled={isFileFilled || isUrlFilled || isTextFilled}
+        />
+        <UrlUploadSection
+          value={url}
+          onChange={handleUrlChange}
+          disabled={isFileFilled || isTextFilled}
+        />
+        <TextUploadSection
+          value={textInput}
+          onChange={handleTextChange}
+          disabled={isFileFilled || isUrlFilled}
+        />
       </div>
 
-      <div className="space-y-4">
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Submit Type:</label>
-          <select
-            title="Submit Type"
-            value={submitType}
-            onChange={(e) => setSubmitType(e.target.value as "file" | "url")}
-            className="w-full border rounded p-2"
-          >
-            <option value="file">Upload File</option>
-            <option value="url">Submit URL</option>
-          </select>
-        </div>
-
-        {submitType === "file" && (
-          <div className="mb-4">
-            <label
-              htmlFor="file-upload"
-              className="block text-sm font-medium mb-2"
-            >
-              Upload File:
-            </label>
-            <input
-              id="file-upload"
-              type="file"
-              onChange={handleFileChange}
-              className="w-full border rounded p-2"
-            />
-          </div>
-        )}
-
-        {submitType === "url" && (
-          <div className="mb-4">
-            <label
-              htmlFor="url-input"
-              className="block text-sm font-medium mb-2"
-            >
-              Enter URL:
-            </label>
-            <input
-              id="url-input"
-              type="text"
-              value={url}
-              onChange={handleUrlChange}
-              className="w-full border rounded p-2"
-            />
-          </div>
-        )}
-
-        <div className="mb-4">
-          <label
-            htmlFor="model-select"
-            className="block text-sm font-medium mb-2"
-          >
-            Select AI Model:
-          </label>
-          <select
-            id="model-select"
-            value={modelName}
-            onChange={handleModelChange}
-            className="w-full border rounded p-2"
-          >
-            {AI_MODELS.map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="mb-4">
-          <label
-            htmlFor="vector-select"
-            className="block text-sm font-medium mb-2"
-          >
-            Select number of results:
-          </label>
-          <select
-            id="vector-select"
-            value={vectorNumber}
-            onChange={(e) => setVectorNumber(parseInt(e.target.value))}
-            className="w-full border rounded p-2"
-          >
-            {[...Array(9)].map((_, i) => (
-              <option key={i + 2} value={i + 2}>
-                {i + 2}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={isLoading}
-          className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed"
-        >
-          {isLoading ? "Submitting..." : "Submit"}
-        </button>
-      </div>
+      {/* Submit Button */}
+      <button
+        onClick={handleSubmit}
+        disabled={isLoading}
+        className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed"
+      >
+        {isLoading ? "Submitting..." : "Submit"}
+      </button>
     </div>
   );
 };
