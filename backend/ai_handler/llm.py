@@ -68,10 +68,9 @@ class OpenRouterLLM(BaseLLM):
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
-            # Optional headers required by OpenRouter for ranking/stats
             default_headers={
-                "HTTP-Referer": "https://your-app-domain.com", 
-                "X-Title": "My RAG App"
+                "HTTP-Referer": "https://rag.nevatal.tech", 
+                "X-Title": "RagReader"
             }
         )
 
@@ -80,7 +79,8 @@ class OpenRouterLLM(BaseLLM):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature
+                temperature=self.temperature,
+                max_retries=3
             )
             return response.choices[0].message.content.strip()
         except Exception as e:

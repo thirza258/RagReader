@@ -1,25 +1,27 @@
 import instructor
 from openai import OpenAI
-from anthropic import Anthropic
-import google.generativeai as genai
 import os
 from backend.common.schema import VoteDecision
 
-# --- 1. Setup Clients wrapped with Instructor ---
+# --- 1. Setup Single OpenRouter Client ---
 
-# OpenAI
-openai_client = instructor.from_openai(OpenAI())
+# OpenRouter uses the standard OpenAI SDK.
+# We just point the base_url to OpenRouter and use the OpenRouter API Key.
+client = instructor.from_openai(
+    OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        default_headers={
+            "HTTP-Referer": "https://rag.nevatal.tech", # Replace with your URL
+            "X-Title": "RagReader",         # Replace with your App Name
+        }
+    ),
+    mode=instructor.Mode.MD_JSON 
+)
 
-# Anthropic (Claude)
-anthropic_client = instructor.from_anthropic(Anthropic())
-
-# Gemini (Google) - Instructor also supports Gemini via the OpenAI-compatible interface or direct wrapping
-# For simplicity, let's assume standard OpenAI usage for the example, 
-# but Instructor handles the specific API differences internally.
-
-def get_vote(client, model_name: str, query: str, chunk: str, response: str) -> VoteDecision:
+def get_vote(model_name: str, query: str, chunk: str, response: str) -> VoteDecision:
     """
-    Generic function to get a structured Pydantic response from any supported LLM.
+    Generic function to get a structured Pydantic response via OpenRouter.
     """
     prompt = f"""
     Question: {query}
@@ -29,7 +31,6 @@ def get_vote(client, model_name: str, query: str, chunk: str, response: str) -> 
     Evaluate if the Proposed Answer makes sense given the Context Chunk.
     """
 
-    # The magic happens here: response_model=VoteDecision
     resp = client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
@@ -40,37 +41,37 @@ def get_vote(client, model_name: str, query: str, chunk: str, response: str) -> 
 
 def vote_response_pydantic(response: str, query: str, chunk: str) -> dict:
     """
-    Orchestrates the voting process across multiple models.
+    Orchestrates the voting process across multiple models via OpenRouter.
     """
     votes = {}
 
-    # 1. ChatGPT Vote
-    try:
-        votes["chatgpt"] = get_vote(openai_client, "gpt-4o", query, chunk, response)
-    except Exception as e:
-        votes["chatgpt"] = f"Error: {e}"
+    # Define the specific OpenRouter model IDs you want to use
+    # See full list at: https://openrouter.ai/models
+    models_to_query = {
+        "gpt4o": "openai/gpt-4o",
+        "claude3": "anthropic/claude-3-opus", # or "anthropic/claude-3.5-sonnet"
+        "gemini": "google/gemini-pro-1.5"
+    }
 
-    # 2. Claude Vote
-    try:
-        votes["claude"] = get_vote(anthropic_client, "claude-3-opus-20240229", query, chunk, response)
-    except Exception as e:
-        votes["claude"] = f"Error: {e}"
-
-    # 3. Gemini Vote (Pseudo-code using OpenAI client compatible endpoint or similar)
-    # For actual Gemini SDK, you might need a specific adapter, but logic remains the same.
-    # votes["gemini"] = ... 
+    for simple_name, openrouter_id in models_to_query.items():
+        try:
+            # We use the same client for all providers now!
+            votes[simple_name] = get_vote(openrouter_id, query, chunk, response)
+        except Exception as e:
+            votes[simple_name] = f"Error: {e}"
 
     return votes
 
 def calculate_vote_result_pydantic(vote_results: dict):
+    """
+    (Logic remains unchanged from your original code)
+    """
     yes_count = 0
     no_count = 0
     details = {}
 
     for model, result in vote_results.items():
-        # Check if it's a valid Pydantic object
         if isinstance(result, VoteDecision):
-            # Access fields directly! No parsing needed.
             vote_val = result.decision 
             reason = result.justification
             
@@ -85,14 +86,12 @@ def calculate_vote_result_pydantic(vote_results: dict):
                 "status": "success"
             }
         else:
-            # Handle error strings
             details[model] = {
                 "vote": "error",
                 "reason": str(result),
                 "status": "failed"
             }
 
-    # Majority Logic
     if yes_count > no_count:
         majority = "yes"
     elif no_count > yes_count:
