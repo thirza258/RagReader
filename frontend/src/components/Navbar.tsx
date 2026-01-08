@@ -20,7 +20,7 @@ const NavBar: React.FC = () => {
 
     return (
       <nav className="fixed top-0 w-full z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
-      <div className="container mx-auto px-6 h-20 flex items-center justify-between">
+      <div className="container mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
             R
@@ -34,7 +34,7 @@ const NavBar: React.FC = () => {
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
           <a href="/" className="hover:text-cyan-400 transition-colors">Home</a>
           <a href="/chat" className="hover:text-cyan-400 transition-colors">Chat</a>
-          <a href="/deepanalysis" className="hover:text-cyan-400 transition-colors">DeepAnalysis</a>
+          <a href="/deep-result" className="hover:text-cyan-400 transition-colors">DeepAnalysis</a>
           <a href="/about" className="hover:text-cyan-400 transition-colors">About</a>
         </div>
 

@@ -33,6 +33,11 @@ function App() {
           />
         </Route>
 
+        {/* Deep Analysis */}
+        <Route element={<DeepResultLayout />}>
+          <Route path="/deep-result" element={<DeepResult />} />
+        </Route>
+
         {/* Login */}
         <Route element={<LoginPageLayout />}>
           <Route path="/login" element={<LoginPage />} />

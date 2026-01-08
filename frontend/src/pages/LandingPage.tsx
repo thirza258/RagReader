@@ -159,8 +159,6 @@ const LandingPage: React.FC = () => {
               </div>
               </div>
               </div>
-              
-
             
             {/* Decorative background blob behind image */}
             <div className="absolute -inset-4 bg-gradient-to-r from-cyan-600 to-blue-600 opacity-30 blur-2xl -z-10 rounded-full" />
