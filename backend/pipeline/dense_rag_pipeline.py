@@ -2,21 +2,15 @@ import os
 import pickle
 import logging
 import uuid
-from typing import Dict, Any, List, Optional
-from django.conf import settings # Assuming Django settings for base paths
+from typing import Dict, Any # Assuming Django settings for base paths
 
-# Pipeline Base
 from backend.pipeline.base_pipeline import BasePipeline
-from backend.common.schema import VoteDecision
 
-# Components
 from backend.common.chunker import Chunker
 from backend.dense_rag.dense_rag import DenseRAG
 from backend.ai_handler.llm import OpenAILLM
 from backend.utils.insert_file import DataLoader
-from backend.common.schema import responses
 
-# Models
 from backend.router.models import (
     Document, 
     GuestUser, 
@@ -49,149 +43,129 @@ class DenseRAGPipeline(BasePipeline):
         self.vector_store_root = config.get("vector_store_path", "./vector_stores")
         os.makedirs(self.vector_store_root, exist_ok=True)
 
-    def get_document(self, username: str) -> Optional[Document]:
-        """Fetches the latest document for the user."""
-        try:
-            user = GuestUser.objects.filter(username=username).first()
-            if not user:
-                return None
-            return Document.objects.filter(user=user).order_by('-created_at').first()
-        except Exception as e:
-            logger.error(f"Error fetching document: {e}")
-            return None
-
-    def _save_vectorstore_to_disk(self, path: str) -> None:
-        """
-        Persists the current in-memory RAG state (texts and vectors) to disk.
-        """
+    def _save_state(self, path: str):
         data = {
             "documents": self.rag.documents,
             "vectors": self.rag.document_vectors
         }
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             pickle.dump(data, f)
-        logger.info(f"VectorStore saved to {path}")
 
-    def _load_vectorstore_from_disk(self, path: str) -> bool:
-        """
-        Loads the RAG state from disk into memory.
-        """
+    def _load_state(self, path: str) -> bool:
         try:
-            if not os.path.exists(path):
-                logger.error(f"Vector store file not found at {path}")
-                return False
-
-            with open(path, 'rb') as f:
+            with open(path, "rb") as f:
                 data = pickle.load(f)
-            
-            # Restore state to the RAG engine
             self.rag.documents = data["documents"]
             self.rag.document_vectors = data["vectors"]
-            logger.info(f"VectorStore loaded from {path}")
             return True
         except Exception as e:
-            logger.error(f"Failed to load vector store: {e}")
+            logger.error(f"Error loading state from {path}: {e}")
             return False
 
-    def _get_or_create_vector_index(self, document: Document) -> bool:
-        """
-        Checks for an existing VectorStore/DocumentVector relation.
-        - If exists: Loads it.
-        - If not: Indexes text, creates DB entries, saves file, then loads.
-        """
-        # 1. Check if DocumentVector exists and is ready
-        doc_vector = DocumentVector.objects.filter(
-            document=document, 
-            status="ready"
-        ).first()
-
-        if doc_vector:
-            # Load existing
-            logger.info(f"Found existing VectorStore for doc {document.id}")
-            return self._load_vectorstore_from_disk(doc_vector.vectorstore_location)
-        
-        # 2. If not, create new Index
-        logger.info(f"No vector store found. Creating new index for {document.name}...")
-        
-        if not document.extracted_text_path:
-            logger.error("Document has no text path.")
-            return False
-
+    def get_document(self, username: str) -> Document:
         try:
-            # A. Load and Chunk
-            raw_text = self.loader.load(document.extracted_text_path)
-            chunks = self.chunker.chunk(raw_text)
-            
-            # B. Embed (In-Memory)
-            self.rag.index_documents(chunks)
-            
-            # C. Define Save Path
-            file_name = f"{document.user.username}_{document.id}_{uuid.uuid4().hex[:8]}.pkl"
-            save_path = os.path.join(self.vector_store_root, file_name)
-            
-            # D. Save to Disk
-            self._save_vectorstore_to_disk(save_path)
-            
-            # E. Update Database Models
-            # Create VectorStore entry
-            vs = VectorStore.objects.create(base_path=self.vector_store_root)
-            
-            # Create DocumentVector link
-            DocumentVector.objects.create(
-                document=document,
-                vectorstore=vs,
-                vectorstore_location=save_path,
-                document_location=document.extracted_text_path,
-                status="ready"
-            )
-            return True
-
+            user = GuestUser.objects.filter(username=username).first()
+            if not user:
+                return None
+            return Document.objects.filter(user=user).first()
         except Exception as e:
-            logger.error(f"Failed to create vector index: {e}")
-            # Optionally create a failed record
-            return False
+            logger.error(f"Error getting document for {username}: {e}")
+            return None
 
     def optimize_query(self, query: str) -> str:
-        try:
-            return self.llm.prompt_generate(query)
-        except:
-            return query
+        """
+        Optimizes the query for better retrieval.
+        """
+        prompt = f"Optimize the following query for better retrieval: {query}"
+        return self.llm.prompt_generate(prompt)
 
-    def run(self, query: str, username: str = None) -> Dict[str, Any]:
-        if not username:
-             return responses.response_400(
-                error="Username required."
-            )
+    def init(self, username: str) -> bool:
+        """
+        Prepares the vector store for the user.
+        1. Checks DB for existing ready index.
+        2. If missing, loads text, chunks, embeds, and saves to disk.
+        3. Loads data into memory for this instance.
+        """
 
-        # 1. Get User Document
+        logger.info(f"Initializing Chat for {username}...")
+        
         document = self.get_document(username)
         if not document:
-            return responses.response_404(
-                
-                error="No documents found for this user."
-            )
+            raise ValueError(f"No document found for user: {username}")
 
-        # 2. Ensure Vector Store is Loaded (from Disk or Created)
-        success = self._get_or_create_vector_index(document)
-        if not success:
-            return responses.response_500(
-                
-                error="Failed to process or load document index."
-            )
+        doc_vector = DocumentVector.objects.filter(document=document, status="ready").first()
+        if doc_vector:
+            # It exists, just load it into memory
+            logger.info("Existing index found. Loading into memory.")
+            success = self._load_state(doc_vector.vectorstore_location)
+            if not success:
+                raise RuntimeError("Index record exists but file load failed.")
+            return
 
-        # 3. Standard RAG Flow (Optimized Query -> Retrieve -> Generate -> Vote)
+        # It doesn't exist, Create it (Heavy Operation)
+        logger.info("Creating new index (Embedding)...")
+        if not document.extracted_text_path:
+            raise ValueError("Document has no text source path.")
+
+        # Load & Chunk
+        raw_text = self.loader.load(document.extracted_text_path)
+        chunks = self.chunker.chunk(raw_text)
+
+        self.rag.index_documents(chunks)
+
+        # Save to Disk
+        file_name = f"{username}_{document.id}_{uuid.uuid4().hex[:6]}.pkl"
+        save_path = os.path.join(self.vector_store_root, file_name)
+        self._save_state(save_path)
+
+        # Save to DB
+        vs, _ = VectorStore.objects.get_or_create(base_path=self.vector_store_root)
+        DocumentVector.objects.create(
+            document=document,
+            vectorstore=vs,
+            vectorstore_location=save_path,
+            document_location=document.extracted_text_path,
+            status="ready"
+        )
+        logger.info("Initialization Complete.")
+        return True
+    
+    def run(self, username: str, query: str) -> Dict[str, Any]:
+        """
+        Retrieves relevant documents and generates an answer.
+        1. Optimizes query for better retrieval.
+        2. Retrieves top K relevant docs.
+        3. Generates answer using LLM.
+        """
+        logger.info(f"Running Chat for {username}...")
+        if not self.rag.documents or len(self.rag.documents) == 0:
+            logger.warning("No documents found in memory. Initializing...")
+            document = self.get_document(username)
+            if not document:
+                raise ValueError(f"No document found for user: {username}")
+            
+            doc_vector = DocumentVector.objects.filter(document=document, status="ready").first()
+            if not doc_vector:
+                raise ValueError("No ready index found for this user.")
+
+            success = self._load_state(doc_vector.vectorstore_location)
+            if not success:
+                raise RuntimeError("Index record exists but file load failed.")
+            return
+        
+        # 2. Retrieve
         optimized_query = self.optimize_query(query)
         retrieved_docs = self.rag.retrieve(optimized_query)
 
         if not retrieved_docs:
-            return responses.response_404(
-                error="No relevant context found."
-            )
+            raise ValueError("No relevant documents found.")
 
         context_str = "\n\n".join(retrieved_docs)
-        
-        answer = self.llm.rag_generate(query=query, context=context_str)
-
-        return responses.response_200(response=answer)
+        answer = self.llm.rag_generate(optimized_query, context_str)
+        return {
+            "answer": answer,
+            "context": retrieved_docs
+        }
+       
 
     

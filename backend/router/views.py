@@ -56,17 +56,22 @@ class InsertURLView(APIView):
         except Exception as e:
             return response.response_500(error=str(e))
 
-class QueryView(APIView):
+class OpenChatView(APIView):
     def post(self, request):
         try: 
-            user = request.get("user")
-            query = request.get("query")
-            pipeline_type = request.get("pipeline_type")
+            username = request.data["USER"]
+            rag_registry.get_engine("Dense Retrieval", "gpt-4o-mini").init(username)
+            
+            return response.response_200("Chat initialized successfully!")
+        except Exception as e:
+            return response.response_500(error=str(e))
 
-            rag_query = rag_registry.get_engine(pipeline_type, user, query)
-
-
-
-
-
-
+class QueryView(APIView):
+    def post(self, request):
+        try:
+            username = request.data["USER"]
+            query = request.data["QUERY"]
+            answer = rag_registry.get_engine("Dense Retrieval", "gpt-4o-mini").run(username, query)
+            return response.response_200(response=answer)
+        except Exception as e:
+            return response.response_500(error=str(e))

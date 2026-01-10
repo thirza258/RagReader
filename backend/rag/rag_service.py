@@ -6,6 +6,7 @@ from backend.pipeline.reranking_rag_pipeline import RerankingPipeline
 from backend.router.models import Document
 from backend.common.constant import CONFIG_VARIANTS
 
+
 class RAGRegistry:
     _instance = None
 
@@ -56,7 +57,7 @@ class RAGRegistry:
                 "chunk_strategy": "paragraph",
                 "chunk_size": 500,
                 "overlap": 50,
-                
+                "vector_store_path": 
             }
 
             # 4. Initialize the structure if not exists
