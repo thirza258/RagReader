@@ -134,4 +134,17 @@ class DataLoader:
         text = re.sub(r"\n+", "\n", text)
         text = re.sub(r"[ \t]+", " ", text)
         return text.strip()
+    
+    def load(self, path: str) -> str:
+        """
+        Simple loader to extract text from a given file path.
+        Supports PDF and TXT files.
+        """
+        if path.lower().endswith(".pdf"):
+            return self._parse_pdf(path)
+        elif path.lower().endswith(".txt"):
+            with default_storage.open(path, "r") as f:
+                return f.read().decode("utf-8")
+        else:
+            raise ValueError("Unsupported file type for loading.")
 

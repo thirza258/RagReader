@@ -6,7 +6,7 @@ from typing import Dict, Any # Assuming Django settings for base paths
 
 from backend.pipeline.base_pipeline import BasePipeline
 
-from backend.common.chunker import Chunker
+from backend.common.chunker import DocumentChunker
 from backend.dense_rag.dense_rag import DenseRAG
 from backend.ai_handler.llm import OpenAILLM
 from backend.utils.insert_file import DataLoader
@@ -30,7 +30,7 @@ class DenseRAGPipeline(BasePipeline):
             model=config.get("llm_model", "gpt-4o"),
             temperature=config.get("temperature", 0.0)
         )
-        self.chunker = Chunker(
+        self.chunker = DocumentChunker(
             strategy=config.get("chunk_strategy", "paragraph"),
             chunk_size=config.get("chunk_size", 500),
             overlap=config.get("overlap", 50),
@@ -62,7 +62,7 @@ class DenseRAGPipeline(BasePipeline):
             logger.error(f"Error loading state from {path}: {e}")
             return False
 
-    def get_document(self, username: str) -> Document:
+    def get_document(self, username: str) -> Document | None:
         try:
             user = GuestUser.objects.filter(username=username).first()
             if not user:
@@ -100,7 +100,7 @@ class DenseRAGPipeline(BasePipeline):
             success = self._load_state(doc_vector.vectorstore_location)
             if not success:
                 raise RuntimeError("Index record exists but file load failed.")
-            return
+            
 
         # It doesn't exist, Create it (Heavy Operation)
         logger.info("Creating new index (Embedding)...")
@@ -114,7 +114,7 @@ class DenseRAGPipeline(BasePipeline):
         self.rag.index_documents(chunks)
 
         # Save to Disk
-        file_name = f"{username}_{document.id}_{uuid.uuid4().hex[:6]}.pkl"
+        file_name = f"{username}_{document.pk}_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
         self._save_state(save_path)
 
@@ -151,7 +151,6 @@ class DenseRAGPipeline(BasePipeline):
             success = self._load_state(doc_vector.vectorstore_location)
             if not success:
                 raise RuntimeError("Index record exists but file load failed.")
-            return
         
         # 2. Retrieve
         optimized_query = self.optimize_query(query)

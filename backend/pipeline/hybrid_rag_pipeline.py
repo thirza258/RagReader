@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 from backend.pipeline.base_pipeline import BasePipeline
 
 from backend.common.chunker import DocumentChunker
-from backend.rag.hybrid_rag import HybridRAG  # Assuming you saved the HybridRAG class here
+from backend.hybrid_rag.hybrid_rag import HybridRAG  
 from backend.ai_handler.llm import OpenAILLM
 from backend.utils.insert_file import DataLoader
 
@@ -104,7 +104,7 @@ class HybridRAGPipeline(BasePipeline):
             logger.error(f"Error loading state from {path}: {e}")
             return False
 
-    def get_document(self, username: str) -> Document:
+    def get_document(self, username: str) -> Document | None:
         try:
             user = GuestUser.objects.filter(username=username).first()
             if not user:
@@ -163,7 +163,7 @@ class HybridRAGPipeline(BasePipeline):
         self.rag.index_documents(chunks)
 
         # Save to Disk
-        file_name = f"{username}_{document.id}_hybrid_{uuid.uuid4().hex[:6]}.pkl"
+        file_name = f"{username}_{document.pk}_hybrid_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
         self._save_state(save_path)
 
@@ -209,7 +209,7 @@ class HybridRAGPipeline(BasePipeline):
             # Fallback: try raw query if optimized returned nothing
             retrieved_docs = self.rag.retrieve(query)
             if not retrieved_docs:
-                return "I could not find any relevant information in the uploaded documents."
+                raise ValueError("No relevant documents found.")
 
         # 3. Generate Answer
         # Combine retrieved docs into a single context string

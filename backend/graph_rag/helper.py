@@ -36,6 +36,8 @@ def extract_graph_data(text: str, client: OpenAI, model: str = "gpt-4o") -> Dict
             temperature=0  # Deterministic output
         )
         content = response.choices[0].message.content
+        if content is None:
+            raise ValueError("LLM returned no content")
         return json.loads(content)
     except Exception as e:
         print(f"LLM Extraction Error: {e}")

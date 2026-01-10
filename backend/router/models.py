@@ -41,7 +41,7 @@ class VectorStore(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.base_path
+        return self.base_path or "VectorStore"
 
 class DocumentVector(models.Model):
     document = models.ForeignKey(

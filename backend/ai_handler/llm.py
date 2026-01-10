@@ -1,5 +1,5 @@
 from langchain_openai import ChatOpenAI
-from backend.common.prompt_saver import vote_prompt, rag_prompt, prompt_generator
+from backend.common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
 from abc import ABC, abstractmethod
 from typing import Optional
 import os
@@ -40,7 +40,7 @@ class BaseLLM(ABC):
 
 
 class OpenAILLM(BaseLLM):
-    def __init__(self, model: str = "gpt-4o", temperature: float = 0.0, api_key: str = None):
+    def __init__(self, model: str = "gpt-4o", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
 
@@ -51,7 +51,7 @@ class OpenAILLM(BaseLLM):
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature
             )
-            return response.choices[0].message.content.strip()
+            return (response.choices[0].message.content or "").strip()
         except Exception as e:
             return f"OpenAI Error: {e}"
 
@@ -61,7 +61,7 @@ class OpenRouterLLM(BaseLLM):
     Base class for any model routed via OpenRouter.
     It uses the OpenAI SDK but points to the OpenRouter URL.
     """
-    def __init__(self, model: str, temperature: float = 0.0, api_key: str = None):
+    def __init__(self, model: str, temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
         
         # OpenRouter Configuration
@@ -79,10 +79,9 @@ class OpenRouterLLM(BaseLLM):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-                max_retries=3
+                temperature=self.temperature
             )
-            return response.choices[0].message.content.strip()
+            return (response.choices[0].message.content or "").strip()
         except Exception as e:
             return f"OpenRouter Error ({self.model}): {e}"
 
@@ -92,7 +91,7 @@ class ClaudeLLM(OpenRouterLLM):
     Anthropic models via OpenRouter.
     Default model: anthropic/claude-3.5-sonnet
     """
-    def __init__(self, model: str = "anthropic/claude-3.5-sonnet", temperature: float = 0.0, api_key: str = None):
+    def __init__(self, model: str = "anthropic/claude-3.5-sonnet", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
 
 
@@ -101,5 +100,5 @@ class GeminiLLM(OpenRouterLLM):
     Google models via OpenRouter.
     Default model: google/gemini-pro-1.5
     """
-    def __init__(self, model: str = "google/gemini-pro-1.5", temperature: float = 0.0, api_key: str = None):
+    def __init__(self, model: str = "google/gemini-pro-1.5", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)

@@ -57,7 +57,6 @@ class RAGRegistry:
                 "chunk_strategy": "paragraph",
                 "chunk_size": 500,
                 "overlap": 50,
-                "vector_store_path": 
             }
 
             # 4. Initialize the structure if not exists
@@ -87,8 +86,7 @@ class RAGRegistry:
                 f"Available methods for this model: {available_methods}"
             )
 
-    def get_document(self, username: str) -> Document:
-        return Document.objects.filter(user=username).first()
+
 
 # Create a global instance
 rag_registry = RAGRegistry()

@@ -82,8 +82,14 @@ class GraphRAG(BaseRAG):
             
         # Add to FAISS
         if vectors:
-            vector_matrix = np.array(vectors)
-            self.index.add(vector_matrix)
+            # Ensure consistent shape and dtype
+            vector_matrix = np.stack(vectors).astype(np.float32)
+
+            # Safety checks
+            assert vector_matrix.ndim == 2
+            assert vector_matrix.shape[1] == self.index.d
+
+            self.index.add(x=vector_matrix, n=vector_matrix.shape[0])
             print("Node embeddings indexed in FAISS.")
 
     def retrieve(self, query: str) -> List[str]:
@@ -98,11 +104,14 @@ class GraphRAG(BaseRAG):
         print(f"--- Graph Search for: '{query}' ---")
 
         # 1. Embed Query
-        query_vec = self._get_embedding(query).reshape(1, -1)
+        query_vec = np.asarray(
+            self._get_embedding(query),
+            dtype=np.float32
+        ).reshape(1, -1)
         
         # 2. Search FAISS (Find top 3 closest entities)
         k = 3
-        distances, indices = self.index.search(query_vec, k)
+        distances, indices = self.index.search(query_vec, k) # type: ignore
         
         found_nodes = []
         for idx in indices[0]:

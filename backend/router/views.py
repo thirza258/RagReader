@@ -50,7 +50,7 @@ class InsertURLView(APIView):
             data = data_loader.process_input(request.data["URL"])
             user = request.data["USER"]
             base_path = _document_base_path(user)
-            document = self.create_document(data, base_path)
+            document = self.create_document(data)
             document.save()
             return response.response_200("Data inserted successfully!")
         except Exception as e:

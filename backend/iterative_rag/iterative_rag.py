@@ -3,7 +3,7 @@ import json
 from typing import List, Dict, Any
 from openai import OpenAI
 from backend.rag.base_rag import BaseRAG
-from backend.rag.dense_rag import DenseRAG
+from backend.dense_rag.dense_rag import DenseRAG
 
 class IterativeRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):
@@ -95,7 +95,10 @@ class IterativeRAG(BaseRAG):
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}
             )
-            result = json.loads(response.choices[0].message.content)
+            response = response.choices[0].message.content
+            if response is None:
+                raise ValueError("LLM returned no content")
+            result = json.loads(response)
             return result.get("sufficient", False)
         except Exception:
             # Fallback to False if JSON parsing fails to keep trying
@@ -118,4 +121,7 @@ class IterativeRAG(BaseRAG):
             model=self.model,
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content.strip()
+        response_text = response.choices[0].message.content
+        if response_text is None:
+            raise ValueError("LLM returned no content")
+        return response_text.strip()

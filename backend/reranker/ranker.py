@@ -26,7 +26,7 @@ class Reranker:
         print(f"Loading Reranker Model: {self.model_name} on {self.device}...")
         self.model = CrossEncoder(self.model_name, device=self.device)
 
-    def rank(self, query: str, documents: List[str], top_k: int = None) -> List[str]:
+    def rank(self, query: str, documents: List[str], top_k: int = 3) -> List[str]:
         """
         Takes a query and a list of documents, scores them by relevance,
         and returns the top_k most relevant chunks.

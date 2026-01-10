@@ -26,7 +26,7 @@ class BasePipeline(ABC):
         pass
 
     @abstractmethod
-    def get_document(self, username: str) -> Document:
+    def get_document(self, username: str) -> Document | None:
         """
         Gets the document from the database.
         """
@@ -52,7 +52,7 @@ class BasePipeline(ABC):
         pass
 
     @abstractmethod
-    def run(self, query: str) -> Dict[str, Any]:
+    def run(self, username:str, query: str) -> Dict[str, Any]:
         """
         The main execution flow:
         Query -> Retrieve -> Generate Answer.

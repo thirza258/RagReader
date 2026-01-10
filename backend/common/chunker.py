@@ -114,7 +114,10 @@ class DocumentChunker:
         # 3. Calculate similarity between adjacent sentences (i and i+1)
         distances = []
         for i in range(len(vecs) - 1):
-            sim = cosine_similarity([vecs[i]], [vecs[i+1]])[0][0]
+            v1 = np.asarray(vecs[i]).reshape(1, -1)
+            v2 = np.asarray(vecs[i + 1]).reshape(1, -1)
+
+            sim = cosine_similarity(v1, v2)[0][0]
             distances.append(sim)
 
         # 4. Group sentences based on similarity Threshold
