@@ -28,40 +28,6 @@ When accuracy is paramount, click the answer to trigger a comprehensive analysis
     *   **OpenAI GPT**
     *   **Anthropic Claude**
     *   **Google Gemini**
-
----
-
-## Architecture Workflow
-
-```mermaid
-graph TD
-    User[User Input] --> Standard[Standard Dense RAG]
-    Standard --> Answer[Initial Answer]
-    Answer -- User Clicks Deep Dive --> Complex[Advanced Pipeline]
-    
-    subgraph "Retrieval Strategies"
-        Complex --> Dense[Dense Vector Search]
-        Complex --> Sparse[Sparse/Keyword Search]
-        Complex --> Iterative[Iterative Search]
-    end
-    
-    Dense & Sparse & Iterative --> Hybrid[Hybrid Fusion]
-    Hybrid --> Rerank[Reranker Model]
-    
-    subgraph "Evaluation & Generation"
-        Rerank --> Gen[Generate Candidate Answers]
-        Gen --> EvalMetrics[Calc MRR & Context Relevance]
-    end
-    
-    subgraph "Voting Council"
-        EvalMetrics --> VoteGPT[GPT Vote]
-        EvalMetrics --> VoteClaude[Claude Vote]
-        EvalMetrics --> VoteGemini[Gemini Vote]
-    end
-    
-    VoteGPT & VoteClaude & VoteGemini --> Dashboard[Dashboard with Score]
-```
-
 ## Tech Stack
 
 *   **LLM Orchestration:** OpenAI GPT, Anthropic Claude, Google Gemini.
