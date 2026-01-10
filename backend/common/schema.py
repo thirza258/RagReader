@@ -62,3 +62,5 @@ class RAGResponse(BaseModel):
                 "response": response
             }
         }
+
+responses = RAGResponse()

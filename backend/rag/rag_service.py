@@ -51,8 +51,12 @@ class RAGRegistry:
 
             instance_config = {
                 "llm_model": llm_model,
-                "embedding_model": "text-embedding-3-small",
+                "model": "text-embedding-3-small",
                 "top_k": 5, 
+                "chunk_strategy": "paragraph",
+                "chunk_size": 500,
+                "overlap": 50,
+                
             }
 
             # 4. Initialize the structure if not exists
