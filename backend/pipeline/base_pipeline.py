@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+from backend.router.models import Document
 
 class BasePipeline(ABC):
     """
@@ -25,11 +26,19 @@ class BasePipeline(ABC):
         pass
 
     @abstractmethod
+    def get_document(self, username: str) -> Document:
+        """
+        Gets the document from the database.
+        """
+        return Document.objects.filter(user=username).first()
+
+    @abstractmethod
     def index_data(self, data: List[str]) -> None:
         """
         Takes raw text, chunks it, and saves it to the DB.
         Replaces your 'parse_chunk' + 'parse_document'.
         """
+
         pass
 
     # --- Phase 2: Inference (Running the RAG) ---
@@ -46,7 +55,7 @@ class BasePipeline(ABC):
     def run(self, query: str) -> Dict[str, Any]:
         """
         The main execution flow:
-        Query -> Retrieve -> Rerank -> Generate Answer.
+        Query -> Retrieve -> Generate Answer.
         Replaces your 'parse_response'.
         """
         pass

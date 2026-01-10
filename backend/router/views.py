@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from backend.utils.helper import _document_base_path, conversation_id_generator
 from backend.router.models import Document, DocumentVector, VectorStore, Conversation, ConversationHistory, GuestUser
 from backend.router import response, data_loader
+from backend.rag.rag_service import rag_registry
 
 # Create your views here.
 class InsertDataView(APIView):
@@ -55,28 +56,17 @@ class InsertURLView(APIView):
         except Exception as e:
             return response.response_500(error=str(e))
 
-class DenseRAGPipelineView(APIView):
+class QueryView(APIView):
     def post(self, request):
-        try:
-            username = request.data["USER"]
-            user = GuestUser.objects.get(username=username)
-            query = request.data["QUERY"]
+        try: 
+            user = request.get("user")
+            query = request.get("query")
+            pipeline_type = request.get("pipeline_type")
 
-            dense_rag = DenseRAGPipeline(user)
+            rag_query = rag_registry.get_engine(pipeline_type, user, query)
 
-            response = dense_rag.run(query)
-            return response.response_200(response)
-        except Exception as e:
-            return response.response_500(error=str(e))
 
-class GraphRAGPipelineView(APIView):
-    def post(self, request):
 
-class HybridRAGPipelineView(APIView):
-    def post(self, request):
 
-class SparseRAGPipelineView(APIView):
-    def post(self, request):
 
-class VoteDataView(APIView):
-    def post(self, request):
+

@@ -2,6 +2,9 @@ from backend.pipeline.dense_rag_pipeline import DenseRAGPipeline
 from backend.pipeline.hybrid_rag_pipeline import HybridRAGPipeline
 from backend.pipeline.sparse_rag_pipeline import SparseRAGPipeline
 from backend.pipeline.iterative_rag_pipeline import IterativeRAGPipeline
+from backend.pipeline.reranking_rag_pipeline import RerankingPipeline
+from backend.router.models import Document
+from backend.common.constant import CONFIG_VARIANTS
 
 class RAGRegistry:
     _instance = None
@@ -15,56 +18,72 @@ class RAGRegistry:
     def __init__(self):
         if self._initialized:
             return
+        
+        # Storage: self.engines[llm_model][method_name]
         self.engines = {}
         self.initialize_engines()
         self._initialized = True
 
     def initialize_engines(self):
-        configs = [
-            {
-                "llm_model": "gpt",
-                "embedding_model": "text-embedding-3-small",
-                "top_k": 5,
-            },
-            {
-                "llm_model": "gemini",
-                "embedding_model": "text-embedding-3-small",
-                "top_k": 5,
-            },
-            {
-                "llm_model": "claude",
-                "embedding_model": "text-embedding-3-small",
-                "top_k": 5,
-            },
-        ]
-
-        engine_classes = {
-            "dense": DenseRAGPipeline,
-            "sparse": SparseRAGPipeline,
-            "hybrid": HybridRAGPipeline,
-            "iterative": IterativeRAGPipeline,
+        """
+        Instantiates pipelines based on the PIPELINE_VARIANTS list.
+        """
+        
+        # 1. Map String Names to Python Classes
+        class_map = {
+            "Dense Retrieval": DenseRAGPipeline,
+            "Sparse Retrieval": SparseRAGPipeline,
+            "Hybrid Retrieval": HybridRAGPipeline,
+            "Iterative Retrieval": IterativeRAGPipeline,
+            "Reranking": RerankingPipeline 
         }
 
-        for config in configs:
-            llm = config["llm_model"]
-            self.engines[llm] = {}
+        # 2. Iterate through your constants
+        for variant in CONFIG_VARIANTS:
+            method_name = variant["method"]
+            llm_model = variant["model"]
+            
+            pipeline_class = class_map.get(method_name)
+            
+            if not pipeline_class:
+                print(f"⚠️ Warning: No class mapping found for '{method_name}'. Skipping.")
+                continue
 
-            for engine_type, engine_cls in engine_classes.items():
-                self.engines[llm][engine_type] = engine_cls(config)
+            instance_config = {
+                "llm_model": llm_model,
+                "embedding_model": "text-embedding-3-small",
+                "top_k": 5, 
+            }
+
+            # 4. Initialize the structure if not exists
+            if llm_model not in self.engines:
+                self.engines[llm_model] = {}
+
+            # 5. Instantiate and Store (Lazy loading recommended, but here we init immediately)
+            print(f"Initializing {method_name} with {llm_model}...")
+            try:
+                self.engines[llm_model][method_name] = pipeline_class(instance_config)
+            except Exception as e:
+                print(f"❌ Error initializing {method_name} ({llm_model}): {e}")
 
         print("--- RAG ENGINES READY ---")
 
-    def get_engine(self, engine_type: str, llm_model: str):
+    def get_engine(self, method: str, llm_model: str):
+        """
+        Retrieves a pipeline.
+        Usage: registry.get_engine("Dense Retrieval", "gpt-4o-mini")
+        """
         try:
-            return self.engines[llm_model][engine_type]
+            return self.engines[llm_model][method]
         except KeyError:
+            available_methods = list(self.engines.get(llm_model, {}).keys())
             raise ValueError(
-                f"RAG engine not found: engine={engine_type}, llm={llm_model}"
+                f"Engine not found for Model: '{llm_model}' and Method: '{method}'. "
+                f"Available methods for this model: {available_methods}"
             )
 
     def get_document(self, username: str) -> Document:
-        return Document.objects.get(user=username)
-
+        return Document.objects.filter(user=username).first()
 
 # Create a global instance
 rag_registry = RAGRegistry()
