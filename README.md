@@ -37,7 +37,7 @@ flowchart TD
 
     %% RAG Registry Initialization
     I --> RAG_REG[RAG Registry Init]
-    RAG_REG --> META[Store RAG Metadata<br/>(user, source, config)]
+    RAG_REG --> META[Store RAG Metadata\n|user | source | config]
 
     %% Ingestion Pipeline
     RAG_REG --> CHUNK[Chunking Engine]
