@@ -1,3 +1,3 @@
 from rest_framework import serializers
-from backend.router.models import Document
+from router.models import Document
 

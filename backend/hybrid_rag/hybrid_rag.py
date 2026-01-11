@@ -1,8 +1,8 @@
 from typing import List, Dict, Any
 from collections import defaultdict
-from backend.rag.base_rag import BaseRAG
-from backend.sparse_rag.sparse_rag import SparseRAG
-from backend.dense_rag.dense_rag import DenseRAG
+from rag.base_rag import BaseRAG
+from sparse_rag.sparse_rag import SparseRAG
+from dense_rag.dense_rag import DenseRAG
 
 class HybridRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):

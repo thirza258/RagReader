@@ -1,7 +1,7 @@
 import instructor
 from openai import OpenAI
 import os
-from backend.common.schema import VoteDecision
+from common.schema import VoteDecision
 
 # --- 1. Setup Single OpenRouter Client ---
 

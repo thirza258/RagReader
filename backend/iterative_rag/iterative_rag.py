@@ -2,8 +2,8 @@ import os
 import json
 from typing import List, Dict, Any
 from openai import OpenAI
-from backend.rag.base_rag import BaseRAG
-from backend.dense_rag.dense_rag import DenseRAG
+from rag.base_rag import BaseRAG
+from dense_rag.dense_rag import DenseRAG
 
 class IterativeRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):

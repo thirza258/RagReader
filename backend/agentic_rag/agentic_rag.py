@@ -1,4 +1,4 @@
-from backend.rag.base_rag import BaseRAG
+from rag.base_rag import BaseRAG
 from typing import Dict, Any
 
 class AgenticRAG(BaseRAG):

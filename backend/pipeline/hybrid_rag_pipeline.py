@@ -4,14 +4,14 @@ import logging
 import uuid
 from typing import Dict, Any, List
 
-from backend.pipeline.base_pipeline import BasePipeline
+from pipeline.base_pipeline import BasePipeline
 
-from backend.common.chunker import DocumentChunker
-from backend.hybrid_rag.hybrid_rag import HybridRAG  
-from backend.ai_handler.llm import OpenAILLM
-from backend.utils.insert_file import DataLoader
+from common.chunker import DocumentChunker
+from hybrid_rag.hybrid_rag import HybridRAG  
+from ai_handler.llm import OpenAILLM
+from utils.insert_file import DataLoader
 
-from backend.router.models import (
+from router.models import (
     Document, 
     GuestUser, 
     VectorStore, 

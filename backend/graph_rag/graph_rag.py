@@ -5,8 +5,8 @@ import faiss
 from typing import List, Dict, Any, Tuple
 from openai import OpenAI
 
-from backend.rag.base_rag import BaseRAG
-from backend.graph_rag.helper import text_to_networkx
+from rag.base_rag import BaseRAG
+from graph_rag.helper import text_to_networkx
 
 class GraphRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):

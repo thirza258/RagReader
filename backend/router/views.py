@@ -1,9 +1,9 @@
 from django.shortcuts import render
 from rest_framework.views import APIView
-from backend.utils.helper import _document_base_path, conversation_id_generator
-from backend.router.models import Document, DocumentVector, VectorStore, Conversation, ConversationHistory, GuestUser
-from backend.router import response, data_loader
-from backend.rag.rag_service import rag_registry
+from utils.helper import _document_base_path, conversation_id_generator
+from router.models import Document, DocumentVector, VectorStore, Conversation, ConversationHistory, GuestUser
+from router import response, data_loader
+from rag.rag_service import rag_registry
 
 # Create your views here.
 class InsertDataView(APIView):

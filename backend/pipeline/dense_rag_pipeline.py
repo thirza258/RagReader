@@ -4,14 +4,14 @@ import logging
 import uuid
 from typing import Dict, Any # Assuming Django settings for base paths
 
-from backend.pipeline.base_pipeline import BasePipeline
+from pipeline.base_pipeline import BasePipeline
 
-from backend.common.chunker import DocumentChunker
-from backend.dense_rag.dense_rag import DenseRAG
-from backend.ai_handler.llm import OpenAILLM
-from backend.utils.insert_file import DataLoader
+from common.chunker import DocumentChunker
+from dense_rag.dense_rag import DenseRAG
+from ai_handler.llm import OpenAILLM
+from utils.insert_file import DataLoader
 
-from backend.router.models import (
+from router.models import (
     Document, 
     GuestUser, 
     VectorStore, 

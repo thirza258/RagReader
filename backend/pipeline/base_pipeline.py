@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
-from backend.router.models import Document
+from router.models import Document
 
 class BasePipeline(ABC):
     """
@@ -18,14 +18,6 @@ class BasePipeline(ABC):
     # --- Phase 1: Ingestion (Data Loading) ---
 
     @abstractmethod
-    def load_file(self, file_path: str) -> List[str]:
-        """
-        Reads a file (PDF, TXT, JSON) and returns raw text strings.
-        Replaces your 'parse_file'.
-        """
-        pass
-
-    @abstractmethod
     def get_document(self, username: str) -> Document | None:
         """
         Gets the document from the database.
@@ -33,12 +25,11 @@ class BasePipeline(ABC):
         return Document.objects.filter(user=username).first()
 
     @abstractmethod
-    def index_data(self, data: List[str]) -> None:
-        """
-        Takes raw text, chunks it, and saves it to the DB.
-        Replaces your 'parse_chunk' + 'parse_document'.
-        """
+    def _save_state(self, path: str):
+        pass
 
+    @abstractmethod
+    def _load_state(self, path: str) -> bool:
         pass
 
     # --- Phase 2: Inference (Running the RAG) ---
@@ -60,16 +51,10 @@ class BasePipeline(ABC):
         """
         pass
 
-    # --- Phase 3: Evaluation (Optional) ---
-    
-    def evaluate_answer(self, query: str, context: str, answer: str) -> Dict[str, Any]:
+    @abstractmethod
+    def init(self, username: str) -> bool:
         """
-        Checks if the answer is grounded in context.
-        Replaces your 'parse_vote'.
+        Initializes the pipeline by loading the state from the database
+        .
         """
-        # This can be concrete because logic is often shared
-        if not self.llm:
-            return {"error": "No LLM loaded"}
-        
-        # Use your LLM's voting capability here
-        return self.llm.vote_generate(query, context, answer)
+        pass

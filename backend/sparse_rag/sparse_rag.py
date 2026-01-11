@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from backend.rag.base_rag import BaseRAG
+from rag.base_rag import BaseRAG
 
 class SparseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):

@@ -1,14 +1,6 @@
 from django.db import models
-from django.contrib.auth.models import User
 
-# Create your models here.
-class AppUser(User):
-    email = models.EmailField(unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.username
+# Create your models here.e
 
 class GuestUser(models.Model):
     email = models.EmailField(unique=True)
@@ -75,12 +67,13 @@ class Conversation(models.Model):
 
 class ConversationHistory(models.Model):
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
-    conversation_id = models.CharField(max_length=255)
-    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE)
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name="histories"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.conversation_id
-
-    
+        return str(self.conversation_id)

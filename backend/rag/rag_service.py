@@ -1,10 +1,10 @@
-from backend.pipeline.dense_rag_pipeline import DenseRAGPipeline
-from backend.pipeline.hybrid_rag_pipeline import HybridRAGPipeline
-from backend.pipeline.sparse_rag_pipeline import SparseRAGPipeline
-from backend.pipeline.iterative_rag_pipeline import IterativeRAGPipeline
-from backend.pipeline.reranking_rag_pipeline import RerankingPipeline
-from backend.router.models import Document
-from backend.common.constant import CONFIG_VARIANTS
+from pipeline.dense_rag_pipeline import DenseRAGPipeline
+from pipeline.hybrid_rag_pipeline import HybridRAGPipeline
+from pipeline.sparse_rag_pipeline import SparseRAGPipeline
+from pipeline.iterative_rag_pipeline import IterativeRAGPipeline
+from pipeline.reranking_rag_pipeline import RerankingPipeline
+from router.models import Document
+from common.constant import CONFIG_VARIANTS
 
 
 class RAGRegistry:

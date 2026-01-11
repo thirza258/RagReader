@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import UploadedFile
-from backend.utils.helper import _document_base_path
+from utils.helper import _document_base_path
 from django.utils.text import get_valid_filename
 
 class DataLoader:

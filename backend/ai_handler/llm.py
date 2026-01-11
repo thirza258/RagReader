@@ -1,5 +1,5 @@
 from langchain_openai import ChatOpenAI
-from backend.common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
+from common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
 from abc import ABC, abstractmethod
 from typing import Optional
 import os
