@@ -56,7 +56,7 @@ flowchart TD
 
     %% Normal Chat (Dense Graph)
     PFG --> DENSE_GRAPH[Dense Graph Retrieval]
-    DENSE_GRAPH --> DENSE_ANS[Answer\n (Dense Graph)]
+    DENSE_GRAPH --> DENSE_ANS[Answer \n(Dense Graph)]
 
     DENSE_ANS --> BASIC_EVAL[MRR / Recall@3 / Precision]
 
