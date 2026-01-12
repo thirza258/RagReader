@@ -14,16 +14,15 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 
 ### 2. Deep Dive Mode (The "Click" Feature)
 When accuracy is paramount, click the answer to trigger a comprehensive analysis pipeline:
-*   **Multi-Method Retrieval:** simultaneously employs:
+*   **Retrieval Method:** simultaneously employs:
     *   **Dense RAG:** Semantic search.
     *   **Sparse RAG:** Keyword-based search (BM25/SPLADE).
     *   **Hybrid RAG:** Combining semantic and keyword scores.
     *   **Iterative RAG:** Multi-step reasoning to find complex answers.
-*   **Advanced Refinement:**
-    *   **Reranking:** Re-orders retrieved chunks using a cross-encoder to ensure the highest relevance.
+    *   **Reranking:** Re-orders all chunks and takes the top k using a cross-encoder based on the user query
 
 ### 3. Evaluation & Validation
-*   **Metrics:** Automatically calculates **MRR (Mean Reciprocal Rank)** and **Context Relevance** scores to grade the quality of retrieved data.
+*   **Metrics:** Automatically calculates **MRR (Mean Reciprocal Rank)** , **Recall@K**,  and **Precision@K** scores to grade the quality of retrieved data.
 *   **The "Council of AI":** A consensus voting mechanism where three distinct LLMs evaluate the generated answers to pick the winner:
     *   **OpenAI GPT**
     *   **Anthropic Claude**
@@ -113,25 +112,42 @@ flowchart TD
     GEMINI_R --> A15[Answer]
 
     %% Evaluation per Answer (No Merge)
-    A1 --> E1[Context Coverage Check]
-    A2 --> E2[Context Coverage Check]
-    A3 --> E3[Context Coverage Check]
+    A1 --> E1[MRR / Recall@3 / Precision]
+    A2 --> E2[MRR / Recall@3 / Precision]
+    A3 --> E3[MRR / Recall@3 / Precision]
 
-    A4 --> E4[Context Coverage Check]
-    A5 --> E5[Context Coverage Check]
-    A6 --> E6[Context Coverage Check]
+    A4 --> E4[MRR / Recall@3 / Precision]
+    A5 --> E5[MRR / Recall@3 / Precision]
+    A6 --> E6[MRR / Recall@3 / Precision]
 
-    A7 --> E7[Context Coverage Check]
-    A8 --> E8[Context Coverage Check]
-    A9 --> E9[Context Coverage Check]
+    A7 --> E7[MRR / Recall@3 / Precision]
+    A8 --> E8[MRR / Recall@3 / Precision]
+    A9 --> E9[MRR / Recall@3 / Precision]
 
-    A10 --> E10[Context Coverage Check]
-    A11 --> E11[Context Coverage Check]
-    A12 --> E12[Context Coverage Check]
+    A10 --> E10[MRR / Recall@3 / Precision]
+    A11 --> E11[MRR / Recall@3 / Precision]
+    A12 --> E12[MRR / Recall@3 / Precision]
 
-    A13 --> E13[Context Coverage Check]
-    A14 --> E14[Context Coverage Check]
-    A15 --> E15[Context Coverage Check]
+    A13 --> E13[MRR / Recall@3 / Precision]
+    A14 --> E14[MRR / Recall@3 / Precision]
+    A15 --> E15[MRR / Recall@3 / Precision]
+
+    %% AI Vote Agreement
+    E1 --> V1[AI Vote: Chunk & Answer Agreement]
+    E2 --> V2[AI Vote: Chunk & Answer Agreement]
+    E3 --> V3[AI Vote: Chunk & Answer Agreement]
+    E4 --> V4[AI Vote: Chunk & Answer Agreement]
+    E5 --> V5[AI Vote: Chunk & Answer Agreement]
+    E6 --> V6[AI Vote: Chunk & Answer Agreement]
+    E7 --> V7[AI Vote: Chunk & Answer Agreement]
+    E8 --> V8[AI Vote: Chunk & Answer Agreement]
+    E9 --> V9[AI Vote: Chunk & Answer Agreement]
+    E10 --> V10[AI Vote: Chunk & Answer Agreement]
+    E11 --> V11[AI Vote: Chunk & Answer Agreement]
+    E12 --> V12[AI Vote: Chunk & Answer Agreement]
+    E13 --> V13[AI Vote: Chunk & Answer Agreement]
+    E14 --> V14[AI Vote: Chunk & Answer Agreement]
+    E15 --> V15[AI Vote: Chunk & Answer Agreement]
 
     %% Output Layer
     E1 --> OUT[Multi-Answer View]
@@ -155,19 +171,20 @@ flowchart TD
 
 *   **LLM Orchestration:** OpenAI GPT, Anthropic Claude, Google Gemini.
 *   **Embedding Models:** OpenAI Embeddings and Mini LM.
-*   **Retrieval:** Hybrid Search (Dense + Sparse), Rerankers (e.g., Cohere/BGE).
+*   **Retrieval:** Hybrid Search, Dense, Sparse, Rerankers (e.g., Cohere/BGE), Iterative Dense
 *   **Framework:** LangChain.
-*   **Frontend:** (e.g., React, Vite).
+*   **Frontend:** React, Vite, Tailwind.
+*   **Backend:** Django for the AI/RAG API
 
 ## Usage Guide
 
 1.  **Upload:** Drag and drop your PDF, TXT, or MD files into the sidebar.
 2.  **Ask:** Type your question in the chat input.
 3.  **Read:** Get an immediate answer via Standard Dense RAG.
-4.  **Verify:** **Click the answer** to activate the "Deep Dive."
-    *   Watch as the system reranks chunks and calculates MRR.
-    *   Wait for the "Council of AI" (GPT, Claude, Gemini) to vote.
-    *   View the final, consensus-based result.
+4.  **Deep Dive:** **Click the answer** to watch your query run through all AIs and methods.
+    *   See each retrieval, reranking, and evaluation performed by the system and every AI model.
+    *   Observe MRR and other metrics calculated at each step.
+    *   See whether each AI agrees with the answer or not based on the chunk.
 
 ---
 
