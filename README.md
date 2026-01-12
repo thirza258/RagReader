@@ -19,7 +19,8 @@ When accuracy is paramount, click the answer to trigger a comprehensive analysis
     *   **Sparse RAG:** Keyword-based search (BM25/SPLADE).
     *   **Hybrid RAG:** Combining semantic and keyword scores.
     *   **Iterative RAG:** Multi-step reasoning to find complex answers.
-    *   **Reranking:** Re-orders all chunks and takes the top k using a cross-encoder based on the user query
+*   **Reranking Method**
+    *   **Reranking:** Will turn on after top k > 50 input; re-orders all chunks and selects the top k using a cross-encoder based on the user query.
 
 ### 3. Evaluation & Validation
 *   **Metrics:** Automatically calculates **MRR (Mean Reciprocal Rank)** , **Recall@K**,  and **Precision@K** scores to grade the quality of retrieved data.
