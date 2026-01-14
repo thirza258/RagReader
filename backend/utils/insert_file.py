@@ -52,10 +52,12 @@ class DataLoader:
             text_path = DataLoader._save_text(base_path, text)
 
             return {
+                "user": username,
                 "text": text,
                 "source_path": pdf_path,
                 "text_path": text_path,
-                "filename": filename,
+                "filename": filename,   
+                "source_type": "pdf",
             }
 
         # ---------- URL ----------
@@ -69,9 +71,11 @@ class DataLoader:
             text_path = DataLoader._save_text(base_path, text)
 
             return {
+                "user": username,
                 "text": text,
                 "source_path": html_path,
                 "text_path": text_path,
+                "source_type": "url",
             }
 
         # ---------- Local PDF Path ----------
@@ -80,9 +84,11 @@ class DataLoader:
             text_path = DataLoader._save_text(base_path, text)
 
             return {
+                "user": username,
                 "text": text,
                 "source_path": source,
                 "text_path": text_path,
+                "source_type": "pdf",
             }
 
         # ---------- Raw Text ----------
@@ -90,9 +96,12 @@ class DataLoader:
         text_path = DataLoader._save_text(base_path, text)
 
         return {
+            "user": username,
             "text": text,
+            "name": "text",
             "source_path": None,
             "text_path": text_path,
+            "source_type": "text",
         }
 
     @staticmethod
@@ -148,3 +157,10 @@ class DataLoader:
         else:
             raise ValueError("Unsupported file type for loading.")
 
+_loader = None
+
+def get_loader():
+    global _loader
+    if _loader is None:
+        _loader = DataLoader()
+    return _loader

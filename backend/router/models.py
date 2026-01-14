@@ -16,10 +16,11 @@ class Document(models.Model):
     name = models.CharField(max_length=255)
     source_type = models.CharField(
         max_length=20,
-        choices=[("pdf", "PDF"), ("url", "URL"), ("file", "File")]
+        choices=[("pdf", "PDF"), ("url", "URL"), ("text", "Text")]
     )
     file = models.TextField(null=True, blank=True)
     extracted_text_path = models.TextField(null=True, blank=True)
+    source_path = models.TextField(null=True, blank=True)
     source_url = models.URLField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

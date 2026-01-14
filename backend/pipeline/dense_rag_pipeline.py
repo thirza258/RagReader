@@ -114,7 +114,7 @@ class DenseRAGPipeline(BasePipeline):
         self.rag.index_documents(chunks)
 
         # Save to Disk
-        file_name = f"{username}_{document.pk}_{uuid.uuid4().hex[:6]}.pkl"
+        file_name = f"{username}_{document.pk}_dense_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
         self._save_state(save_path)
 

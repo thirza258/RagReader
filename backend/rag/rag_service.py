@@ -55,7 +55,7 @@ class RAGRegistry:
                 "model": "text-embedding-3-small",
                 "top_k": 5, 
                 "chunk_strategy": "paragraph",
-                "chunk_size": 500,
+                "chunk_size": 512,
                 "overlap": 50,
             }
 
@@ -90,3 +90,12 @@ class RAGRegistry:
 
 # Create a global instance
 rag_registry = RAGRegistry()
+
+_registry = None
+
+def get_registry():
+    global _registry
+    if _registry is None:
+        from .rag_service import RagRegistry
+        _registry = RagRegistry()
+    return _registry

@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Literal, Dict, Any
 import time
+from django.http import JsonResponse
 
 class VoteDecision(BaseModel):
     decision: Literal["yes", "no"] = Field(
@@ -11,10 +12,10 @@ class VoteDecision(BaseModel):
         ..., 
         description="A concise one-sentence explanation of why you voted this way."
     )
-
 class RAGResponse(BaseModel):
-    def response_200(self, response: str) -> Dict[str, Any]:
-        return {
+    @staticmethod
+    def response_200(response: str):
+        return JsonResponse({
             "status": 200,
             "message": "Response generated successfully",
             "timestamp": time.time(),
@@ -22,9 +23,13 @@ class RAGResponse(BaseModel):
                 "response": response
             }
         }
+        , status=200
+        , content_type="application/json"
+        )
 
-    def response_400(self, error: str) -> Dict[str, Any]:
-        return {
+    @staticmethod
+    def response_400(error: str):
+        return JsonResponse({
             "status": 400,
             "message": error,
             "timestamp": time.time(),
@@ -32,9 +37,13 @@ class RAGResponse(BaseModel):
                 "response": None
             }
         }
+        , status=400
+        , content_type="application/json"
+        )
 
-    def response_500(self, error: str) -> Dict[str, Any]:
-        return {
+    @staticmethod
+    def response_500(error: str):
+        return JsonResponse({
             "status": 500,
             "message": error,
             "timestamp": time.time(),
@@ -42,9 +51,13 @@ class RAGResponse(BaseModel):
                 "response": None
             }
         }
+        , status=500
+        , content_type="application/json"
+        )
 
-    def response_404(self, error: str) -> Dict[str, Any]:
-        return {
+    
+    def response_404(error: str):
+        return JsonResponse({
             "status": 404,
             "message": error,
             "timestamp": time.time(),
@@ -52,9 +65,13 @@ class RAGResponse(BaseModel):
                 "response": None
             }
         }
-        
-    def response_201(self, response: str) -> Dict[str, Any]:
-        return {
+        , status=404
+        , content_type="application/json"
+        )
+
+    @staticmethod
+    def response_201(response: str):
+        return JsonResponse({
             "status": 201,
             "message": "Response created successfully",
             "timestamp": time.time(),
@@ -62,5 +79,16 @@ class RAGResponse(BaseModel):
                 "response": response
             }
         }
+        , status=201
+        , content_type="application/json"
+        )
 
 responses = RAGResponse()
+
+_responses = None
+
+def get_responses():
+    global _responses
+    if _responses is None:
+        _responses = RAGResponse()
+    return _responses
