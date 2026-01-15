@@ -73,6 +73,7 @@ class DataLoader:
             return {
                 "user": username,
                 "text": text,
+                "name": source,
                 "source_path": html_path,
                 "text_path": text_path,
                 "source_type": "url",
@@ -152,8 +153,9 @@ class DataLoader:
         if path.lower().endswith(".pdf"):
             return self._parse_pdf(path)
         elif path.lower().endswith(".txt"):
-            with default_storage.open(path, "r") as f:
-                return f.read().decode("utf-8")
+            with default_storage.open(path, "rb") as f:
+                with io.TextIOWrapper(f, encoding="utf-8") as text_file:
+                    return text_file.read()
         else:
             raise ValueError("Unsupported file type for loading.")
 

@@ -108,6 +108,7 @@ class DenseRAGPipeline(BasePipeline):
             raise ValueError("Document has no text source path.")
 
         # Load & Chunk
+        print(document.extracted_text_path)
         raw_text = self.loader.load(document.extracted_text_path)
         chunks = self.chunker.chunk(raw_text)
 

@@ -11,7 +11,7 @@ from common.schema import get_responses
 from django.db import IntegrityError
 from rest_framework.parsers import MultiPartParser, FormParser
 
-# Create your views here.
+
 class InsertDataView(GenericAPIView):
     serializer_class = InsertDataSerializer
     parser_classes = [MultiPartParser, FormParser]
@@ -27,7 +27,8 @@ class InsertDataView(GenericAPIView):
 
     def post(self, request):
         try:
-   
+            print(request.data)
+            print(request.FILES)
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
@@ -53,8 +54,9 @@ class InsertURLView(GenericAPIView):
         document = Document.objects.create(
             user=user,
             name=data["name"],
-            source_type=data["source_path"],
-            source_url=data["source_url"],
+            source_type=data["source_type"],
+            extracted_text_path=data["text_path"],
+            source_path=data["source_path"],
         )
         return document
 
@@ -62,11 +64,14 @@ class InsertURLView(GenericAPIView):
         try:
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
+
             username = serializer.validated_data["USER"]
             url = serializer.validated_data["URL"]
+
             data = get_loader().process_input(url, username)
             document = self.create_document(data)
             document.save()
+
             return get_responses().response_200("Data inserted successfully!")
         except Exception as e:
             return get_responses().response_500(error=str(e))
@@ -89,24 +94,27 @@ class InsertTextView(GenericAPIView):
         try:
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
+
             username = serializer.validated_data.get("USER")
             text = serializer.validated_data.get("TEXT")
+
             data = get_loader().process_input(text, username)
             document = self.create_document(data)
             document.save()
+
             return get_responses().response_200("Data inserted successfully!")
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
 class OpenChatView(APIView):
     def post(self, request):
-        try: 
+        # try: 
             username = request.data["USER"]
             rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).init(username)
             
             return get_responses().response_200("Chat initialized successfully!")
-        except Exception as e:
-            return get_responses().response_500(error=str(e))
+        # except Exception as e:
+        #     return get_responses().response_500(error=str(e))
 
 class QueryView(GenericAPIView):
     serializer_class = QuerySerializer
@@ -115,9 +123,11 @@ class QueryView(GenericAPIView):
         try:
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
+
             username = serializer.validated_data["USER"]
             query = serializer.validated_data["QUERY"]
-            answer = rag_registry.get_engine("Dense Retrieval", "gpt-4o-mini").run(username, query)
+            
+            answer = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).run(username, query)
             return get_responses().response_200(response=answer)
         except Exception as e:
             return get_responses().response_500(error=str(e))
