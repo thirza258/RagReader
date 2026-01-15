@@ -23,7 +23,7 @@ export interface DeepAnalysisConfig {
   selectedModels: string[];
 }
 
-const RETRIEVAL_OPTIONS = ["Hybrid", "Sparse", "Dense", "Iterative", "Reranker"];
+const RETRIEVAL_OPTIONS = ["Dense Retrieval", "Sparse Retrieval", "Hybrid Retrieval", "Iterative Retrieval", "Reranking"];
 const AI_OPTIONS = ["GPT-4o", "Gemini Pro", "Claude 3.5 Sonnet"];
 
 const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) => {
