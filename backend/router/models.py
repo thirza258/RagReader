@@ -78,3 +78,20 @@ class ConversationHistory(models.Model):
 
     def __str__(self):
         return str(self.conversation_id)
+
+class Metadata(models.Model):
+    llm_model = models.CharField(max_length=100, default="gpt-4o", help_text="LLM for answer generation")
+    temperature = models.FloatField(default=0.0, help_text="LLM temperature (0.0 = deterministic)")
+    embedding_model = models.CharField(max_length=100, default="text-embedding-3-small", help_text="OpenAI embedding model")
+    top_k = models.IntegerField(default=5, help_text="Number of documents to retrieve")
+    chunk_strategy = models.CharField(max_length=32, default="paragraph", help_text='Chunking strategy, e.g., "fixed", "paragraph", "semantic"')
+    chunk_size = models.IntegerField(default=500, help_text="Max characters per chunk")
+    overlap = models.IntegerField(default=50, help_text="Overlap for fixed chunking only")
+    vector_store_path = models.TextField(default="./vector_stores", help_text="Path to store vector indices")
+    max_retries = models.IntegerField(default=3, help_text="Max iterations for iterative search")
+    reranker_model = models.CharField(max_length=200, default="cross-encoder/ms-marco-MiniLM-L-6-v2", help_text="Reranker model name")
+    reranker_top_k = models.IntegerField(default=3, help_text="Top K for reranker")
+    device = models.CharField(max_length=20, default="cuda", help_text="Device to use - 'cuda' or 'cpu'")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
