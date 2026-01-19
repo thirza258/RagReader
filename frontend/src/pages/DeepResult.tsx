@@ -7,6 +7,7 @@ const DeepResult: React.FC = () => {
     {
       method: "Hybrid Retrieval",
       aiModel: "GPT-4o",
+      query: "What is the Battle of Surabaya?",
       answer:
         "The Battle of Surabaya was a major armed conflict in November 1945, marking a turning point in Indonesia’s struggle for independence.",
   
@@ -32,22 +33,23 @@ const DeepResult: React.FC = () => {
       ],
   
       evaluationMetrics: [
-        { label: "MRR@5", value: 0.85 },
-        { label: "Precision@3", value: 0.66 },
-        { label: "Recall@3", value: 0.75 },
+        { label: "Retrieval Score", value: 0.85 },
+        { label: "Faithfulness Score", value: 0.66 },
+        { label: "Answer Relevance", value: 0.75 },
       ],
     },
   
     {
       method: "Dense Retrieval",
       aiModel: "Claude 3.5 Sonnet",
+      query: "What is the Battle of Surabaya?",
       answer:
         "The Surabaya conflict demonstrated Indonesia’s determination to resist colonial reoccupation after World War II.",
   
       retrievedChunks: [
         {
           id: "doc-7-1",
-          label: "Historical Context",
+          label: "Chunk 1",
           text:
             "Following Japan’s surrender, Indonesian forces resisted attempts by Allied troops to restore Dutch colonial control.",
         },
@@ -59,28 +61,38 @@ const DeepResult: React.FC = () => {
       ],
   
       evaluationMetrics: [
-        { label: "Recall@5", value: 0.92 },
+        { label: "Retrieval Score", value: 0.85 },
+        { label: "Faithfulness Score", value: 0.66 },
+        { label: "Answer Relevance", value: 0.75 },
       ],
     },
   
     {
       method: "Keyword Search",
       aiModel: "GPT-4.1 Mini",
+      query: "What is the Battle of Surabaya?",
       answer:
         "Heroes’ Day in Indonesia commemorates those who fought in the Battle of Surabaya in 1945.",
   
       retrievedChunks: [
         {
           id: 101,
+          label: "Chunk 1",
           text:
             "November 10 is observed as Heroes’ Day in Indonesia to honor the Battle of Surabaya.",
         },
         {
           id: 102,
-          label: "Casualties",
+          label: "Chunk 2",
           text:
             "Thousands of Indonesian fighters and civilians were killed during the conflict.",
         },
+      ],
+
+      evaluationMetrics: [
+        { label: "Retrieval Score", value: 0.85 },
+        { label: "Faithfulness Score", value: 0.66 },
+        { label: "Answer Relevance", value: 0.75 },
       ],
     },
   ];

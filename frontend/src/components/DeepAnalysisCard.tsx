@@ -21,9 +21,9 @@ export interface EvaluationMetric {
 interface DeepAnalysisCardProps {
   method: string; // e.g., "Hybrid Retrieval"
   aiModel: string; // e.g., "GPT-4o"
+  query: string;
   answer: string;
   retrievedChunks: RetrievedChunk[];
-  modelAgreement?: ModelConsensus[];
   evaluationMetrics?: EvaluationMetric[];
   className?: string;
 }
@@ -33,9 +33,9 @@ interface DeepAnalysisCardProps {
 const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
   method,
   aiModel,
+  query,
   answer,
   retrievedChunks,
-  modelAgreement = [],
   evaluationMetrics = [],
   className = "",
 }) => {
@@ -69,6 +69,13 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
         </div>
 
         <div className="space-y-4">
+          <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+            <div className="text-xs text-slate-400 mb-1 uppercase tracking-wider">Query</div>
+            <div className="text-white font-medium text-sm leading-relaxed">
+              {query}
+            </div>
+          </div>
+          
           
           {/* Answer Section */}
           <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
@@ -99,19 +106,7 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
             )}
           </div>
 
-          {/* Model Agreement Section */}
-          {modelAgreement.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-slate-800 p-3 rounded-lg border border-slate-700">
-              <div className="text-white font-semibold text-sm">Model Consensus</div>
-              <div className="sm:ml-auto flex flex-wrap gap-3 text-xs font-mono">
-                {modelAgreement.map((model, idx) => (
-                  <span key={idx} className={getStatusColor(model.status)}>
-                    {model.modelName}: {model.status}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+
 
           {/* RAG Evaluation Metrics */}
           {evaluationMetrics.length > 0 && (
@@ -126,8 +121,6 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
           )}
         </div>
       </div>
-
-      {/* Decorative background blob */}
       <div className="absolute -inset-4 bg-gradient-to-r from-cyan-600 to-blue-600 opacity-30 blur-2xl -z-10 rounded-full pointer-events-none" />
     </div>
   );

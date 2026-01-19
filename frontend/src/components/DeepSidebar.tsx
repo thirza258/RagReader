@@ -23,19 +23,19 @@ export interface DeepAnalysisConfig {
   selectedModels: string[];
 }
 
-const RETRIEVAL_OPTIONS = ["Dense Retrieval", "Sparse Retrieval", "Hybrid Retrieval", "Iterative Retrieval", "Reranking"];
+const RETRIEVAL_OPTIONS = ["Dense Retrieval", "Sparse Retrieval", "Hybrid Retrieval"];
 const AI_OPTIONS = ["GPT-4o", "Gemini Pro", "Claude 3.5 Sonnet"];
 
 const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) => {
-  // --- Local State for Configuration ---
+  const [useReranker, setUseReranker] = useState<boolean>(false);
+  const [chunkStrategy, setChunkStrategy] = useState<'custom' | 'paragraph' | 'semantic'>('custom')
   const [topK, setTopK] = useState<number>(5);
-  const [chunkSize, setChunkSize] = useState<number>(512);
+  const [chunkSize, setChunkSize] = useState<number | ''>(512);
   
   const [methods, setMethods] = useState<Record<string, boolean>>({
     Hybrid: true,
     Sparse: false,
     Dense: false,
-    Iterative: false,
     Reranker: false,
   });
 
@@ -57,7 +57,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) =>
   const handleAnalyzeClick = () => {
     const config: DeepAnalysisConfig = {
       topK,
-      chunkSize,
+      chunkSize: chunkSize === '' ? 0 : chunkSize,
       retrievalMethods: Object.keys(methods).filter(k => methods[k]),
       selectedModels: Object.keys(models).filter(k => models[k]),
     };
@@ -128,43 +128,89 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) =>
 
         {/* --- 2. CHUNK SETTINGS --- */}
         <section>
-          <div className="flex items-center gap-2 mb-3 text-[hsl(var(--primary))]">
-            <Settings size={16} />
-            <h3 className="text-xs font-bold uppercase tracking-wider">Chunking Strategy</h3>
-          </div>
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-3 text-[hsl(var(--primary))]">
+        <Settings size={16} />
+        <h3 className="text-xs font-bold uppercase tracking-wider">
+          Chunking Strategy
+        </h3>
+      </div>
 
-          <div className="space-y-4">
-            {/* Top K Slider */}
-            <div>
-              <div className="flex justify-between mb-2">
-                <label className="text-sm font-medium text-[hsl(var(--foreground))]">Retrieved Chunks (Top-K)</label>
-                <span className="text-sm font-bold text-[hsl(var(--primary))]">{topK}</span>
-              </div>
-              <input 
-                type="range" 
-                min="1" 
-                max="20" 
-                value={topK} 
-                onChange={(e) => setTopK(parseInt(e.target.value))}
-                className="w-full h-2 bg-[hsl(var(--muted))] rounded-lg appearance-none cursor-pointer accent-[hsl(var(--primary))]"
-              />
-            </div>
+      <div className="space-y-4">
 
-            {/* Chunk Size Input */}
-            <div>
-              <label className="text-sm font-medium text-[hsl(var(--foreground))] block mb-2">Chunk Size (Tokens)</label>
-              <div className="relative">
-                <input 
-                  type="number" 
-                  value={chunkSize}
-                  onChange={(e) => setChunkSize(parseInt(e.target.value))}
-                  className="w-full bg-[hsl(var(--background))] border border-[hsl(var(--input))] rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+        {/* Strategy Selector */}
+        <div>
+          <label className="text-sm font-medium text-[hsl(var(--foreground))] block mb-2">
+            Strategy
+          </label>
+          <div className="flex gap-4">
+            {['custom', 'paragraph', 'semantic'].map((strategy) => (
+              <label
+                key={strategy}
+                className="flex items-center gap-2 text-sm cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  name="chunkStrategy"
+                  value={strategy}
+                  checked={chunkStrategy === strategy}
+                  onChange={() => {
+                    setChunkStrategy(strategy as any)
+                    if (strategy !== 'custom') setChunkSize('')
+                  }}
                 />
-                <span className="absolute right-3 top-2.5 text-xs text-[hsl(var(--muted-foreground))]">tokens</span>
-              </div>
-            </div>
+                {strategy.charAt(0).toUpperCase() + strategy.slice(1)}
+              </label>
+            ))}
           </div>
-        </section>
+        </div>
+
+        {/* Top-K Slider (Always Enabled) */}
+        <div>
+          <div className="flex justify-between mb-2">
+            <label className="text-sm font-medium text-[hsl(var(--foreground))]">
+              Retrieved Chunks (Top-K)
+            </label>
+            <span className="text-sm font-bold text-[hsl(var(--primary))]">
+              {topK}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            value={topK}
+            onChange={(e) => setTopK(parseInt(e.target.value))}
+            className="w-full h-2 bg-[hsl(var(--muted))] rounded-lg appearance-none cursor-pointer accent-[hsl(var(--primary))]"
+          />
+        </div>
+
+        {/* Chunk Size (Custom Only) */}
+        <div className={chunkStrategy !== 'custom' ? 'opacity-50' : ''}>
+          <label className="text-sm font-medium text-[hsl(var(--foreground))] block mb-2">
+            Chunk Size (Tokens)
+          </label>
+          <div className="relative">
+            <input
+              type="number"
+              disabled={chunkStrategy !== 'custom'}
+              value={chunkSize}
+              onChange={(e) => setChunkSize(parseInt(e.target.value))}
+              placeholder={
+                chunkStrategy !== 'custom'
+                  ? 'Disabled for this strategy'
+                  : ''
+              }
+              className="w-full bg-[hsl(var(--background))] border border-[hsl(var(--input))] rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
+            />
+            <span className="absolute right-3 top-2.5 text-xs text-[hsl(var(--muted-foreground))]">
+              tokens
+            </span>
+          </div>
+        </div>
+
+      </div>
+    </section>
 
         {/* --- 3. RETRIEVAL METHOD --- */}
         <section>
@@ -187,6 +233,38 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) =>
                 />
               </label>
             ))}
+          </div>
+        </section>
+
+        {/* --- 4. RERANKER --- */}
+        <section>
+          <div className="flex items-center gap-2 mb-3 text-[hsl(var(--primary))]">
+            <Database size={16} />
+            <h3 className="text-xs font-bold uppercase tracking-wider">
+              Reranker
+            </h3>
+          </div>
+
+          <div className="space-y-2">
+            <label
+              className={`flex items-center justify-between p-3 rounded-md border
+                border-[hsl(var(--border))] bg-[hsl(var(--background))]
+                hover:bg-[hsl(var(--muted))] cursor-pointer transition-colors group`}
+            >
+              <span className="text-sm font-medium text-[hsl(var(--foreground))] group-hover:text-[hsl(var(--primary))] transition-colors">
+                Enable Reranker
+              </span>
+
+              <input
+                type="checkbox"
+                checked={useReranker}
+                onChange={(e) => setUseReranker(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300
+                  text-[hsl(var(--primary))]
+                  focus:ring-[hsl(var(--ring))]
+                  accent-[hsl(var(--primary))]"
+              />
+            </label>
           </div>
         </section>
 
