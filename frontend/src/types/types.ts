@@ -19,3 +19,8 @@ export type ChatResponse = {
 };
 
 export type EmbeddingStatus = "embedded" | "pending" | "failed";
+
+export type SubmitPayload =
+  | { type: "file"; file: File }
+  | { type: "url"; url: string }
+  | { type: "text"; text: string };

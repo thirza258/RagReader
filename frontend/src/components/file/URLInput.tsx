@@ -23,7 +23,7 @@ interface UrlInputProps {
         onChange={onChange}
         placeholder="https://example.com"
         disabled={disabled}
-        className={`w-full border rounded p-2 ${
+        className={`w-full border rounded p-2 text-black ${
           disabled ? "bg-gray-100 cursor-not-allowed opacity-50" : ""
         }`}
       />

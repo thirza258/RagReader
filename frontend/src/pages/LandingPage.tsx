@@ -16,8 +16,10 @@ import {
   Vote, 
   X 
 } from "lucide-react";
-
+import service from "../services/service";
 import NavBar from "../components/Navbar";
+import { useNavigate } from "react-router-dom";
+import { SubmitPayload } from "../types/types";
 
 import FileSubmit from "../components/FileSubmit";
 
@@ -48,6 +50,33 @@ const Badge = ({ children }: { children: React.ReactNode }) => (
 
 const LandingPage: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [url, setUrl] = useState<string>("");
+  const [text, setText] = useState<string>("");
+
+  const navigate = useNavigate();
+
+  const handleSubmit = async (payload: SubmitPayload) => {
+    const username = localStorage.getItem("username");
+    if (!username) {
+      navigate("/login");
+      return;
+    }
+  
+    switch (payload.type) {
+      case "file":
+        await service.submitFile(payload.file, username);
+        break;
+      case "url":
+        await service.submitURL(payload.url, username);
+        break;
+      case "text":
+        await service.submitText(payload.text, username);
+        break;
+    }
+  
+    navigate("/main");
+  };
 
   // Mock functions for FileSubmit
   const handleSetFile = (file: File) => console.log("File set:", file);
@@ -82,7 +111,7 @@ const LandingPage: React.FC = () => {
             <div className="p-1 bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl border border-slate-700 shadow-2xl">
               <div className="bg-slate-950 rounded-lg p-4">
                 <p className="mb-4 text-sm text-slate-400 font-medium uppercase tracking-wider">Start Your Analysis</p>
-                <FileSubmit setFile={() => {}} setUrl={() => {}} />
+                <FileSubmit onSubmit={handleSubmit} />
               </div>
             </div>
 

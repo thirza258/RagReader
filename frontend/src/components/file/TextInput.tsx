@@ -22,7 +22,7 @@ interface TextInputProps {
         onChange={onChange}
         placeholder="Paste your content here..."
         disabled={disabled}
-        className={`w-full border rounded p-2 resize-y ${
+        className={`w-full border rounded p-2 resize-y  text-black ${
           disabled ? "bg-gray-100 cursor-not-allowed opacity-50" : ""
         }`}
       />

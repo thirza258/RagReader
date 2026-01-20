@@ -1,59 +1,98 @@
-import axios from "axios";
+import { apiClient } from "./apiClient";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+const signUp = async (email: string, username: string) => {
+    const response = await apiClient.post("/sign-up/", {
+        "USERNAME": username,
+        "EMAIL": email,
+    },
+    {
+        headers: {
+            "Content-Type": "application/json",
+        },
+    });
+    return response.data;
+};
 
-const submitFile = async (file: File, modelName: string, vectorNumber: number) => {
-    console.log(import.meta.env.VITE_PRODUCTION_MODE);
+const submitFile = async (
+    file: File,
+    username: string
+) => {
     const formData = new FormData();
-    formData.append("file", file);
-    formData.append("model_name", modelName);
-    formData.append("vector_number", vectorNumber.toString());
+    formData.append("FILE", file);
+    formData.append("USER", username);
 
-    console.log("formData", formData);
-
-    const response = await axios.post(`${apiBaseUrl}/api/v1/file/`, formData, {
+    const response = await apiClient.post("/insert-data/", formData, {
         headers: {
-            "Content-Type": "multipart/form-data",  // Important for file uploads
+            "Content-Type": "multipart/form-data",
         },
     });
 
     return response.data;
 };
 
-const submitURL = async (file: string, modelName: string, vectorNumber: number) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("model_name", modelName);
-    formData.append("vector_number", vectorNumber.toString());
-
-    const response = await axios.post(`${apiBaseUrl}/api/v1/file/`, formData, {
-        headers: {
-            "Content-Type": "application/json",  // Important for file uploads
+const submitURL = async (
+    url: string,
+    username: string
+) => {
+    const response = await apiClient.post(
+        "/insert-url/",
+        {
+            URL: url,
+            USER: username,
         },
+        {
+            headers: {
+                "Content-Type": "application/json",
+            },
+        }
+    );
+
+    return response.data;
+};
+
+const submitText = async (
+    text: string,
+    username: string
+) => {
+    const response = await apiClient.post("/insert-text/", {
+        TEXT: text,
+        USER: username,
+    },
+    {
+        headers: {
+            "Content-Type": "application/json",
+        },
+    }
+);
+
+    return response.data;
+};
+
+const generateChat = async (
+    query: string,
+    username: string
+) => {
+    const response = await apiClient.post("/query/", {
+        QUERY: query,
+        USER: username,
     });
 
     return response.data;
 };
 
-const generateChat = async (input_message: string) => {
-    const response = await axios.post(`${apiBaseUrl}/api/v1/chat/`, {
-        input_message: input_message
-    }, {
-        headers: {
-            "Content-Type": "application/json", 
-        },
+const openChat = async (
+    username: string
+) => {
+    const response = await apiClient.post("/open-chat/", {
+        USER: username,
     });
-
     return response.data;
 };
+
+
 
 const cleanSystem = async () => {
-    const response = await axios.get(`${apiBaseUrl}/api/v1/clean/`, {
-        headers: {
-            "Content-Type": "application/json", 
-        },
-    });
-
+    const response = await apiClient.get("/clean/");
     return response.data;
 };
 
@@ -62,4 +101,7 @@ export default {
     submitURL,
     generateChat,
     cleanSystem,
-}
+    signUp,
+    submitText,
+    openChat,
+};

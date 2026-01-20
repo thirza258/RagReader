@@ -4,16 +4,15 @@ import service from "../services/service";
 import FileUploadSection from "./file/FileInput";
 import UrlUploadSection from "./file/URLInput";
 import TextUploadSection from "./file/TextInput";
+import { SubmitPayload } from "../types/types";
 
 
 interface FileSubmitProps {
-  setFile: (file: File | null) => void;
-  setUrl: (url: string | null) => void;
+  onSubmit: (payload: SubmitPayload) => Promise<void>;
 }
 
 const FileSubmit: React.FC<FileSubmitProps> = ({
-  setFile,
-  setUrl,
+  onSubmit,
 }) => {
   const [fileLocal, setFileLocal] = useState<File | null>(null);
   const [url, setLocalUrl] = useState<string>("");
@@ -24,17 +23,11 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // --- Handlers ---
-
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
       const selectedFile = event.target.files[0];
-      setFileLocal(selectedFile);
-      setFile(selectedFile);
-
-      // Clear other inputs
+      setFileLocal(selectedFile)
       setLocalUrl("");
-      setUrl("");
       setTextInput("");
     }
   };
@@ -42,12 +35,10 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
   const handleUrlChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setLocalUrl(value);
-    setUrl(value);
 
     // If user starts typing URL, clear other inputs
     if (value) {
       setFileLocal(null);
-      setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setTextInput("");
     }
@@ -60,10 +51,8 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
     // If user starts typing Text, clear other inputs
     if (value) {
       setFileLocal(null);
-      setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setLocalUrl("");
-      setUrl("");
     }
   };
 
@@ -72,21 +61,25 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
       alert("Please upload a file, enter a URL, or paste text.");
       return;
     }
-
+    setIsLoading(true);
+  
     try {
-      setIsLoading(true);
+      if (fileLocal) {
+        await onSubmit({ type: "file", file: fileLocal });
+      } else if (url) {
+        await onSubmit({ type: "url", url });
+      } else if (textInput) {
+        await onSubmit({ type: "text", text: textInput });
+      }
+    } 
 
-      let response;
-      
-
-      console.log("Submission successful:", response);
-      alert("Submitted successfully!");
-      navigate("/main");
-    } catch (error) {
+    catch (error) {
       console.error("Error submitting:", error);
       alert("Failed to submit.");
     } finally {
       setIsLoading(false);
+      navigate("/loading");
+      return;
     }
   };
 
@@ -100,21 +93,28 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
 
       <div className="space-y-4 w-full">
        
-        <FileUploadSection
+      <FileUploadSection
           inputRef={fileInputRef}
           onChange={handleFileChange}
-          disabled={isFileFilled || isUrlFilled || isTextFilled}
+          disabled={isUrlFilled || isTextFilled}
+          fileName={fileLocal?.name}
+          onClear={() => {
+            setFileLocal(null);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = "";
+            }
+          }}
         />
         <UrlUploadSection
-          value={url}
-          onChange={handleUrlChange}
-          disabled={isFileFilled || isTextFilled}
-        />
+            value={url}
+            onChange={handleUrlChange}
+            disabled={isFileFilled || isTextFilled}
+          />
         <TextUploadSection
-          value={textInput}
-          onChange={handleTextChange}
-          disabled={isFileFilled || isUrlFilled}
-        />
+        value={textInput}
+        onChange={handleTextChange}
+        disabled={isFileFilled || isUrlFilled}
+      />
       </div>
 
       {/* Submit Button */}

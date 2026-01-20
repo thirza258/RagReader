@@ -1,27 +1,50 @@
-import service from "../services/service";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { Menu, X, User, LogOut, Settings, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
-import { X, Menu } from "lucide-react";
-import { useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-const NavBar: React.FC = () => {
-    const handleStartOver = async () => {
-      try {
-        await service.cleanSystem();
-      } catch (error) {
-        console.error("Error cleaning system:", error);
-        alert("Failed to clean system.");
-      }
-      window.location.href = "/";
-    };
+const Navbar: React.FC = () => {
+  const navigate = useNavigate();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
 
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
+  // Check LocalStorage on Mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem("username"); 
+    if (storedUser) {
+      setUsername(storedUser);
+      setEmail(localStorage.getItem("email") || null);
+    }
+  }, []);
 
-    return (
-      <nav className="fixed top-0 w-full z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
+  const handleLogout = () => {
+    localStorage.removeItem("username");
+    localStorage.removeItem("token"); // Clean up other auth items if needed
+    setUsername(null);
+    navigate("/login");
+  };
+
+  // Helper to get initials
+  const getInitials = (name: string) => {
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  return (
+    <nav className="fixed top-0 w-full z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
       <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        
+        {/* Logo Section */}
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
           <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
             R
           </div>
@@ -34,34 +57,111 @@ const NavBar: React.FC = () => {
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
           <a href="/" className="hover:text-cyan-400 transition-colors">Home</a>
           <a href="/chat" className="hover:text-cyan-400 transition-colors">Chat</a>
-          <a href="/deep-result" className="hover:text-cyan-400 transition-colors">DeepAnalysis</a>
+          <a href="/deep-result" className="hover:text-cyan-400 transition-colors">
+            DeepAnalysis
+          </a>
           <a href="/about" className="hover:text-cyan-400 transition-colors">About</a>
         </div>
 
+        {/* Right Side: Auth Logic */}
         <div className="hidden md:flex items-center gap-4">
-          <Button variant="ghost">Sign In</Button>
-          <Button>Get Started</Button>
+          {username ? (
+            /* --- LOGGED IN STATE --- */
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                  <Avatar className="h-10 w-10 border border-slate-700">
+                    <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`} alt={username} />
+                    <AvatarFallback className="bg-slate-800 text-cyan-400">
+                      {getInitials(username)}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56 bg-slate-900 border-slate-800 text-slate-200" align="end" forceMount>
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none text-white">{username}</p>
+                    <p className="text-xs leading-none text-slate-400">{email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-slate-800" />
+                <DropdownMenuItem className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer">
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer">
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  <span>Billing</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer">
+                  <Settings className="mr-2 h-4 w-4" />
+                  <span>Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-slate-800" />
+                <DropdownMenuItem 
+                  className="focus:bg-red-900/50 focus:text-red-400 text-red-400 cursor-pointer"
+                  onClick={handleLogout}
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            /* --- LOGGED OUT STATE --- */
+            <>
+              <Button variant="ghost" onClick={() => navigate("/login")} className="text-slate-300 hover:text-white hover:bg-slate-800">
+                Sign In
+              </Button>
+              <Button onClick={() => navigate("/register")} className="bg-cyan-600 hover:bg-cyan-700 text-white">
+                Get Started
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Mobile Menu Toggle */}
-        <button className="md:hidden text-white" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+        <button
+          className="md:hidden text-white hover:bg-slate-800 p-2 rounded-md"
+          onClick={() => setIsMenuOpen(!isMenuOpen)}
+        >
           {isMenuOpen ? <X /> : <Menu />}
         </button>
       </div>
 
       {/* Mobile Menu Dropdown */}
       {isMenuOpen && (
-        <div className="md:hidden bg-slate-900 border-b border-slate-800 p-4 flex flex-col gap-4">
-            <a href="/" className="text-slate-300">Home</a>
-            <a href="/chat" className="text-slate-300">Chat</a>
-            <a href="/deepanalysis" className="text-slate-300">DeepAnalysis</a>
-            <a href="/about" className="text-slate-300">About</a>
-            <Button className="w-full">Get Started</Button>
+        <div className="md:hidden bg-slate-900 border-b border-slate-800 p-4 flex flex-col gap-4 animate-in slide-in-from-top-5">
+          <a href="/" className="text-slate-300 hover:text-cyan-400">Home</a>
+          <a href="/chat" className="text-slate-300 hover:text-cyan-400">Chat</a>
+          <a href="/deep-result" className="text-slate-300 hover:text-cyan-400">DeepAnalysis</a>
+          <a href="/about" className="text-slate-300 hover:text-cyan-400">About</a>
+          
+          <div className="h-px bg-slate-800 my-2" />
+          
+          {username ? (
+            <>
+              <div className="flex items-center gap-3 px-2 py-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`} />
+                  <AvatarFallback>{getInitials(username)}</AvatarFallback>
+                </Avatar>
+                <span className="text-slate-200 font-medium">{username}</span>
+              </div>
+              <Button variant="destructive" onClick={handleLogout} className="w-full justify-start">
+                <LogOut className="mr-2 h-4 w-4" /> Log out
+              </Button>
+            </>
+          ) : (
+            <Button className="w-full bg-cyan-600" onClick={() => navigate("/login")}>
+              Get Started
+            </Button>
+          )}
         </div>
       )}
     </nav>
-    );
-  };
-  
-  export default NavBar;
-  
+  );
+};
+
+export default Navbar;
