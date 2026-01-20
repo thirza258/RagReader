@@ -12,6 +12,10 @@ class InsertDataSerializer(serializers.Serializer):
     USER = serializers.CharField()
     FILE = serializers.FileField()
 
+class DeepAnalysisSerializer(serializers.Serializer):
+    USER = serializers.CharField()
+    QUERY = serializers.CharField()
+
 class InsertTextSerializer(serializers.Serializer):
     USER = serializers.CharField()
     TEXT = serializers.CharField()

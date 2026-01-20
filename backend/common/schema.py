@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Literal, Dict, Any
+from typing import Literal, Dict, Any, List
 import time
 from django.http import JsonResponse
 
@@ -12,9 +12,36 @@ class VoteDecision(BaseModel):
         ..., 
         description="A concise one-sentence explanation of why you voted this way."
     )
+
+class DeepAnalysisResponse(BaseModel):
+    response: str = Field(
+        ...,
+        description="The response to the query."
+    )
+    retrieved_chunks: List[str] = Field(
+        ...,
+        description="The chunks retrieved from the vector store."
+    )
+    query: str = Field(
+        ...,
+        description="The query that was used to retrieve the chunks."
+    )
+    method: str = Field(
+        ...,
+        description="The method that was used to retrieve the chunks."
+    )
+    ai_model: str = Field(
+        ...,
+        description="The AI model that was used to retrieve the chunks."
+    )
+    evaluation_metrics: List[Dict] = Field(
+        ...,
+        description="The evaluation metrics."
+    )
+
 class RAGResponse(BaseModel):
     @staticmethod
-    def response_200(response: str):
+    def response_200(response: str | dict):
         return JsonResponse({
             "status": 200,
             "message": "Response generated successfully",
@@ -70,10 +97,10 @@ class RAGResponse(BaseModel):
         )
 
     @staticmethod
-    def response_201(response: str):
+    def response_201(response: str | dict):
         return JsonResponse({
             "status": 201,
-            "message": "Response created successfully",
+            "message": "Object created successfully",
             "timestamp": time.time(),
             "data": {
                 "response": response

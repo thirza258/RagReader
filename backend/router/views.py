@@ -131,22 +131,3 @@ class QueryView(GenericAPIView):
             return get_responses().response_200(response=answer)
         except Exception as e:
             return get_responses().response_500(error=str(e))
-
-class SignUpView(GenericAPIView):
-    serializer_class = SignUpSerializer
-
-    def post(self, request):
-        try:
-            serializer = self.get_serializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-
-            try:
-                GuestUser.objects.create(
-                    email=serializer.validated_data["EMAIL"],
-                    username=serializer.validated_data["USERNAME"],
-                )
-            except IntegrityError:
-                return get_responses().response_400("User already exists")
-            return get_responses().response_201("User created successfully!")
-        except Exception as e:
-            return get_responses().response_500(error=str(e))
