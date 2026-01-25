@@ -76,7 +76,6 @@ class DenseRAGPipeline(BasePipeline):
         Optimizes the query for better retrieval.
         Returns ONLY the optimized string.
         """
-        # 1. Strict Prompt Engineering
         prompt = (
             "You are a query optimization tool for a Vector Database. "
             "Your task is to rewrite the user's input into a single, keyword-rich sentence "
@@ -92,10 +91,8 @@ class DenseRAGPipeline(BasePipeline):
             "Output:"
         )
         
-        # 2. Generate
         raw_response = self.llm.prompt_generate(prompt)
         
-        # 3. Validation & Cleaning (The "Safety Net")
         optimized_query = self._validate_and_clean_query(raw_response, query)
         
         logger.info(f"Original Query: '{query}' -> Optimized: '{optimized_query}'")
@@ -109,24 +106,18 @@ class DenseRAGPipeline(BasePipeline):
         if not response:
             return original_query
 
-        # Step 1: Remove leading/trailing whitespace
         cleaned = response.strip()
 
-        # Step 2: Remove accidental quotes (e.g., "DeepWiki definition")
         cleaned = cleaned.replace('"', '').replace("'", "")
 
-        # Step 3: Ensure it is only one line
         if "\n" in cleaned:
-            # If the LLM still gave a list, take the first line
             cleaned = cleaned.split("\n")[0]
 
-        # Step 4: Remove conversational prefixes (rare with good prompts, but possible)
         prefixes = ["Here is", "Optimized query:", "Answer:"]
         for prefix in prefixes:
             if cleaned.lower().startswith(prefix.lower()):
                 cleaned = cleaned[len(prefix):].strip()
 
-        # Step 5: Sanity Check - If result is suspiciously long (e.g., an explanation), fail safe.
         if len(cleaned) > 200: 
             logger.warning(f"Optimization failed (result too long). Fallback to original.")
             return original_query
@@ -149,31 +140,27 @@ class DenseRAGPipeline(BasePipeline):
 
         doc_vector = DocumentVector.objects.filter(document=document, status="ready").last()
         if doc_vector:
-            # It exists, just load it into memory
             logger.info("Existing index found. Loading into memory.")
             success = self._load_state(doc_vector.vectorstore_location)
             if not success:
                 raise RuntimeError("Index record exists but file load failed.")
             
 
-        # It doesn't exist, Create it (Heavy Operation)
         logger.info("Creating new index (Embedding)...")
         if not document.extracted_text_path:
             raise ValueError("Document has no text source path.")
 
-        # Load & Chunk
         print(document.extracted_text_path)
         raw_text = self.loader.load(document.extracted_text_path)
         chunks = self.chunker.chunk(raw_text)
 
         self.rag.index_documents(chunks)
 
-        # Save to Disk
+      
         file_name = f"{username}_{document.pk}_dense_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
         self._save_state(save_path)
 
-        # Save to DB
         vs, _ = VectorStore.objects.get_or_create(base_path=self.vector_store_root)
         DocumentVector.objects.create(
             document=document,
@@ -231,7 +218,6 @@ class DenseRAGPipeline(BasePipeline):
         """
         logger.info(f"Initializing Chat for {username}...")
         
-        # Update Progress: Started
         if job:
             job.progress = 10
             job.save()
@@ -245,7 +231,6 @@ class DenseRAGPipeline(BasePipeline):
         if doc_vector:
             logger.info("Existing index found. Loading into memory.")
             
-            # Update Progress: Loading
             if job:
                 job.progress = 80
                 job.save()
@@ -260,7 +245,6 @@ class DenseRAGPipeline(BasePipeline):
             logger.info(f"Document vectors: {self.rag.document_vectors}")
             return True
 
-        # --- Heavy Operation Start ---
         logger.info("Creating new index (Embedding)...")
         
         if job:
@@ -272,7 +256,6 @@ class DenseRAGPipeline(BasePipeline):
             raise ValueError("Document has no text source path.")
 
 
-        # Load & Chunk
         raw_text = self.loader.load(document.extracted_text_path)
         
         if job:
@@ -281,7 +264,6 @@ class DenseRAGPipeline(BasePipeline):
 
         chunks = self.chunker.chunk(raw_text)
 
-        # Embedding (The slowest part)
         if job:
             job.progress = 50
             job.save()
@@ -292,12 +274,10 @@ class DenseRAGPipeline(BasePipeline):
             job.progress = 90
             job.save()
 
-        # Save to Disk
         file_name = f"{username}_{document.pk}_dense_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
         self._save_state(save_path)
 
-        # Save to DB
         vs, _ = VectorStore.objects.get_or_create(base_path=self.vector_store_root)
         DocumentVector.objects.create(
             document=document,
@@ -307,6 +287,5 @@ class DenseRAGPipeline(BasePipeline):
             status="ready"
         )
         
-        # Note: Task will set progress to 100% upon return
         logger.info("Initialization Complete.")
         return True
