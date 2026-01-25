@@ -22,3 +22,6 @@ backend/vectorstore/
 
 backend/media/
 backend/vector_stores/
+
+.env.frontend
+.env.backend

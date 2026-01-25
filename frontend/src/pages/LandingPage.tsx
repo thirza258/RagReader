@@ -96,15 +96,12 @@ const LandingPage: React.FC = () => {
           <div className="space-y-8">
             
             <h1 className="text-5xl lg:text-7xl font-bold leading-tight text-white">
-              Elevate Your RAG <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">
-                Precision & Recall
-              </span>
+              RAG Evaluation System <br />
+              
             </h1>
             <p className="text-lg text-slate-400 max-w-xl leading-relaxed">
-              Upload your documents and let our Hybrid Search engine perform deep 
-              dense/sparse retrieval. Get detailed evaluations with MRR, Precision@K, 
-              and AI-voted consensus.
+              Upload your documents and let our system perform deep 
+              dense, sparse, or hybrid retrieval. Get detailed evaluations of the retrieved chunks, query, and answer with retrieval score, faithfulness score, and answer relevance.
             </p>
             
             {/* User Provided Component Integration */}
@@ -128,6 +125,13 @@ const LandingPage: React.FC = () => {
               <div className="w-3 h-3 rounded-full bg-green-500" />
               <div className="ml-2 text-white font-semibold">
                 Hybrid Retrieval - GPT 4o
+              </div>
+            </div>
+            <div className="space-y-4">
+              {/* Query Section */}
+              <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <div className="text-xs text-slate-400 mb-1">Query</div>
+                <div className="text-white font-semibold">What is the Battle of Surabaya?</div>
               </div>
             </div>
 
@@ -159,30 +163,20 @@ const LandingPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Model Agreement */}
-              <div className="flex items-center gap-4 bg-slate-800 p-3 rounded-lg border border-slate-700">
-                <div className="text-white font-semibold">Model Agreement</div>
-                <div className="ml-auto flex gap-3 text-xs font-mono">
-                  <span className="text-green-400">OpenAI: AGREE</span>
-                  <span className="text-green-400">Claude: AGREE</span>
-                  <span className="text-green-400">Gemini: AGREE</span>
-                </div>
-              </div>
-
               {/* RAG Evaluation */}
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-slate-800 p-3 rounded-lg text-center border border-slate-700">
-                  <div className="text-xs text-slate-500">MRR@5</div>
+                  <div className="text-xs text-slate-500">Retrieval Score</div>
                   <div className="text-xl font-bold text-cyan-400">0.85</div>
                 </div>
 
                 <div className="bg-slate-800 p-3 rounded-lg text-center border border-slate-700">
-                  <div className="text-xs text-slate-500">Precision@3</div>
+                  <div className="text-xs text-slate-500">Faithfulness Score</div>
                   <div className="text-xl font-bold text-cyan-400">0.66</div>
                 </div>
 
                 <div className="bg-slate-800 p-3 rounded-lg text-center border border-slate-700">
-                  <div className="text-xs text-slate-500">Recall@3</div>
+                  <div className="text-xs text-slate-500">Answer Relevance</div>
                   <div className="text-xl font-bold text-cyan-400">0.75</div>
                 </div>
               </div>

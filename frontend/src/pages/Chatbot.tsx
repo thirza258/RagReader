@@ -2,6 +2,7 @@ import { useState } from "react";
 import service from "../services/service";
 import ReactMarkdown from "react-markdown";
 import { ChatResponse } from "../interface";
+import { useNavigate } from "react-router-dom";
 
 import { ChatMessage } from "../components/ui/chatmessage";
 import { Message } from "../types/types";
@@ -11,6 +12,7 @@ function Chatbot() {
   const [input, setInput] = useState<string>("");
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   
+  const navigate = useNavigate();
 
   const sendMessage = async (): Promise<void> => {
     if (!input.trim() || chatLoading) return;
@@ -25,16 +27,17 @@ function Chatbot() {
     setChatLoading(true);
   
     try {
-      const response: ChatResponse = await service.generateChat(input);
+      const username = localStorage.getItem("username") || "";
+      // const response: ChatResponse = await service.generateChat(input, username);
   
-      if (response.status !== 200) {
-        throw new Error(response.message);
-      }
+      // if (response.status !== 200) {
+      //   throw new Error(response.message);
+      // }
   
       const botMessage: Message = {
         user: "bot",
-        text: response.data,
-        // evalScore can be injected here later if backend returns it
+        text: "The Battle of Surabaya occurred in November 1945 and involved Indonesian militias resisting British-led Allied troops. The conflict resulted in heavy casualties and is commemorated annually as Heroes’ Day in Indonesia.",
+        
       };
   
       setMessages((prev) => [...prev, botMessage]);
@@ -62,11 +65,8 @@ function Chatbot() {
           key={index}
           user={msg.user}
           text={msg.text}
-          evalScore={msg.evalScore} 
           onDeepAnalysis={
-            msg.evalScore
-              ? () => console.log("Deep analysis for message", index)
-              : undefined
+            () => navigate("/deep-result")
           }
         />
       ))}
