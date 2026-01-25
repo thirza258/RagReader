@@ -26,7 +26,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           }
         `}
       >
-        {/* Message content */}
         <ReactMarkdown>{text}</ReactMarkdown>
 
         {/* Optional evaluation metrics */}

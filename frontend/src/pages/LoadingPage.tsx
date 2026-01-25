@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom"; // Assuming React Router
+import React, { useEffect, useState, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom"; 
 import { Loader2, CheckCircle2, XCircle, Terminal } from "lucide-react";
+import service from "../services/service";
 
-// Types matching your Django Job model
 type JobStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
 
-interface JobResponse {
+interface JobResponse { 
   job_id: string;
   status: JobStatus;
   progress: number;
@@ -14,18 +14,15 @@ interface JobResponse {
 
 const LoadingPage: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  
-  // Retrieve job_id passed from the previous page (OpenChatView response)
-  // Fallback is for testing purposes
-  const jobId = location.state?.job_id || "no-job-id"; 
+
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<JobStatus>("PENDING");
   const [message, setMessage] = useState("Initializing connection...");
   const [error, setError] = useState<string | null>(null);
 
-  // Dynamic message based on progress/status
+
   useEffect(() => {
     if (status === "FAILED") {
       setMessage("Initialization Failed");
@@ -43,60 +40,82 @@ const LoadingPage: React.FC = () => {
     else setMessage("Finalizing setup...");
   }, [progress, status]);
 
-  // Polling Logic
+  
+  const username = localStorage.getItem("username");
+
+  useEffect(() => {
+    if (!username) {
+      navigate("/error", {
+        state: {
+          status: 401,
+          error: "Unauthorized",
+          message: "Please login to continue.",
+        },
+      });
+    }
+  }, [username, navigate]);
+
+    const startedRef = useRef(false);
+
+    useEffect(() => {
+      if (!username || startedRef.current) return;
+      startedRef.current = true;
+    
+      const startChat = async () => {
+        try {
+          const response = await service.openChat(username);
+          const job = response?.data;
+    
+          if (!job?.job_id) {
+            throw new Error("Invalid open-chat response");
+          }
+    
+          setJobId(job.job_id);
+          setStatus(job.status);
+          setProgress(job.progress);
+        } catch (err) {
+          console.error("Open chat failed:", err);
+          setError("Failed to start chat initialization");
+        }
+      };
+    
+      startChat();
+    }, [username]);
+  
+
   useEffect(() => {
     if (!jobId) return;
-
+  
     const pollInterval = setInterval(async () => {
       try {
-        // Replace with your actual API endpoint
-        // const response = await fetch(`/api/job-status/${jobId}/`); 
-        
-        // --- MOCK RESPONSE FOR DEMO (Remove this in production) ---
-        // Simulating the backend moving from 0 to 100
-        const mockResponse: JobResponse = await new Promise((resolve) => {
-            // This logic just simulates the Celery task progress
-            resolve({
-                job_id: jobId,
-                status: progress >= 100 ? "READY" : "PROCESSING",
-                progress: Math.min(progress + 15, 100),
-            });
-        });
-        const data = mockResponse;
-        // -----------------------------------------------------------
-
-        // UNCOMMENT REAL LOGIC:
-        /*
-        const res = await fetch(`http://localhost:8000/api/job-status/${jobId}`);
-        if (!res.ok) throw new Error("Network response was not ok");
-        const data = await res.json();
-        */
-
-        setStatus(data.status);
-        setProgress(data.progress);
-
-        if (data.status === "READY") {
+        const response = await service.getJobStatus(jobId);
+  
+        const job = response?.data;
+        if (!job) throw new Error("Invalid job status payload");
+  
+        setStatus(job.status);
+        setProgress(job.progress);
+  
+        if (job.status === "READY") {
           clearInterval(pollInterval);
-          // Wait a moment for the user to see 100% before redirecting
+  
           setTimeout(() => {
-             // Navigate to your Chat UI
-             console.log("Redirecting to chat...");
-             // navigate("/chat"); 
+            console.log("Redirecting to chat...");
+            navigate("/chat");
           }, 800);
-        } else if (data.status === "FAILED") {
+  
+        } else if (job.status === "FAILED") {
           clearInterval(pollInterval);
-          setError(data.error || "An unknown error occurred.");
+          setError(job.error || "Initialization failed");
         }
-
+  
       } catch (err) {
         console.error("Polling error:", err);
-        // Don't clear interval immediately on network blip, 
-        // but maybe after X retries. For now, we just log.
       }
-    }, 2000); // Poll every 2 seconds
-
+    }, 2000);
+  
     return () => clearInterval(pollInterval);
-  }, [jobId, progress, navigate]); // Added progress to dep array for the mock logic to work
+  }, [jobId, navigate]);
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background text-foreground p-4">
@@ -136,7 +155,9 @@ const LoadingPage: React.FC = () => {
             <p className="text-sm text-muted-foreground">
               {status === "FAILED" 
                 ? "Please check the logs or try again later."
-                : `Job ID: ${jobId.slice(0, 8)}...`}
+                : jobId
+                  ? `Job ID: ${jobId.slice(0, 8)}...`
+                  : "Job ID: ???"}
             </p>
           </div>
 

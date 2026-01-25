@@ -53,10 +53,8 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
 
   return (
     <div className={`relative ${className}`}>
-      {/* Main Card */}
       <div className="relative z-10 bg-slate-900 border border-slate-700 rounded-2xl p-4 shadow-2xl  ">
         
-        {/* Header (Window Controls + Title) */}
         <div className="flex items-center gap-3 mb-4 border-b border-slate-700 pb-4">
           <div className="flex gap-1.5">
             <div className="w-3 h-3 rounded-full bg-red-500" />
@@ -77,7 +75,6 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
           </div>
           
           
-          {/* Answer Section */}
           <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
             <div className="text-xs text-slate-400 mb-1 uppercase tracking-wider">Generated Answer</div>
             <div className="text-white font-medium text-sm leading-relaxed">
@@ -85,7 +82,6 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
             </div>
           </div>
 
-          {/* Retrieved Chunks Section */}
           <div className="space-y-2">
             <div className="text-xs text-slate-400 uppercase tracking-wider">Retrieved Context</div>
             
@@ -106,9 +102,6 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
             )}
           </div>
 
-
-
-          {/* RAG Evaluation Metrics */}
           {evaluationMetrics.length > 0 && (
             <div className={`grid gap-2 ${evaluationMetrics.length <= 3 ? `grid-cols-${evaluationMetrics.length}` : 'grid-cols-3'}`}>
               {evaluationMetrics.map((metric, idx) => (

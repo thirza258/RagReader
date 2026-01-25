@@ -20,6 +20,7 @@ import service from "../services/service";
 import NavBar from "../components/Navbar";
 import { useNavigate } from "react-router-dom";
 import { SubmitPayload } from "../types/types";
+import { AxiosError } from "axios";
 
 import FileSubmit from "../components/FileSubmit";
 
@@ -62,20 +63,33 @@ const LandingPage: React.FC = () => {
       navigate("/login");
       return;
     }
-  
+    try {
     switch (payload.type) {
       case "file":
         await service.submitFile(payload.file, username);
         break;
+  
       case "url":
         await service.submitURL(payload.url, username);
         break;
+  
       case "text":
         await service.submitText(payload.text, username);
         break;
     }
-  
-    navigate("/main");
+    navigate("/loading");
+    } catch (error) {
+      navigate("/error", {
+        state: {
+          status: (error instanceof AxiosError && error.response?.status) ? error.response.status : 500,
+          error: "Failed to submit",
+          message:
+            error instanceof AxiosError
+              ? error.response?.data?.message || error.message || "Failed to submit."
+              : (error as Error)?.message || "Failed to submit.",
+        }
+      });
+    }
   };
 
   // Mock functions for FileSubmit
@@ -136,7 +150,6 @@ const LandingPage: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              {/* Answer Section */}
               <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                 <div className="text-xs text-slate-400 mb-1">Answer</div>
                 <div className="text-white font-semibold">

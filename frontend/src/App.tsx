@@ -21,12 +21,10 @@ function App() {
           <Route path="/" element={<LandingPage />} />
         </Route>
 
-        {/* Chat */}
         <Route element={<ChatLayout />}>
           <Route path="/chat" element={<Chatbot />} />
         </Route>
 
-        {/* Deep Result */}
         <Route element={<DeepResultLayout />}>
           <Route
             path="/deep-result/:conversationId"
@@ -34,17 +32,14 @@ function App() {
           />
         </Route>
 
-        {/* Deep Analysis */}
         <Route element={<DeepResultLayout />}>
           <Route path="/deep-result" element={<DeepResult />} />
         </Route>
 
-        {/* Login */}
         <Route element={<LoginPageLayout />}>
           <Route path="/login" element={<LoginPage />} />
         </Route>
 
-        {/* Error */}
         <Route element={<LandingPageLayout />}>
           <Route path="/error" element={<ErrorPage />} />
         </Route>

@@ -89,6 +89,12 @@ const openChat = async (
     return response.data;
 };
 
+const getJobStatus = async (
+    jobId: string
+) => {
+    const response = await apiClient.get(`/job-status/${jobId}/`);
+    return response.data;
+};
 
 
 const cleanSystem = async () => {
@@ -104,4 +110,5 @@ export default {
     signUp,
     submitText,
     openChat,
+    getJobStatus,
 };

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import service from "../services/service";
-import ReactMarkdown from "react-markdown";
 import { ChatResponse } from "../interface";
 import { useNavigate } from "react-router-dom";
 
@@ -28,28 +27,28 @@ function Chatbot() {
   
     try {
       const username = localStorage.getItem("username") || "";
-      // const response: ChatResponse = await service.generateChat(input, username);
+      const response: ChatResponse = await service.generateChat(input, username);
   
-      // if (response.status !== 200) {
-      //   throw new Error(response.message);
-      // }
+      if (response.status !== 200) {
+        throw new Error(response.message);
+      }
   
       const botMessage: Message = {
         user: "bot",
-        text: "The Battle of Surabaya occurred in November 1945 and involved Indonesian militias resisting British-led Allied troops. The conflict resulted in heavy casualties and is commemorated annually as Heroes’ Day in Indonesia.",
-        
+        text: response.data.answer, 
       };
   
       setMessages((prev) => [...prev, botMessage]);
     } catch (error) {
       console.error("Error fetching AI response:", error);
   
-      const errorMessage: Message = {
-        user: "bot",
-        text: "Sorry, something went wrong.",
-      };
-  
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          user: "bot",
+          text: "Sorry, something went wrong.",
+        },
+      ]);
     } finally {
       setChatLoading(false);
     }
