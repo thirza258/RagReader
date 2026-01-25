@@ -109,7 +109,7 @@ class HybridRAGPipeline(BasePipeline):
             user = GuestUser.objects.filter(username=username).first()
             if not user:
                 return None
-            return Document.objects.filter(user=user).first()
+            return Document.objects.filter(user=user).last()
         except Exception as e:
             logger.error(f"Error getting document for {username}: {e}")
             return None
@@ -135,7 +135,7 @@ class HybridRAGPipeline(BasePipeline):
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
-        doc_vector = DocumentVector.objects.filter(document=document, status="ready").first()
+        doc_vector = DocumentVector.objects.filter(document=document, status="ready").last()
         if doc_vector:
             # It exists, just load it into memory
             logger.info("Existing index found. Loading into memory.")

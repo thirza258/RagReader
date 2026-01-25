@@ -1,5 +1,5 @@
 from django.db import models
-
+import uuid
 # Create your models here.e
 
 class GuestUser(models.Model):
@@ -78,6 +78,31 @@ class ConversationHistory(models.Model):
 
     def __str__(self):
         return str(self.conversation_id)
+
+class Job(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING"
+        PROCESSING = "PROCESSING"
+        READY = "READY"
+        FAILED = "FAILED"
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    progress = models.PositiveSmallIntegerField(default=0)
+    user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, null=True, blank=True) 
+    vectorstore = models.ForeignKey(VectorStore, on_delete=models.CASCADE, null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.id} - {self.status}"
+
+    def mark_failed(self, message: str):
+        self.status = self.Status.FAILED
+        self.error_message = message
+        self.save(update_fields=["status", "error_message", "updated_at"])
+
 
 class Metadata(models.Model):
     llm_model = models.CharField(max_length=100, default="gpt-4o", help_text="LLM for answer generation")

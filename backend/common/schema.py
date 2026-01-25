@@ -46,11 +46,21 @@ class RAGResponse(BaseModel):
             "status": 200,
             "message": "Response generated successfully",
             "timestamp": time.time(),
-            "data": {
-                "response": response
-            }
+            "data": response
         }
         , status=200
+        , content_type="application/json"
+        )
+    
+    @staticmethod
+    def response_202(message: dict | str): 
+        return JsonResponse({
+            "status": 202,
+            "message": "Chat initialization started.",
+            "timestamp": time.time(),
+            "data": message
+        }
+        , status=202
         , content_type="application/json"
         )
 
@@ -60,9 +70,7 @@ class RAGResponse(BaseModel):
             "status": 400,
             "message": error,
             "timestamp": time.time(),
-            "data": {
-                "response": None
-            }
+            "data": None
         }
         , status=400
         , content_type="application/json"
@@ -74,9 +82,7 @@ class RAGResponse(BaseModel):
             "status": 500,
             "message": error,
             "timestamp": time.time(),
-            "data": {
-                "response": None
-            }
+            "data": None
         }
         , status=500
         , content_type="application/json"
@@ -88,9 +94,7 @@ class RAGResponse(BaseModel):
             "status": 404,
             "message": error,
             "timestamp": time.time(),
-            "data": {
-                "response": None
-            }
+            "data": None
         }
         , status=404
         , content_type="application/json"
@@ -102,9 +106,7 @@ class RAGResponse(BaseModel):
             "status": 201,
             "message": "Object created successfully",
             "timestamp": time.time(),
-            "data": {
-                "response": response
-            }
+            "data": response
         }
         , status=201
         , content_type="application/json"

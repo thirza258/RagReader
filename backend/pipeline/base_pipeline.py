@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from router.models import Document
+from router.models import Job
 
 class BasePipeline(ABC):
     """
@@ -22,7 +23,7 @@ class BasePipeline(ABC):
         """
         Gets the document from the database.
         """
-        return Document.objects.filter(user=username).first()
+        
 
     @abstractmethod
     def _save_state(self, path: str):

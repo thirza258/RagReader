@@ -24,7 +24,6 @@ class DenseRAGPipeline(BasePipeline):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         
-        # 1. Initialize Components
         self.rag = DenseRAG(config)
         self.llm = OpenAILLM(
             model=config.get("llm_model", "gpt-4o"),
@@ -38,8 +37,6 @@ class DenseRAGPipeline(BasePipeline):
         )
         self.loader = DataLoader()
 
-        # Base path for storing vector files (pickled)
-        # Ensure this directory exists
         self.vector_store_root = config.get("vector_store_path", "./vector_stores")
         os.makedirs(self.vector_store_root, exist_ok=True)
 
@@ -55,8 +52,10 @@ class DenseRAGPipeline(BasePipeline):
         try:
             with open(path, "rb") as f:
                 data = pickle.load(f)
-            self.rag.documents = data["documents"]
-            self.rag.document_vectors = data["vectors"]
+
+            logger.info(f"KEYS FOUND IN PICKLE: {list(data.keys())}") 
+            self.rag.documents = data.get('documents', [])
+            self.rag.document_vectors = data.get('vectors', [])
             return True
         except Exception as e:
             logger.error(f"Error loading state from {path}: {e}")
@@ -67,7 +66,7 @@ class DenseRAGPipeline(BasePipeline):
             user = GuestUser.objects.filter(username=username).first()
             if not user:
                 return None
-            return Document.objects.filter(user=user).first()
+            return Document.objects.filter(user=user).last()
         except Exception as e:
             logger.error(f"Error getting document for {username}: {e}")
             return None
@@ -75,9 +74,64 @@ class DenseRAGPipeline(BasePipeline):
     def optimize_query(self, query: str) -> str:
         """
         Optimizes the query for better retrieval.
+        Returns ONLY the optimized string.
         """
-        prompt = f"Optimize the following query for better retrieval: {query}"
-        return self.llm.prompt_generate(prompt)
+        # 1. Strict Prompt Engineering
+        prompt = (
+            "You are a query optimization tool for a Vector Database. "
+            "Your task is to rewrite the user's input into a single, keyword-rich sentence "
+            "that is optimized for cosine similarity search."
+            "\n\n"
+            "Rules:\n"
+            "1. Output ONLY the rewritten query.\n"
+            "2. Do NOT provide explanations, bullet points, or numbering.\n"
+            "3. Do NOT use quotes around the output.\n"
+            "4. Keep the language the same as the input.\n"
+            "\n"
+            f"Input: {query}\n"
+            "Output:"
+        )
+        
+        # 2. Generate
+        raw_response = self.llm.prompt_generate(prompt)
+        
+        # 3. Validation & Cleaning (The "Safety Net")
+        optimized_query = self._validate_and_clean_query(raw_response, query)
+        
+        logger.info(f"Original Query: '{query}' -> Optimized: '{optimized_query}'")
+        return optimized_query
+
+    def _validate_and_clean_query(self, response: str, original_query: str) -> str:
+        """
+        Ensures the response is a clean, single-line string.
+        If the LLM hallucinates or fails, fallback to the original query.
+        """
+        if not response:
+            return original_query
+
+        # Step 1: Remove leading/trailing whitespace
+        cleaned = response.strip()
+
+        # Step 2: Remove accidental quotes (e.g., "DeepWiki definition")
+        cleaned = cleaned.replace('"', '').replace("'", "")
+
+        # Step 3: Ensure it is only one line
+        if "\n" in cleaned:
+            # If the LLM still gave a list, take the first line
+            cleaned = cleaned.split("\n")[0]
+
+        # Step 4: Remove conversational prefixes (rare with good prompts, but possible)
+        prefixes = ["Here is", "Optimized query:", "Answer:"]
+        for prefix in prefixes:
+            if cleaned.lower().startswith(prefix.lower()):
+                cleaned = cleaned[len(prefix):].strip()
+
+        # Step 5: Sanity Check - If result is suspiciously long (e.g., an explanation), fail safe.
+        if len(cleaned) > 200: 
+            logger.warning(f"Optimization failed (result too long). Fallback to original.")
+            return original_query
+
+        return cleaned
 
     def init(self, username: str) -> bool:
         """
@@ -93,7 +147,7 @@ class DenseRAGPipeline(BasePipeline):
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
-        doc_vector = DocumentVector.objects.filter(document=document, status="ready").first()
+        doc_vector = DocumentVector.objects.filter(document=document, status="ready").last()
         if doc_vector:
             # It exists, just load it into memory
             logger.info("Existing index found. Loading into memory.")
@@ -145,17 +199,20 @@ class DenseRAGPipeline(BasePipeline):
             if not document:
                 raise ValueError(f"No document found for user: {username}")
             
-            doc_vector = DocumentVector.objects.filter(document=document, status="ready").first()
+            doc_vector = DocumentVector.objects.filter(document=document, status="ready").last()
             if not doc_vector:
                 raise ValueError("No ready index found for this user.")
 
             success = self._load_state(doc_vector.vectorstore_location)
             if not success:
                 raise RuntimeError("Index record exists but file load failed.")
+
+            if not self.rag.documents or len(self.rag.documents) == 0:
+                raise RuntimeError("State loaded from disk, but memory is still empty. The .pkl file might be corrupt or empty.")
         
-        # 2. Retrieve
         optimized_query = self.optimize_query(query)
         retrieved_docs = self.rag.retrieve(optimized_query)
+        logger.info(f"Retrieved documents: {retrieved_docs}")
 
         if not retrieved_docs:
             raise ValueError("No relevant documents found.")
@@ -168,4 +225,88 @@ class DenseRAGPipeline(BasePipeline):
         }
        
 
-    
+    def init_job(self, username: str, job=None) -> bool:
+        """
+        job: Instance of Job model (optional)
+        """
+        logger.info(f"Initializing Chat for {username}...")
+        
+        # Update Progress: Started
+        if job:
+            job.progress = 10
+            job.save()
+
+        document = self.get_document(username)
+        if not document:
+            raise ValueError(f"No document found for user: {username}")
+
+        doc_vector = DocumentVector.objects.filter(document=document, status="ready").last()
+        
+        if doc_vector:
+            logger.info("Existing index found. Loading into memory.")
+            
+            # Update Progress: Loading
+            if job:
+                job.progress = 80
+                job.save()
+            
+            logger.info(f"Loading state from {doc_vector.vectorstore_location}")
+            success = self._load_state(doc_vector.vectorstore_location)
+            if not success:
+                logger.error("Index record exists but file load failed.")
+                raise RuntimeError("Index record exists but file load failed.")
+            logger.info(f"State loaded successfully from {doc_vector.vectorstore_location}")
+            logger.info(f"Documents: {self.rag.documents}")
+            logger.info(f"Document vectors: {self.rag.document_vectors}")
+            return True
+
+        # --- Heavy Operation Start ---
+        logger.info("Creating new index (Embedding)...")
+        
+        if job:
+            job.progress = 20
+            job.save()
+        logger.info(f"Loading text from {document.extracted_text_path}")
+        print(document.extracted_text_path)
+        if not document.extracted_text_path:
+            raise ValueError("Document has no text source path.")
+
+
+        # Load & Chunk
+        raw_text = self.loader.load(document.extracted_text_path)
+        
+        if job:
+            job.progress = 40
+            job.save()
+
+        chunks = self.chunker.chunk(raw_text)
+
+        # Embedding (The slowest part)
+        if job:
+            job.progress = 50
+            job.save()
+            
+        self.rag.index_documents(chunks)
+        
+        if job:
+            job.progress = 90
+            job.save()
+
+        # Save to Disk
+        file_name = f"{username}_{document.pk}_dense_{uuid.uuid4().hex[:6]}.pkl"
+        save_path = os.path.join(self.vector_store_root, file_name)
+        self._save_state(save_path)
+
+        # Save to DB
+        vs, _ = VectorStore.objects.get_or_create(base_path=self.vector_store_root)
+        DocumentVector.objects.create(
+            document=document,
+            vectorstore=vs,
+            vectorstore_location=save_path,
+            document_location=document.extracted_text_path,
+            status="ready"
+        )
+        
+        # Note: Task will set progress to 100% upon return
+        logger.info("Initialization Complete.")
+        return True
