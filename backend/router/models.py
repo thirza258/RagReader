@@ -119,4 +119,22 @@ class Metadata(models.Model):
     device = models.CharField(max_length=20, default="cuda", help_text="Device to use - 'cuda' or 'cpu'")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+class AnalysisBatch(models.Model):  
+    user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
+    query = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    total_variants = models.IntegerField(default=0) 
+
+class AnalysisResult(models.Model):
+    batch = models.ForeignKey(AnalysisBatch, related_name='results', on_delete=models.CASCADE)
+    method = models.CharField(max_length=100)
+    ai_model = models.CharField(max_length=100)
+    answer = models.TextField()
+    retrieved_chunks = models.JSONField(default=list) 
+    model_agreement = models.JSONField(default=list)
+    evaluation_metrics = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']

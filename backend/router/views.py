@@ -3,7 +3,9 @@ from rest_framework.views import APIView
 from utils.helper import _document_base_path, conversation_id_generator
 from router.models import (
     Document, 
-    GuestUser, Job)
+    GuestUser, Job,
+    AnalysisBatch, AnalysisResult
+)
 from utils.insert_file import get_loader
 from rag.rag_service import rag_registry
 from router.serializers import (InsertDataSerializer, 
@@ -16,7 +18,7 @@ from common.schema import get_responses
 from rest_framework.parsers import MultiPartParser, FormParser
 
 from router.models import Job
-from router.tasks import initialize_rag_task
+from router.tasks import initialize_rag_task, run_single_analysis
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework import status
@@ -187,8 +189,72 @@ class QueryView(GenericAPIView):
             if last_job.status != Job.Status.READY:
                  return get_responses().response_400(error=f"System is still initializing. Current status: {last_job.status}")
 
-            # 2. Run the RAG
             answer = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).run(username, query)
             return get_responses().response_200(response=answer)
         except Exception as e:
             return get_responses().response_500(error=str(e))
+
+class StartAnalysisView(GenericAPIView):
+    serializer_class = QuerySerializer
+
+    def post(self, request):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)  # pyright: ignore[reportUnreachable]
+            username = serializer.validated_data["USER"]
+            query = serializer.validated_data["QUERY"]
+
+            batch = AnalysisBatch.objects.create(
+                user=request.user, 
+                query=query,
+                total_variants=len(CONFIG_VARIANTS)
+            )
+
+            for config in CONFIG_VARIANTS:
+                run_single_analysis.delay(  # pyright: ignore[reportUnreachable]
+                    batch_id=batch.id,
+                    username=username,
+                    query=query,
+                    variant_config=config
+                )
+
+            response = {
+                "message": "Analysis started",
+                "batch_id": batch.id,
+                "expected_count": len(CONFIG_VARIANTS)
+            }
+            return get_responses().response_202(message=response)
+        except Exception as e:
+            return get_responses().response_500(error=str(e))
+
+
+class AnalysisStatusView(GenericAPIView):
+    def get(self, request, batch_id):
+        try:
+            batch = AnalysisBatch.objects.get(id=batch_id)
+        except AnalysisBatch.DoesNotExist:
+            return Response({"error": "Batch not found"}, status=404)
+
+        results = batch.results.all()
+        
+        data = []
+        for res in results:
+            data.append({
+                "method": res.method,
+                "aiModel": res.ai_model,
+                "query": batch.query,
+                "answer": res.answer,
+                "retrievedChunks": res.retrieved_chunks,
+                "modelAgreement": res.model_agreement,
+                "evaluationMetrics": res.evaluation_metrics
+            })
+
+        progress = (len(data) / batch.total_variants) * 100 if batch.total_variants > 0 else 0
+        is_complete = len(data) == batch.total_variants
+
+        return get_responses().response_200(response={
+            "batch_id": batch_id,
+            "progress": progress,
+            "is_complete": is_complete,
+            "data": data 
+        })

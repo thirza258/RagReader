@@ -46,11 +46,13 @@ CORS_ALLOW_CREDENTIALS = True
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "channels",
     "django.contrib.staticfiles",
     "rest_framework",
     "router",
@@ -90,6 +92,17 @@ CORS_ALLOW_HEADERS = [
 ]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
+        },
+    },
+}
 
 CACHES = {
     "default": {
@@ -133,7 +146,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "ragreader.wsgi.application"
-
+ASGI_APPLICATION = "ragreader.asgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
