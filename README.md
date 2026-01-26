@@ -6,6 +6,46 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 
 ---
 
+## How to Run This App
+
+### Prerequisites
+- **Python 3.9+** and **npm** installed.
+- **Redis server** installed and running.
+
+### Steps
+
+1. **Start Redis server**  
+   Make sure Redis is running.  
+   ```bash
+   # Start your local Redis (example for Linux/macOS):
+   redis-server
+   # Check if Redis is running:
+   redis-cli ping
+   # Should output: PONG
+   ```
+
+2. **Start Celery worker**  
+   From the backend directory, start a Celery worker for background tasks:  
+   ```bash
+   celery -A ragreader worker --loglevel=info
+   ```
+
+3. **Run Django backend**  
+   Start the backend server:  
+   ```bash
+   python manage.py runserver
+   ```
+
+4. **Run the frontend**  
+   From the frontend directory, start the development server:  
+   ```bash
+   npm install     # Only needed on first run
+   npm run dev
+   ```
+
+Once all services are running, access the app at [http://localhost:5173](http://localhost:5173) (or as indicated in the terminal).
+
+
 ## Key Features
 
 ### 1. Standard Mode (Fast & Efficient)
