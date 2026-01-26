@@ -29,7 +29,7 @@ const Navbar: React.FC = () => {
 
   const handleLogout = () => {
     localStorage.removeItem("username");
-    localStorage.removeItem("token"); // Clean up other auth items if needed
+    localStorage.removeItem("token"); 
     setUsername(null);
     navigate("/login");
   };

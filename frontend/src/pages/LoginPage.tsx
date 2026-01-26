@@ -18,12 +18,12 @@ const LoginPage: React.FC = () => {
         if (response.status !== 200 && response.status !== 201) {
           throw new Error(response.message);
         }
-        const payload = response.data.response;
- 
-        localStorage.setItem("username", payload.username);
-        localStorage.setItem("email", payload.email);
+        const { username, email } = response.data;
 
-        navigate("/home");
+        localStorage.setItem("username", username);
+        localStorage.setItem("email", email);
+
+        navigate("/");
       })
       .catch(error => {
         navigate("/error", {

@@ -11,6 +11,7 @@ import Chatbot from "./pages/Chatbot";
 import DeepResult from "./pages/DeepResult";
 import LoginPage from "./pages/LoginPage";
 import ErrorPage from "./pages/ErrorPage";
+import LoadingPage from "./pages/LoadingPage";
 
 function App() {
   return (
@@ -42,6 +43,10 @@ function App() {
 
         <Route element={<LandingPageLayout />}>
           <Route path="/error" element={<ErrorPage />} />
+        </Route>
+
+        <Route element={<LandingPageLayout />}>
+          <Route path="/loading" element={<LoadingPage />} />
         </Route>
 
       </Routes>
