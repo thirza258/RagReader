@@ -51,30 +51,29 @@ jobs:
           mkdir -p ~/rag_app
           cd ~/rag_app
 
-          cat <<ENV > .env
-          DEBUG=false
-          DEVELOPMENT_MODE=false
+          echo "DEBUG=false" > .env
+          echo "DEVELOPMENT_MODE=false" >> .env
 
-          DB_NAME=${{ secrets.DB_NAME }}
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_PORT=5432
+          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+          echo "DB_USER=${{ secrets.DB_USER }}" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_PORT=5432" >> .env
 
-          BACKEND_PORT=${{ secrets.BACKEND_PORT }}
+          echo "BACKEND_PORT=${{ secrets.BACKEND_PORT }}" >> .env
 
-          DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@postgres:5432/${{ secrets.DB_NAME }}
+          echo "DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@postgres:5432/${{ secrets.DB_NAME }}" >> .env
 
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          OPEN_ROUTER_KEY=${{ secrets.OPEN_ROUTER_KEY }}
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          echo "OPEN_ROUTER_KEY=${{ secrets.OPEN_ROUTER_KEY }}" >> .env
 
-          LANGSMITH_TRACING=false
-          ENV
+          echo "LANGSMITH_TRACING=false" >> .env
+          echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> .env
+          echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
+          echo "LANGSMITH_PROJECT=${{ secrets.LANGSMITH_PROJECT }}" >> .env
 
           mkdir -p frontend
-          cat <<ENV > frontend/.env
-          VITE_API_URL=http://backend:${{ secrets.BACKEND_PORT }}
-          VITE_API_VERSION=v1
-          ENV
+          echo "VITE_API_URL=http://backend:${{ secrets.BACKEND_PORT }}" > frontend/.env
+          echo "VITE_API_VERSION=v1" >> frontend/.env
 
           cat <<COMPOSE > docker-compose.prod.yml
           services:
