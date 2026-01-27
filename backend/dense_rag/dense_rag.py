@@ -27,9 +27,8 @@ class DenseRAG(BaseRAG):
         self.top_k = config.get("top_k", 3)
         self.model = config.get("model", "text-embedding-3-small")
         
-        # 3. In-Memory Vector Store (Replace with Chroma/Pinecone for production)
-        self.documents = []  # Stores the actual text
-        self.document_vectors = None # Stores the numpy arrays
+        self.documents = []  
+        self.document_vectors = None #
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """

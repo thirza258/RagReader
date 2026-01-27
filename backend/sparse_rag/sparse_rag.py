@@ -1,74 +1,80 @@
+import pickle
+import os
+import re
 from typing import List, Dict, Any
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from rank_bm25 import BM25Okapi
 from rag.base_rag import BaseRAG
+
+try:
+    nltk.data.find('corpora/stopwords')
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('stopwords', quiet=True)
+    nltk.download('punkt', quiet=True)
 
 class SparseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):
         """
-        Initializes the SparseRAG engine with TF-IDF.
-        
-        Config arguments expected:
-        - top_k: (int) Number of documents to retrieve. Default is 3.
-        - remove_stop_words: (bool) Whether to remove English stop words. Default is True.
+        Initializes the SparseRAG engine with BM25.
         """
         super().__init__(config)
         self.documents = []
-        self.vectorizer = None
-        self.tfidf_matrix = None
+        self.bm25 = None
         
-        # Configuration defaults
         self.top_k = config.get("top_k", 3)
-        self.remove_stop_words = "english" if config.get("remove_stop_words", True) else None
+        
+        if config.get("remove_stop_words", True):
+            self.stop_words = set(stopwords.words('english'))
+        else:
+            self.stop_words = set()
+
+    def _tokenize(self, text: str) -> List[str]:
+        """
+        Helper to lowercase, remove punctuation, and tokenize text.
+        """
+        text = re.sub(f'[^a-zA-Z0-9\s]', '', text.lower())
+        tokens = word_tokenize(text)
+        return [w for w in tokens if w not in self.stop_words]
 
     def index_documents(self, documents: List[str]) -> None:
         """
-        Builds the TF-IDF matrix for the provided documents.
+        Builds the BM25 index for the provided documents.
         """
-        print(f"Indexing {len(documents)} documents using TF-IDF...")
+        if not documents:
+            print("Warning: Document list is empty.")
+            return
+
+        print(f"Indexing {len(documents)} documents using BM25...")
         
         self.documents = documents
+        tokenized_corpus = [self._tokenize(doc) for doc in documents]
         
-        # Initialize the vectorizer
-        # You can add n_gram_range=(1, 2) here if you want to capture phrases
-        self.vectorizer = TfidfVectorizer(stop_words=self.remove_stop_words)
-        
-        # Fit and transform the documents into a sparse matrix
-        # This creates a matrix where rows are documents and columns are tokens
         try:
-            self.tfidf_matrix = self.vectorizer.fit_transform(documents)
+            self.bm25 = BM25Okapi(tokenized_corpus)
             print("Indexing complete.")
-        except ValueError as e:
-            print(f"Error during indexing (list might be empty): {e}")
+        except Exception as e:
+            print(f"Error during indexing: {e}")
 
     def retrieve(self, query: str) -> List[str]:
         """
-        Retrieves the top-k documents based on Cosine Similarity of TF-IDF vectors.
+        Retrieves the top-k documents based on BM25 scores.
         """
-        if self.vectorizer is None or self.tfidf_matrix is None:
+        if self.bm25 is None:
             print("Warning: No documents indexed.")
             return []
+            
+        tokenized_query = self._tokenize(query)
+        
+        scores = self.bm25.get_scores(tokenized_query)
+        
+        top_indices = scores.argsort()[-self.top_k:][::-1]
 
-        # 1. Transform the query into the same vector space as the documents
-        query_vector = self.vectorizer.transform([query])
-
-        # 2. Calculate Cosine Similarity between query and all docs
-        # Result shape is (1, number_of_documents)
-        similarity_scores = cosine_similarity(query_vector, self.tfidf_matrix).flatten()
-
-        # 3. Sort results
-        # argsort returns indices of values sorted in ascending order
-        # We take the last 'top_k' indices and reverse them ([::-1]) to get descending order
-        top_indices = similarity_scores.argsort()[-self.top_k:][::-1]
-
-        # 4. Filter out results with 0 similarity (irrelevant docs)
         relevant_docs = []
         for idx in top_indices:
-            if similarity_scores[idx] > 0:
+            if scores[idx] > 0:
                 relevant_docs.append(self.documents[idx])
-            else:
-                # If the score is 0, the document shares no keywords with the query
-                continue
                 
         return relevant_docs

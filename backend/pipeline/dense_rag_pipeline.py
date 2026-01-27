@@ -53,76 +53,12 @@ class DenseRAGPipeline(BasePipeline):
             with open(path, "rb") as f:
                 data = pickle.load(f)
 
-            logger.info(f"KEYS FOUND IN PICKLE: {list(data.keys())}") 
             self.rag.documents = data.get('documents', [])
             self.rag.document_vectors = data.get('vectors', [])
             return True
         except Exception as e:
             logger.error(f"Error loading state from {path}: {e}")
             return False
-
-    def get_document(self, username: str) -> Document | None:
-        try:
-            user = GuestUser.objects.filter(username=username).first()
-            if not user:
-                return None
-            return Document.objects.filter(user=user).last()
-        except Exception as e:
-            logger.error(f"Error getting document for {username}: {e}")
-            return None
-
-    def optimize_query(self, query: str) -> str:
-        """
-        Optimizes the query for better retrieval.
-        Returns ONLY the optimized string.
-        """
-        prompt = (
-            "You are a query optimization tool for a Vector Database. "
-            "Your task is to rewrite the user's input into a single, keyword-rich sentence "
-            "that is optimized for cosine similarity search."
-            "\n\n"
-            "Rules:\n"
-            "1. Output ONLY the rewritten query.\n"
-            "2. Do NOT provide explanations, bullet points, or numbering.\n"
-            "3. Do NOT use quotes around the output.\n"
-            "4. Keep the language the same as the input.\n"
-            "\n"
-            f"Input: {query}\n"
-            "Output:"
-        )
-        
-        raw_response = self.llm.prompt_generate(prompt)
-        
-        optimized_query = self._validate_and_clean_query(raw_response, query)
-        
-        logger.info(f"Original Query: '{query}' -> Optimized: '{optimized_query}'")
-        return optimized_query
-
-    def _validate_and_clean_query(self, response: str, original_query: str) -> str:
-        """
-        Ensures the response is a clean, single-line string.
-        If the LLM hallucinates or fails, fallback to the original query.
-        """
-        if not response:
-            return original_query
-
-        cleaned = response.strip()
-
-        cleaned = cleaned.replace('"', '').replace("'", "")
-
-        if "\n" in cleaned:
-            cleaned = cleaned.split("\n")[0]
-
-        prefixes = ["Here is", "Optimized query:", "Answer:"]
-        for prefix in prefixes:
-            if cleaned.lower().startswith(prefix.lower()):
-                cleaned = cleaned[len(prefix):].strip()
-
-        if len(cleaned) > 200: 
-            logger.warning(f"Optimization failed (result too long). Fallback to original.")
-            return original_query
-
-        return cleaned
 
     def init(self, username: str) -> bool:
         """
@@ -150,7 +86,7 @@ class DenseRAGPipeline(BasePipeline):
         if not document.extracted_text_path:
             raise ValueError("Document has no text source path.")
 
-        print(document.extracted_text_path)
+        
         raw_text = self.loader.load(document.extracted_text_path)
         chunks = self.chunker.chunk(raw_text)
 
@@ -210,13 +146,12 @@ class DenseRAGPipeline(BasePipeline):
             "answer": answer,
             "context": retrieved_docs
         }
-       
 
     def init_job(self, username: str, job=None) -> bool:
         """
         job: Instance of Job model (optional)
         """
-        logger.info(f"Initializing Chat for {username}...")
+        logger.info(f"Initializing Dense RAG for {username}...")
         
         if job:
             job.progress = 10
@@ -251,7 +186,6 @@ class DenseRAGPipeline(BasePipeline):
             job.progress = 20
             job.save()
         logger.info(f"Loading text from {document.extracted_text_path}")
-        print(document.extracted_text_path)
         if not document.extracted_text_path:
             raise ValueError("Document has no text source path.")
 

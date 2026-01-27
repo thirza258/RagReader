@@ -24,7 +24,6 @@ from rest_framework.response import Response
 from rest_framework import status
 
 
-
 class InsertDataView(GenericAPIView):
     serializer_class = InsertDataSerializer
     parser_classes = [MultiPartParser, FormParser]
@@ -40,8 +39,6 @@ class InsertDataView(GenericAPIView):
 
     def post(self, request):
         try:
-            print(request.data)
-            print(request.FILES)
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
@@ -123,8 +120,6 @@ class OpenChatView(APIView):
     def post(self, request):
         try:
             username = request.data.get("USER")
-            
-           
             user = GuestUser.objects.get(username=username) 
 
             job = Job.objects.create(
@@ -133,8 +128,8 @@ class OpenChatView(APIView):
                 progress=0
             )
 
-            method = CONFIG_VARIANTS[0]["method"]
-            model_config = CONFIG_VARIANTS[0]["model"]
+            method = CONFIG_VARIANTS[2]["method"]
+            model_config = CONFIG_VARIANTS[2]["model"]
             
             transaction.on_commit(lambda: initialize_rag_task.delay(
                 job_id=str(job.id),
@@ -189,7 +184,7 @@ class QueryView(GenericAPIView):
             if last_job.status != Job.Status.READY:
                  return get_responses().response_400(error=f"System is still initializing. Current status: {last_job.status}")
 
-            answer = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).run(username, query)
+            answer = rag_registry.get_engine(CONFIG_VARIANTS[2]["method"], CONFIG_VARIANTS[2]["model"]).run(username, query)
             return get_responses().response_200(response=answer)
         except Exception as e:
             return get_responses().response_500(error=str(e))

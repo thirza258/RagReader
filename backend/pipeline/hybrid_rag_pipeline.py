@@ -24,17 +24,12 @@ class HybridRAGPipeline(BasePipeline):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         
-        # 1. Initialize Components
-        # HybridRAG initializes its own Sparse and Dense engines internally
         self.rag = HybridRAG(config)
         
         self.llm = OpenAILLM(
             model=config.get("llm_model", "gpt-4o"),
             temperature=config.get("temperature", 0.0)
         )
-        
-        # We need the embedding client for semantic chunking. 
-        # Accessing it via the dense engine inside the hybrid rag.
         embedding_client = getattr(self.rag.dense_engine, 'client', None)
         
         self.chunker = DocumentChunker(
@@ -53,17 +48,12 @@ class HybridRAGPipeline(BasePipeline):
         """
         Saves the state of both the Sparse and Dense engines.
         """
-        # We need to capture the state of both sub-engines
         data = {
             "sparse": {
-                # Assuming SparseRAG has 'documents' and an index (e.g., 'bm25')
                 "documents": getattr(self.rag.sparse_engine, "documents", []),
-                # We pickle the whole object or specific attributes if known. 
-                # Assuming the sparse engine class instance attributes are sufficient.
                 "model_state": self.rag.sparse_engine.__dict__
             },
             "dense": {
-                # DenseRAG standard attributes
                 "documents": getattr(self.rag.dense_engine, "documents", []),
                 "vectors": getattr(self.rag.dense_engine, "document_vectors", [])
             }
@@ -103,23 +93,6 @@ class HybridRAGPipeline(BasePipeline):
         except Exception as e:
             logger.error(f"Error loading state from {path}: {e}")
             return False
-
-    def get_document(self, username: str) -> Document | None:
-        try:
-            user = GuestUser.objects.filter(username=username).first()
-            if not user:
-                return None
-            return Document.objects.filter(user=user).last()
-        except Exception as e:
-            logger.error(f"Error getting document for {username}: {e}")
-            return None
-
-    def optimize_query(self, query: str) -> str:
-        """
-        Optimizes the query for better retrieval using the LLM.
-        """
-        prompt = f"Optimize the following query for better search retrieval. Output only the optimized query string: {query}"
-        return self.llm.prompt_generate(prompt)
 
     def init(self, username: str) -> bool:
         """
@@ -211,8 +184,7 @@ class HybridRAGPipeline(BasePipeline):
             if not retrieved_docs:
                 raise ValueError("No relevant documents found.")
 
-        # 3. Generate Answer
-        # Combine retrieved docs into a single context string
+
         context_str = "\n\n".join(retrieved_docs)
         answer = self.llm.rag_generate(query, context_str)
         
@@ -220,3 +192,79 @@ class HybridRAGPipeline(BasePipeline):
             "answer": answer,
             "context": retrieved_docs
         }
+    
+    def init_job(self, username: str, job=None) -> bool:
+        """
+        Initializes the Hybrid RAG pipeline for a job.
+        """
+        logger.info(f"Initializing Hybrid RAG for {username}...")
+
+        if job:
+            job.progress = 10
+            job.save()
+
+        document = self.get_document(username)
+        if not document:
+            raise ValueError(f"No document found for user: {username}")
+
+        doc_vector = DocumentVector.objects.filter(document=document, status="ready").last()
+
+        if doc_vector:
+            logger.info("Existing index found. Loading into memory.")
+            
+            if job:
+                job.progress = 80
+                job.save()
+            
+            logger.info(f"Loading state from {doc_vector.vectorstore_location}")
+            success = self._load_state(doc_vector.vectorstore_location)
+            if not success:
+                logger.error("Index record exists but file load failed.")
+                raise RuntimeError("Index record exists but file load failed.")
+            logger.info(f"State loaded successfully from {doc_vector.vectorstore_location}")
+
+            return True
+
+        logger.info("Creating new Hybrid index...")
+        
+        if job:
+            job.progress = 20
+            job.save()
+
+        logger.info(f"Loading text from {document.extracted_text_path}")
+
+        if not document.extracted_text_path:
+            raise ValueError("Document has no text source path.")
+
+        raw_text = self.loader.load(document.extracted_text_path)
+
+        if job:
+            job.progress = 40
+            job.save()
+
+        chunks = self.chunker.chunk(raw_text)
+
+        if job:
+            job.progress = 50
+            job.save()
+            
+        self.rag.index_documents(chunks)
+
+        if job:
+            job.progress = 90
+            job.save()
+
+        file_name = f"{username}_{document.pk}_hybrid_{uuid.uuid4().hex[:6]}.pkl"
+        save_path = os.path.join(self.vector_store_root, file_name)
+        self._save_state(save_path)
+
+        vs, _ = VectorStore.objects.get_or_create(base_path=self.vector_store_root)
+        DocumentVector.objects.create(
+            document=document,
+            vectorstore=vs,
+            vectorstore_location=save_path,
+            document_location=document.extracted_text_path,
+            status="ready"
+        )
+        logger.info("Hybrid Initialization Complete.")
+        return True

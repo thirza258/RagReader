@@ -20,8 +20,6 @@ class HybridRAG(BaseRAG):
         self.final_top_k = config.get("top_k", 3)
         self.rrf_k = config.get("rrf_k", 60)
         
-        # We need to fetch MORE candidates from the sub-engines than we ultimately return
-        # to ensure the intersection logic of RRF works effectively.
         child_config = config.copy()
         child_config["top_k"] = config.get("child_top_k", self.final_top_k * 2)
         

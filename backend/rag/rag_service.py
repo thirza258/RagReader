@@ -20,7 +20,6 @@ class RAGRegistry:
         if self._initialized:
             return
         
-        # Storage: self.engines[llm_model][method_name]
         self.engines = {}
         self.initialize_engines()
         self._initialized = True
@@ -30,16 +29,14 @@ class RAGRegistry:
         Instantiates pipelines based on the PIPELINE_VARIANTS list.
         """
         
-        # 1. Map String Names to Python Classes
         class_map = {
             "Dense Retrieval": DenseRAGPipeline,
             "Sparse Retrieval": SparseRAGPipeline,
             "Hybrid Retrieval": HybridRAGPipeline,
-            "Iterative Retrieval": IterativeRAGPipeline,
-            "Reranking": RerankingPipeline 
+            # "Iterative Retrieval": IterativeRAGPipeline,
+            # "Reranking": RerankingPipeline 
         }
 
-        # 2. Iterate through your constants
         for variant in CONFIG_VARIANTS:
             method_name = variant["method"]
             llm_model = variant["model"]
@@ -59,11 +56,9 @@ class RAGRegistry:
                 "overlap": 50,
             }
 
-            # 4. Initialize the structure if not exists
             if llm_model not in self.engines:
                 self.engines[llm_model] = {}
 
-            # 5. Instantiate and Store (Lazy loading recommended, but here we init immediately)
             print(f"Initializing {method_name} with {llm_model}...")
             try:
                 self.engines[llm_model][method_name] = pipeline_class(instance_config)
