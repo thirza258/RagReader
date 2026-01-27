@@ -22,7 +22,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./backend
-          file: Dockerfile-backend
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
 
@@ -30,7 +29,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          file: Dockerfile-frontend
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
 
