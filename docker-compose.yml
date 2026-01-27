@@ -1,5 +1,4 @@
 services:
-
   backend:
     build:
       context: .
@@ -9,6 +8,20 @@ services:
       - "8000:8000"
     depends_on:
       - redis
+      - postgres
+      - vector_db
+    env_file:
+      - .env
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile-backend
+    container_name: rag_worker
+    command: celery -A backend worker -l info
+    depends_on:
+      - redis
+      - postgres
     env_file:
       - .env
 
@@ -18,7 +31,9 @@ services:
       dockerfile: Dockerfile-frontend
     container_name: rag_frontend
     ports:
-      - "3000:80"
+      - "5176:5176"
+    env_file:
+      - ./frontend/.env
 
   redis:
     image: redis:7-alpine
@@ -34,10 +49,14 @@ services:
     volumes:
       - ./vectorstore:/chroma/chroma
 
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile-backend
-    command: celery -A backend worker -l info
-    depends_on:
-      - redis
+  postgres:
+    image: postgres:16-alpine
+    container_name: rag_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: mydatabase
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - ./postgres:/var/lib/postgresql/data

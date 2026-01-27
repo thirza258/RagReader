@@ -39,7 +39,7 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 4. **Run the frontend**  
    From the frontend directory, start the development server:  
    ```bash
-   npm install     # Only needed on first run
+   npm install     
    npm run dev
    ```
 
