@@ -24,7 +24,7 @@ jobs:
           context: .
           file: Dockerfile-backend
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/rag-backend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v5
@@ -32,7 +32,7 @@ jobs:
           context: ./frontend
           file: Dockerfile-frontend
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/rag-frontend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
 
       - name: Install cloudflared
         run: |
@@ -62,6 +62,8 @@ jobs:
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
           DB_PORT=5432
 
+          BACKEND_PORT=${{ secrets.BACKEND_PORT }}
+
           DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@postgres:5432/${{ secrets.DB_NAME }}
 
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
@@ -72,7 +74,7 @@ jobs:
 
           mkdir -p frontend
           cat <<ENV > frontend/.env
-          VITE_API_URL=http://backend:8000
+          VITE_API_URL=http://backend:${{ secrets.BACKEND_PORT }}
           VITE_API_VERSION=v1
           ENV
 
@@ -102,7 +104,8 @@ jobs:
               restart: unless-stopped
 
             backend:
-              image: ${{ secrets.DOCKER_USERNAME }}/rag-backend:latest
+              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
+              command: daphne
               container_name: rag_backend
               env_file: .env
               depends_on:
@@ -110,13 +113,13 @@ jobs:
                 - redis
                 - vector_db
               ports:
-                - "8000:8000"
+                - "${BACKEND_PORT}:${BACKEND_PORT}"
               restart: unless-stopped
 
             worker:
-              image: ${{ secrets.DOCKER_USERNAME }}/rag-backend:latest
+              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
               container_name: rag_worker
-              command: celery -A backend worker -l info
+              command: celery -A ragreader worker -l info
               env_file: .env
               depends_on:
                 - redis
@@ -124,7 +127,7 @@ jobs:
               restart: unless-stopped
 
             frontend:
-              image: ${{ secrets.DOCKER_USERNAME }}/rag-frontend:latest
+              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
               container_name: rag_frontend
               ports:
                 - "5176:5176"
