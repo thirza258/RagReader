@@ -110,7 +110,7 @@ jobs:
                 - redis
                 - vector_db
               ports:
-                - "${BACKEND_PORT}:${BACKEND_PORT}"
+                - "\${BACKEND_PORT}:\${BACKEND_PORT}"
               restart: unless-stopped
 
             worker:
