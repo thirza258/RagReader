@@ -1,6 +1,5 @@
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import service from "../services/service";
 import FileUploadSection from "./file/FileInput";
 import UrlUploadSection from "./file/URLInput";
 import TextUploadSection from "./file/TextInput";

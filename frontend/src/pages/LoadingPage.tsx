@@ -1,16 +1,9 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom"; 
+import { useNavigate } from "react-router-dom"; 
 import { Loader2, CheckCircle2, XCircle, Terminal } from "lucide-react";
 import service from "../services/service";
 
 type JobStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
-
-interface JobResponse { 
-  job_id: string;
-  status: JobStatus;
-  progress: number;
-  error?: string;
-}
 
 const LoadingPage: React.FC = () => {
   const navigate = useNavigate();

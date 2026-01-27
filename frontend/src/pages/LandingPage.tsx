@@ -1,40 +1,25 @@
-import React, { useState } from "react";
+import React from "react";
 import { 
   BarChart3, 
   BrainCircuit, 
-  CheckCircle2, 
   ChevronRight, 
   Database, 
   Layers, 
-  LayoutDashboard, 
   Library, 
-  Menu, 
   Microscope, 
   Network, 
   Search, 
   Share2, 
   Vote, 
-  X 
+ 
 } from "lucide-react";
 import service from "../services/service";
-import NavBar from "../components/Navbar";
 import { useNavigate } from "react-router-dom";
 import { SubmitPayload } from "../types/types";
 import { AxiosError } from "axios";
 
 import FileSubmit from "../components/FileSubmit";
 
-const Button = ({ 
-  children, variant = "primary", className = "", ...props 
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "outline" | "ghost" }) => {
-  const base = "px-6 py-2.5 rounded-lg font-medium transition-all duration-200 flex items-center justify-center gap-2";
-  const variants = {
-    primary: "bg-cyan-500 hover:bg-cyan-400 text-white shadow-lg shadow-cyan-500/20",
-    outline: "border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10",
-    ghost: "text-slate-300 hover:text-white hover:bg-white/5",
-  };
-  return <button className={`${base} ${variants[variant]} ${className}`} {...props}>{children}</button>;
-};
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`bg-slate-900/50 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 hover:border-cyan-500/30 transition-all duration-300 group ${className}`}>
@@ -50,10 +35,7 @@ const Badge = ({ children }: { children: React.ReactNode }) => (
 
 
 const LandingPage: React.FC = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [url, setUrl] = useState<string>("");
-  const [text, setText] = useState<string>("");
+
 
   const navigate = useNavigate();
 
@@ -91,10 +73,6 @@ const LandingPage: React.FC = () => {
       });
     }
   };
-
-  // Mock functions for FileSubmit
-  const handleSetFile = (file: File) => console.log("File set:", file);
-  const handleSetUrl = (url: string) => console.log("URL set:", url);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30 overflow-x-hidden">

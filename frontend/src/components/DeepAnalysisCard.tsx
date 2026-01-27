@@ -39,17 +39,6 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
   evaluationMetrics = [],
   className = "",
 }) => {
-  // Helper to determine color based on agreement status
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "AGREE":
-        return "text-green-400";
-      case "DISAGREE":
-        return "text-red-400";
-      default:
-        return "text-yellow-400";
-    }
-  };
 
   return (
     <div className={`relative ${className}`}>

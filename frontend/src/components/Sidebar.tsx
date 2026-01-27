@@ -1,7 +1,6 @@
 import React from "react";
-import { format } from "date-fns"; // Optional: for nice date formatting, or use standard JS Date
 
-// Define interfaces for History items
+
 export interface HistoryItem {
   id: string;
   title: string;

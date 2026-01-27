@@ -1,7 +1,7 @@
 import NavBar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 import { Outlet } from "react-router-dom";
-import DeepSidebar, { DeepAnalysisConfig } from "../components/DeepSidebar";
+import DeepSidebar from "../components/DeepSidebar";
 
 const ChatLayout = () => {
   return (
@@ -42,7 +42,7 @@ const DeepResultLayout = () => {
       <div className="flex flex-1 overflow-hidden pt-16">
         <DeepSidebar onBack={function (): void {
           throw new Error("Function not implemented.");
-        } } onAnalyze={function (config: DeepAnalysisConfig): void {
+        } } onAnalyze={function (): void {
           throw new Error("Function not implemented.");
         } } />
         <main className="flex-1 overflow-y-auto relative ps-5">

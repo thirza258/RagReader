@@ -4,8 +4,7 @@ import {
   FileText, 
   Settings, 
   Database, 
-  Cpu, 
-  Layers, 
+  Cpu,  
   Play 
 } from "lucide-react";
 
