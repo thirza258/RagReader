@@ -140,7 +140,7 @@ jobs:
                 - redis
                 - vector_db
               ports:
-                - "${BACKEND_PORT}:${BACKEND_PORT}"
+                - "${{ secrets.BACKEND_PORT }}:${{ secrets.BACKEND_PORT }}"
               restart: unless-stopped
 
             worker:
@@ -167,8 +167,8 @@ jobs:
             vectorstore:
           COMPOSE
 
-          docker pull ${DOCKER_USERNAME}/ragreader-backend:latest
-          docker pull ${DOCKER_USERNAME}/ragreader-frontend:latest
+          docker pull ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
+          docker pull ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
 
           docker compose -f docker-compose.prod.yml up -d --remove-orphans --pull never
 
