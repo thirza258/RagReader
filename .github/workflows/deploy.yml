@@ -59,50 +59,61 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get install -y sshpass
 
-      - name: Deploy to server
+            - name: Deploy to server
         run: |
           sshpass -p "${{ secrets.SSH_PASSWORD }}" ssh \
             -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=5 \
             -o ProxyCommand="/usr/bin/cloudflared access ssh --hostname %h --id ${{ secrets.CF_CLIENT_ID }} --secret ${{ secrets.CF_CLIENT_SECRET }}" \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
 
           set -e
-          mkdir -p ~/rag_app
-          cd ~/rag_app
 
-          echo "DEBUG=false" > .env
-          echo "DEVELOPMENT_MODE=false" >> .env
+          APP_DIR=~/rag_app
+          mkdir -p $APP_DIR
+          cd $APP_DIR
 
-          echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
-          echo "DB_USER=${{ secrets.DB_USER }}" >> .env
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "DB_PORT=5432" >> .env
+          # -----------------------------
+          # Environment files
+          # -----------------------------
+          cat > .env <<ENV
+          DEBUG=false
+          DEVELOPMENT_MODE=false
 
-          echo "BACKEND_PORT=${{ secrets.BACKEND_PORT }}" >> .env
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_PORT=5432
 
-          echo "DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@postgres:5432/${{ secrets.DB_NAME }}" >> .env
+          BACKEND_PORT=${{ secrets.BACKEND_PORT }}
 
-          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
-          echo "OPEN_ROUTER_KEY=${{ secrets.OPEN_ROUTER_KEY }}" >> .env
+          DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@postgres:5432/${{ secrets.DB_NAME }}
 
-          echo "LANGSMITH_TRACING=false" >> .env
-          echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> .env
-          echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
-          echo "LANGSMITH_PROJECT=${{ secrets.LANGSMITH_PROJECT }}" >> .env
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          OPEN_ROUTER_KEY=${{ secrets.OPEN_ROUTER_KEY }}
+
+          LANGSMITH_TRACING=false
+          LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}
+          LANGSMITH_PROJECT=${{ secrets.LANGSMITH_PROJECT }}
+          ENV
 
           mkdir -p frontend
-          echo "VITE_API_URL=http://backend:${{ secrets.BACKEND_PORT }}" > frontend/.env
-          echo "VITE_API_VERSION=v1" >> frontend/.env
+          cat > frontend/.env <<ENV
+          VITE_API_URL=http://backend:${{ secrets.BACKEND_PORT }}
+          VITE_API_VERSION=v1
+          ENV
 
-          cat <<COMPOSE > docker-compose.prod.yml
+          # -----------------------------
+          # Compose file
+          # -----------------------------
+          cat > docker-compose.prod.yml <<'COMPOSE'
           services:
             postgres:
               image: postgres:16-alpine
               container_name: rag_postgres
-              environment:
-                POSTGRES_DB: \${DB_NAME}
-                POSTGRES_USER: \${DB_USER}
-                POSTGRES_PASSWORD: \${DB_PASSWORD}
+              env_file: .env
               volumes:
                 - postgres_data:/var/lib/postgresql/data
               restart: unless-stopped
@@ -120,20 +131,20 @@ jobs:
               restart: unless-stopped
 
             backend:
-              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
-              command: daphne
+              image: ${DOCKER_USERNAME}/ragreader-backend:latest
               container_name: rag_backend
+              command: daphne
               env_file: .env
               depends_on:
                 - postgres
                 - redis
                 - vector_db
               ports:
-                - "\${BACKEND_PORT}:\${BACKEND_PORT}"
+                - "${BACKEND_PORT}:${BACKEND_PORT}"
               restart: unless-stopped
 
             worker:
-              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
+              image: ${DOCKER_USERNAME}/ragreader-backend:latest
               container_name: rag_worker
               command: celery -A ragreader worker -l info
               env_file: .env
@@ -143,7 +154,7 @@ jobs:
               restart: unless-stopped
 
             frontend:
-              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
+              image: ${DOCKER_USERNAME}/ragreader-frontend:latest
               container_name: rag_frontend
               ports:
                 - "5176:5176"
@@ -156,8 +167,11 @@ jobs:
             vectorstore:
           COMPOSE
 
-          docker compose -f docker-compose.prod.yml pull
-          docker compose -f docker-compose.prod.yml up -d --remove-orphans
-          docker image prune -f
+          docker pull ${DOCKER_USERNAME}/ragreader-backend:latest
+          docker pull ${DOCKER_USERNAME}/ragreader-frontend:latest
+
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans --pull never
+
+          docker image prune -f --filter "dangling=true"
 
           EOF
