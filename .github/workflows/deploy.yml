@@ -131,7 +131,7 @@ jobs:
               restart: unless-stopped
 
             backend:
-              image: ${DOCKER_USERNAME}/ragreader-backend:latest
+              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
               container_name: rag_backend
               command: daphne
               env_file: .env
@@ -144,7 +144,7 @@ jobs:
               restart: unless-stopped
 
             worker:
-              image: ${DOCKER_USERNAME}/ragreader-backend:latest
+              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
               container_name: rag_worker
               command: celery -A ragreader worker -l info
               env_file: .env
@@ -154,7 +154,7 @@ jobs:
               restart: unless-stopped
 
             frontend:
-              image: ${DOCKER_USERNAME}/ragreader-frontend:latest
+              image: ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
               container_name: rag_frontend
               ports:
                 - "5176:5176"
@@ -169,6 +169,8 @@ jobs:
 
           docker pull ${{ secrets.DOCKER_USERNAME }}/ragreader-backend:latest
           docker pull ${{ secrets.DOCKER_USERNAME }}/ragreader-frontend:latest
+          docker pull chromadb/chroma
+          docker pull redis:7-alpine
 
           docker compose -f docker-compose.prod.yml up -d --remove-orphans --pull never
 
