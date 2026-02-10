@@ -123,17 +123,18 @@ class Metadata(models.Model):
 class AnalysisBatch(models.Model):  
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
     query = models.TextField()
+    job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    total_variants = models.IntegerField(default=0) 
+    total_variants = models.IntegerField(default=0)
 
 class AnalysisResult(models.Model):
     batch = models.ForeignKey(AnalysisBatch, related_name='results', on_delete=models.CASCADE)
     method = models.CharField(max_length=100)
     ai_model = models.CharField(max_length=100)
     answer = models.TextField()
-    retrieved_chunks = models.JSONField(default=list) 
-    model_agreement = models.JSONField(default=list)
-    evaluation_metrics = models.JSONField(default=list)
+    retrieved_chunks = models.JSONField(default=list, null=True, blank=True) 
+    model_agreement = models.JSONField(default=list, null=True, blank=True)
+    evaluation_metrics = models.JSONField(default=list, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

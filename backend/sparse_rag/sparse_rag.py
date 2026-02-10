@@ -11,9 +11,11 @@ from rag.base_rag import BaseRAG
 try:
     nltk.data.find('corpora/stopwords')
     nltk.data.find('tokenizers/punkt')
+    nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
     nltk.download('stopwords', quiet=True)
     nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
 
 class SparseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):

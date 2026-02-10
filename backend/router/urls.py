@@ -6,10 +6,11 @@ from .views import (
     InsertTextView,
     InsertURLView,
     JobStatusView,
+    StartAnalysisView,
+    AnalysisStatusView
 )
-
 from django.urls import re_path
-from . import consumers
+from .consumers import AnalysisConsumer
 
 urlpatterns = [
     path("insert-data/", InsertDataView.as_view(), name="insert-data"),
@@ -18,8 +19,11 @@ urlpatterns = [
     path("open-chat/", OpenChatView.as_view(), name="open-chat"),
     path("job-status/<str:job_id>/", JobStatusView.as_view(), name="job-status"),
     path("query/", QueryView.as_view(), name="query"),
+    path("start-analysis/", StartAnalysisView.as_view(), name="start-analysis"),
+    path("analysis-status/<str:job_id>/", AnalysisStatusView.as_view(), name="analysis-status"),
+    
 ]
 
 websocket_urlpatterns = [
-    re_path(r'ws/analysis/(?P<job_id>\w+)/$', consumers.AnalysisConsumer.as_asgi()),
+    re_path(r"ws/analysis/(?P<job_id>[\w-]+)/$", AnalysisConsumer.as_asgi()),
 ]
