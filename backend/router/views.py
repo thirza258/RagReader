@@ -236,7 +236,7 @@ class AnalysisStatusView(GenericAPIView):
             results = AnalysisResult.objects.filter(batch=analysis_batch)
             data = [{
                 "method": result.method,
-                "result": result.result_data
+                "result": result.answer
             } for result in results]
 
             progress = 100.0 
@@ -249,7 +249,6 @@ class AnalysisStatusView(GenericAPIView):
                 "data": data 
             }
 
-            # mimicking your get_responses().response_200
             return Response(response_payload, status=status.HTTP_200_OK)
         
         except AnalysisBatch.DoesNotExist:

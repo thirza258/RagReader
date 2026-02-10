@@ -8,7 +8,7 @@ from pipeline.base_pipeline import BasePipeline
 
 from common.chunker import DocumentChunker
 from dense_rag.dense_rag import DenseRAG
-from ai_handler.llm import OpenAILLM
+from ai_handler.llm import OpenAILLM, GeminiLLM, ClaudeLLM
 from utils.insert_file import DataLoader
 
 from router.models import (
@@ -25,10 +25,7 @@ class DenseRAGPipeline(BasePipeline):
         super().__init__(config)
         
         self.rag = DenseRAG(config)
-        self.llm = OpenAILLM(
-            model=config.get("llm_model", "gpt-4o"),
-            temperature=config.get("temperature", 0.0)
-        )
+        self.llm = self._initialize_llm(config.get("llm_model", "openai"))
         self.chunker = DocumentChunker(
             strategy=config.get("chunk_strategy", "paragraph"),
             chunk_size=config.get("chunk_size", 500),

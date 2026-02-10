@@ -123,9 +123,14 @@ class Metadata(models.Model):
 class AnalysisBatch(models.Model):  
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
     query = models.TextField()
-    job_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    job_id = models.UUIDField(default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     total_variants = models.IntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['job_id'], name='unique_job_id')
+        ]
 
 class AnalysisResult(models.Model):
     batch = models.ForeignKey(AnalysisBatch, related_name='results', on_delete=models.CASCADE)

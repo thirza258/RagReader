@@ -3,6 +3,9 @@ from typing import List, Dict, Any, Optional
 from router.models import Document, GuestUser
 from router.models import Job
 import logging
+from ai_handler.llm import OpenAILLM, GeminiLLM, ClaudeLLM
+import os
+import glob
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,41 @@ class BasePipeline(ABC):
             return original_query
 
         return cleaned
+    
+    def _initialize_llm(self, model_name: str):
+        if model_name.startswith("gpt-") or model_name.startswith("text-"):
+            from ai_handler.llm import OpenAILLM
+            return OpenAILLM(
+                model=model_name,
+                temperature=self.config.get("temperature", 0.0)
+            )
+        elif model_name.startswith("gemini-"):
+            from ai_handler.llm import GeminiLLM
+            return GeminiLLM(
+                model=model_name,
+                temperature=self.config.get("temperature", 0.0)
+            )
+        elif model_name.startswith("claude-"):
+            from ai_handler.llm import ClaudeLLM
+            return ClaudeLLM(
+                model=model_name,
+                temperature=self.config.get("temperature", 0.0)
+            )
+        else:
+            raise ValueError(f"Unsupported LLM model: {model_name}")
+        
+    def is_initialized(self, username):
+        """Check if this engine variant is already initialized for the user"""
+        user_vector_dir = os.path.join(self.vector_store_root, username)
+        
+        if not os.path.exists(user_vector_dir):
+            return False
+        
+        pattern = f"{username}_*_{self.method}_*.pkl"
+        
+        matching_files = glob.glob(os.path.join(user_vector_dir, pattern))
+        
+        return len(matching_files) > 0
 
     @abstractmethod
     def _save_state(self, path: str):

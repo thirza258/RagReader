@@ -26,10 +26,7 @@ class HybridRAGPipeline(BasePipeline):
         
         self.rag = HybridRAG(config)
         
-        self.llm = OpenAILLM(
-            model=config.get("llm_model", "gpt-4o"),
-            temperature=config.get("temperature", 0.0)
-        )
+        self.llm = self._initialize_llm(config.get("llm_model", "openai"))
         embedding_client = getattr(self.rag.dense_engine, 'client', None)
         
         self.chunker = DocumentChunker(

@@ -5,7 +5,8 @@ from pipeline.iterative_rag_pipeline import IterativeRAGPipeline
 from pipeline.reranking_rag_pipeline import RerankingPipeline
 from router.models import Document
 from common.constant import CONFIG_VARIANTS
-
+import os
+import glob
 
 class RAGRegistry:
     _instance = None
@@ -81,6 +82,8 @@ class RAGRegistry:
                 f"Available methods for this model: {available_methods}"
             )
 
+
+    
 
 
 # Create a global instance
