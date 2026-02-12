@@ -12,12 +12,11 @@ import DeepResult from "./pages/DeepResult";
 import LoginPage from "./pages/LoginPage";
 import ErrorPage from "./pages/ErrorPage";
 import LoadingPage from "./pages/LoadingPage";
+import GroundTruthSelector from "./pages/GroundTruth";
 
 function App() {
   return (
       <Routes>
-
-
         <Route element={<LandingPageLayout />}>
           <Route path="/" element={<LandingPage />} />
         </Route>
@@ -47,6 +46,10 @@ function App() {
 
         <Route element={<LandingPageLayout />}>
           <Route path="/loading" element={<LoadingPage />} />
+        </Route>
+
+        <Route element={<LandingPageLayout />}>
+          <Route path="/ground-truth" element={<GroundTruthSelector />} />
         </Route>
 
       </Routes>
