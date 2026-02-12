@@ -1,8 +1,8 @@
 services:
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile-backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: rag_backend
     ports:
       - "8000:8000"
@@ -15,8 +15,8 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile-backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: rag_worker
     command: celery -A backend worker -l info
     depends_on:
@@ -28,7 +28,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile-frontend
+      dockerfile: Dockerfile
     container_name: rag_frontend
     ports:
       - "5176:5176"
