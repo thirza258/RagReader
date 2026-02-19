@@ -24,3 +24,13 @@ export type SubmitPayload =
   | { type: "file"; file: File }
   | { type: "url"; url: string }
   | { type: "text"; text: string };
+
+export interface DocStep {
+  id: number;
+  title: string;
+  description: React.ReactNode;
+  icon: React.ReactNode;
+  imagePath?: string;
+  imageAlt: string;
+  imagePlaceholderText: string;
+}

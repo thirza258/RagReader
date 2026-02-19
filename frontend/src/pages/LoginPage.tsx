@@ -42,6 +42,9 @@ const LoginPage: React.FC = () => {
         className="bg-slate-900 p-8 rounded-lg shadow-md w-80 space-y-4 border border-slate-800"
         onSubmit={handleSubmit}
       >
+        <h1 className="text-2xl font-bold mb-6 text-center text-white">Welcome Back!</h1>
+        <h1 className="text-sm mb-6 text-center text-slate-400">RagReader alpha ver.</h1>
+        <div className="w-full h-px bg-slate-700 my-4"></div>
         <h2 className="text-xl font-bold mb-4 text-center text-white">Login</h2>
         <div>
           <label className="block mb-2 text-sm font-medium text-slate-300" htmlFor="username">
@@ -74,6 +77,13 @@ const LoginPage: React.FC = () => {
           className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-500 transition-colors"
         >
           Login
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="w-full bg-slate-700 text-white py-2 rounded hover:bg-slate-600 transition-colors mt-2"
+        >
+          Go Back
         </button>
       </form>
     </div>

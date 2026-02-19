@@ -60,6 +60,7 @@ const Navbar: React.FC = () => {
           <a href="/deep-result" className="hover:text-cyan-400 transition-colors">
             DeepAnalysis
           </a>
+          <a href="/docs" className="hover:text-cyan-400 transition-colors">Docs</a>
           <a href="/about" className="hover:text-cyan-400 transition-colors">About</a>
         </div>
 

@@ -13,6 +13,7 @@ import LoginPage from "./pages/LoginPage";
 import ErrorPage from "./pages/ErrorPage";
 import LoadingPage from "./pages/LoadingPage";
 import GroundTruthSelector from "./pages/GroundTruth";
+import Docs from "./pages/Docs";
 
 function App() {
   return (
@@ -49,7 +50,11 @@ function App() {
         </Route>
 
         <Route element={<LandingPageLayout />}>
-          <Route path="/ground-truth" element={<GroundTruthSelector />} />
+          <Route path="/ground-truth" element={<GroundTruthSelector allChunks={[]} onSave={() => {}} onCancel={() => {}} />} />
+        </Route>
+
+        <Route element={<LandingPageLayout />}>
+          <Route path="/docs" element={<Docs />} />
         </Route>
 
       </Routes>
