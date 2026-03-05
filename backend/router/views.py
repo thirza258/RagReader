@@ -13,7 +13,7 @@ from utils.insert_file import get_loader
 from router.models import (
     Document, 
     GuestUser, Job,
-    AnalysisBatch, AnalysisResult
+    AnalysisBatch, AnalysisResult, Conversation
 )
 from router.models import Job
 from router.tasks import initialize_rag_task, run_single_analysis
@@ -188,6 +188,14 @@ class QueryView(GenericAPIView):
                  return get_responses().response_400(error=f"System is still initializing. Current status: {last_job.status}")
 
             answer = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).run(username, query)
+            
+            answer_record = Conversation.objects.create(
+                user=GuestUser.objects.get(username=username),
+                query=query,
+                response=answer,
+                context=""
+            )
+            
             return get_responses().response_200(response=answer)
         except Exception as e:
             return get_responses().response_500(error=str(e))

@@ -59,12 +59,12 @@ class DocumentVector(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 class Conversation(models.Model):
+    user = models.ForeignKey(GuestUser, on_delete=models.CASCADE, default=None, null=True, blank=True)
     query = models.TextField()
     response = models.TextField()
     context = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
 
 class ConversationHistory(models.Model):
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
@@ -102,7 +102,6 @@ class Job(models.Model):
         self.status = self.Status.FAILED
         self.error_message = message
         self.save(update_fields=["status", "error_message", "updated_at"])
-
 
 class Metadata(models.Model):
     llm_model = models.CharField(max_length=100, default="gpt-4o", help_text="LLM for answer generation")

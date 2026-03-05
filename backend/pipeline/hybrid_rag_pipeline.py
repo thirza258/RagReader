@@ -124,20 +124,16 @@ class HybridRAGPipeline(BasePipeline):
         raw_text = raw_data.get("text", "")
         
         if not raw_text:
-             # Fallback if loader usage in pipeline differs slightly from direct usage
              raw_text = self.loader.load(document.extracted_text_path)
 
         chunks = self.chunker.chunk(raw_text)
 
-        # Index Documents (This triggers both Sparse and Dense indexing)
         self.rag.index_documents(chunks)
 
-        # Save to Disk
         file_name = f"{username}_{document.pk}_hybrid_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
         self._save_state(save_path)
 
-        # Save to DB
         vs, _ = VectorStore.objects.get_or_create(base_path=self.vector_store_root)
         DocumentVector.objects.create(
             document=document,

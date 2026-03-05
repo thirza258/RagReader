@@ -80,3 +80,18 @@ class SparseRAG(BaseRAG):
                 relevant_docs.append(self.documents[idx])
                 
         return relevant_docs
+    
+    def get_retrieved_scores(self, query: str) -> Dict[str, Any]:
+        """
+        Returns the BM25 scores for all documents given a query.
+        Useful for evaluation purposes.
+        """
+        if self.bm25 is None:
+            print("Warning: No documents indexed.")
+            return {}
+
+        tokenized_query = self._tokenize(query)
+        
+        scores = self.bm25.get_scores(tokenized_query)
+        
+        return {"scores": scores.tolist()}

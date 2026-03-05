@@ -30,6 +30,14 @@ class BaseRAG(ABC):
         Returns a list of strings (chunks/documents).
         """
         pass
+    
+    @abstractmethod
+    def get_retrieved_scores(self, query: str) -> Dict[str, List[float]]:
+        """
+        Optional: Return relevance scores or metadata for retrieved documents.
+        Useful for debugging and for advanced fusion techniques.
+        """
+        pass
 
     def generate_answer(self, query: str, context: List[str]) -> str:
         """

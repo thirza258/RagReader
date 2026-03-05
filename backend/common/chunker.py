@@ -9,19 +9,13 @@ class DocumentChunker:
                  chunk_size: int = 500, 
                  overlap: int = 50,
                  embedding_client=None):
-        """
-        Args:
-            strategy: 'fixed', 'paragraph', or 'semantic'.
-            chunk_size: Max chars for fixed/paragraph, or max token estimate for semantic.
-            overlap: Overlap in characters (only for fixed strategy).
-            embedding_client: Required ONLY for 'semantic' strategy (to calculate distances).
-        """
         self.strategy = strategy
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.client = embedding_client
 
     def chunk(self, text: str) -> List[str]:
+        print(f"Chunking document with strategy '{self.strategy}'...")
         if self.strategy == "fixed":
             return self._chunk_fixed(text)
         elif self.strategy == "paragraph":
@@ -31,14 +25,8 @@ class DocumentChunker:
         else:
             raise ValueError(f"Unknown strategy: {self.strategy}")
 
-    # --- Strategy 1: Fixed / Random Window ---
     def _chunk_fixed(self, text: str) -> List[str]:
-        """
-        Blindly cuts text into chunks of size N with overlap.
-        Pro: Consistent size.
-        Con: Cuts sentences and words in half.
-        """
-        chunks = []
+        chunks =[]
         start = 0
         text_len = len(text)
 
@@ -46,34 +34,42 @@ class DocumentChunker:
             end = start + self.chunk_size
             chunk = text[start:end]
             chunks.append(chunk)
-            # Move forward by chunk_size minus overlap
             start += (self.chunk_size - self.overlap)
         
         return chunks
 
     def _chunk_paragraph(self, text: str) -> List[str]:
-        """
-        Splits by double newlines. Merges small paragraphs until they hit chunk_size.
-        Pro: Respects document structure.
-        Con: Paragraphs can be huge or tiny.
-        """
-        # Split by double newlines (standard paragraph break)
-        raw_paras = text.split('\n\n')
-        raw_paras = [p.strip() for p in raw_paras if p.strip()]
+        # FIX 1: Fall back to single newlines if double newlines don't exist
+        delimiter = '\n\n' if '\n\n' in text else '\n'
+        raw_paras = text.split(delimiter)
+        raw_paras =[p.strip() for p in raw_paras if p.strip()]
         
-        chunks = []
+        chunks =[]
         current_chunk = ""
 
         for para in raw_paras:
-            # If adding this paragraph exceeds size, save current and start new
-            if len(current_chunk) + len(para) > self.chunk_size:
+            if len(para) > self.chunk_size:
+                # Flush existing chunk
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+                
+                # Split the massive paragraph
+                sub_chunks = self._chunk_fixed(para)
+                
+                # Add all sub-chunks except the last one directly to chunks
+                chunks.extend(sub_chunks[:-1])
+                # Keep the last piece as the new current_chunk to merge with upcoming text
+                current_chunk = sub_chunks[-1] if sub_chunks else ""
+            
+            # Normal logic: merge until it hits chunk size
+            elif len(current_chunk) + len(para) + len(delimiter) > self.chunk_size:
                 if current_chunk:
                     chunks.append(current_chunk)
                 current_chunk = para
             else:
-                # Add to current chunk with a spacer
                 if current_chunk:
-                    current_chunk += "\n\n" + para
+                    current_chunk += delimiter + para
                 else:
                     current_chunk = para
         
@@ -82,58 +78,53 @@ class DocumentChunker:
             
         return chunks
 
-    # --- Strategy 3: Semantic (Sentence Similarity) ---
     def _chunk_semantic(self, text: str) -> List[str]:
-        """
-        Advanced: Splits by sentences. Embeds every sentence.
-        If sentence A and sentence B are dissimilar (cosine distance), 
-        we break the chunk there (Topic Shift).
-        """
         if not self.client:
-            raise ValueError("Semantic chunking requires an embedding_client (DenseRAG instance or OpenAI client).")
+            raise ValueError("Semantic chunking requires an embedding_client.")
 
-        # 1. Split text into sentences (Simple regex for demo)
         sentences = re.split(r'(?<=[.?!])\s+', text)
-        sentences = [s for s in sentences if s.strip()]
+        sentences =[s for s in sentences if s.strip()]
         
         if not sentences:
-            return []
+            return[]
 
-        # 2. Embed ALL sentences individually
-        # Note: This is API heavy (1 call per sentence). Batch this in production.
         try:
             embeddings_resp = self.client.embeddings.create(
                 input=sentences,
                 model="text-embedding-3-small"
             )
-            vecs = [d.embedding for d in embeddings_resp.data]
+            vecs =[d.embedding for d in embeddings_resp.data]
         except Exception as e:
             print(f"Embedding failed: {e}")
-            return sentences # Fallback to sentence list
+            return sentences
 
-        # 3. Calculate similarity between adjacent sentences (i and i+1)
-        distances = []
+        distances =[]
         for i in range(len(vecs) - 1):
             v1 = np.asarray(vecs[i]).reshape(1, -1)
             v2 = np.asarray(vecs[i + 1]).reshape(1, -1)
-
             sim = cosine_similarity(v1, v2)[0][0]
             distances.append(sim)
 
-        # 4. Group sentences based on similarity Threshold
-        # If similarity < 0.5 (for example), it's a topic change.
-        threshold = 0.5 
-        chunks = []
+       
+        threshold = 0.75 
+        chunks =[]
         current_group = [sentences[0]]
+        
+        # Rough token estimate: 1 token ≈ 4 characters
+        current_tokens = len(sentences[0]) // 4
 
         for i, dist in enumerate(distances):
-            if dist > threshold:
-                # Sentences are similar -> Group them
-                current_group.append(sentences[i+1])
+            next_sentence = sentences[i+1]
+            next_tokens = len(next_sentence) // 4
+            
+            # FIX 4: Ensure chunks don't grow infinitely by checking self.chunk_size limit
+            if dist > threshold and (current_tokens + next_tokens) < self.chunk_size:
+                current_group.append(next_sentence)
+                current_tokens += next_tokens
             else:
-                # Sentences are different -> Break chunk
                 chunks.append(" ".join(current_group))
-                current_group = [sentences[i+1]]
+                current_group =[next_sentence]
+                current_tokens = next_tokens
 
         if current_group:
             chunks.append(" ".join(current_group))

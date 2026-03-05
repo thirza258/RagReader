@@ -141,8 +141,15 @@ class DataLoader:
 
     @staticmethod
     def _clean_text(text: str) -> str:
-        text = re.sub(r"\n+", "\n", text)
+        # Replace single newlines between words with space
+        text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+
+        # Collapse multiple newlines into paragraph break
+        text = re.sub(r"\n{2,}", "\n\n", text)
+
+        # Normalize spaces
         text = re.sub(r"[ \t]+", " ", text)
+
         return text.strip()
     
     def load(self, path: str) -> str:

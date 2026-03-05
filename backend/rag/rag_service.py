@@ -1,8 +1,6 @@
 from pipeline.dense_rag_pipeline import DenseRAGPipeline
 from pipeline.hybrid_rag_pipeline import HybridRAGPipeline
 from pipeline.sparse_rag_pipeline import SparseRAGPipeline
-from pipeline.iterative_rag_pipeline import IterativeRAGPipeline
-from pipeline.reranking_rag_pipeline import RerankingPipeline
 from router.models import Document
 from common.constant import CONFIG_VARIANTS
 import os
@@ -34,8 +32,6 @@ class RAGRegistry:
             "Dense Retrieval": DenseRAGPipeline,
             "Sparse Retrieval": SparseRAGPipeline,
             "Hybrid Retrieval": HybridRAGPipeline,
-            # "Iterative Retrieval": IterativeRAGPipeline,
-            # "Reranking": RerankingPipeline 
         }
 
         for variant in CONFIG_VARIANTS:
@@ -52,7 +48,7 @@ class RAGRegistry:
                 "llm_model": llm_model,
                 "model": "text-embedding-3-small",
                 "top_k": 5, 
-                "chunk_strategy": "paragraph",
+                "chunk_strategy": "fixed",
                 "chunk_size": 512,
                 "overlap": 50,
             }
@@ -81,10 +77,6 @@ class RAGRegistry:
                 f"Engine not found for Model: '{llm_model}' and Method: '{method}'. "
                 f"Available methods for this model: {available_methods}"
             )
-
-
-    
-
 
 # Create a global instance
 rag_registry = RAGRegistry()

@@ -118,6 +118,26 @@ class BasePipeline(ABC):
         matching_files = glob.glob(os.path.join(user_vector_dir, pattern))
         
         return len(matching_files) > 0
+    
+    def get_retrieved_docs(self, query: str) -> List[str]:
+        """
+        Retrieves relevant documents using the RAG engine.
+        """
+        optimized_query = self.optimize_query(query)
+        retrieved_docs = self.rag.retrieve(optimized_query)
+        
+        if not retrieved_docs:
+            logger.warning("No documents retrieved with optimized query. Retrying with original query.")
+            retrieved_docs = self.rag.retrieve(query)
+        
+        return retrieved_docs
+    
+    def get_retrieved_scores(self, query: str) -> Dict[str, List[float]]:
+        """
+        Optional: Get relevance scores for retrieved documents.
+        """
+        optimized_query = self.optimize_query(query)
+        return self.rag.get_retrieved_scores(optimized_query)
 
     @abstractmethod
     def _save_state(self, path: str):

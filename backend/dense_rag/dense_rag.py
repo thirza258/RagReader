@@ -16,19 +16,17 @@ class DenseRAG(BaseRAG):
         """
         super().__init__(config)
         
-        # 1. Setup OpenAI Client
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables.")
         
         self.client = OpenAI(api_key=api_key)
         
-        # 2. Configuration
         self.top_k = config.get("top_k", 3)
         self.model = config.get("model", "text-embedding-3-small")
         
         self.documents = []  
-        self.document_vectors = None #
+        self.document_vectors = None 
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
@@ -57,11 +55,9 @@ class DenseRAG(BaseRAG):
         print(f"Embedding {len(documents)} documents using {self.model}...")
         self.documents = documents
         
-        # Call API
         embeddings = self._get_embeddings(documents)
         
         if embeddings:
-            # Convert to numpy array for fast math
             self.document_vectors = np.array(embeddings)
             print("Indexing complete. Vectors stored in memory.")
         else:
@@ -77,8 +73,6 @@ class DenseRAG(BaseRAG):
             print("Warning: Database is empty.")
             return []
 
-        # 1. Embed Query
-        # Note: We pass [query] as a list because the API expects a list
         query_embedding_list = self._get_embeddings([query])
         
         if not query_embedding_list:
@@ -86,15 +80,10 @@ class DenseRAG(BaseRAG):
             
         query_vector = np.array(query_embedding_list)
 
-        # 2. Calculate Cosine Similarity
-        # shape: (1, n_docs)
         similarities = cosine_similarity(query_vector, self.document_vectors).flatten()
 
-        # 3. Sort and Filter
-        # Get indices of top_k scores (sorted ascending)
         sorted_indices = similarities.argsort()
         
-        # Reverse to get descending (highest score first) and slice top_k
         top_indices = sorted_indices[-self.top_k:][::-1]
 
         results = []
@@ -102,7 +91,28 @@ class DenseRAG(BaseRAG):
         for idx in top_indices:
             score = similarities[idx]
             doc_text = self.documents[idx]
-            print(f"Score: {score:.4f} | Text: {doc_text[:50]}...") # Debug print
+            print(f"Score: {score:.4f} | Text: {doc_text[:50]}...") 
             results.append(doc_text)
             
         return results
+    
+    def get_retrieved_scores(self, query: str) -> Dict[str, Any]:
+        """
+        Returns the cosine similarity scores for all documents given a query.
+        Useful for evaluation purposes.
+        """
+        if self.document_vectors is None or len(self.documents) == 0:
+            print("Warning: Database is empty.")
+            return {"scores": []}
+
+        query_embedding_list = self._get_embeddings([query])
+        
+        if not query_embedding_list:
+            return {"scores": []}
+            
+        query_vector = np.array(query_embedding_list)
+
+        similarities = cosine_similarity(query_vector, self.document_vectors).flatten()
+
+        return {"scores": similarities.tolist()}
+    

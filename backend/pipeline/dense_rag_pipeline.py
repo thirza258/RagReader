@@ -1,11 +1,12 @@
+from importlib.resources import path
+from os import path
 import os
 import pickle
 import logging
 import uuid
-from typing import Dict, Any # Assuming Django settings for base paths
+from typing import Dict, Any 
 
 from pipeline.base_pipeline import BasePipeline
-
 from common.chunker import DocumentChunker
 from dense_rag.dense_rag import DenseRAG
 from ai_handler.llm import OpenAILLM, GeminiLLM, ClaudeLLM
@@ -17,6 +18,9 @@ from router.models import (
     VectorStore, 
     DocumentVector
 )
+
+from django.conf import settings
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -78,17 +82,16 @@ class DenseRAGPipeline(BasePipeline):
             if not success:
                 raise RuntimeError("Index record exists but file load failed.")
             
-
         logger.info("Creating new index (Embedding)...")
         if not document.extracted_text_path:
             raise ValueError("Document has no text source path.")
 
-        
         raw_text = self.loader.load(document.extracted_text_path)
         chunks = self.chunker.chunk(raw_text)
+        
+        self._save_chunks(chunks) 
 
         self.rag.index_documents(chunks)
-
       
         file_name = f"{username}_{document.pk}_dense_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
@@ -104,6 +107,31 @@ class DenseRAGPipeline(BasePipeline):
         )
         logger.info("Initialization Complete.")
         return True
+
+    def _save_chunks(self, chunks: list) -> str:
+        """
+        Save chunked text into the Django project root folder.
+        """
+
+        content = []
+        print("Saving chunks...")
+
+        for i, chunk in enumerate(chunks, 1):
+            content.append(f"===== CHUNK {i} =====\n")
+            content.append(chunk.strip())
+            content.append("\n\n")
+
+        final_text = "".join(content)
+
+        path = os.path.join(settings.BASE_DIR, "chunks.txt")
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(final_text)
+            
+        print("CWD:", os.getcwd())
+        print("Saving to:", path)
+
+        return path
     
     def run(self, username: str, query: str) -> Dict[str, Any]:
         """
@@ -194,6 +222,8 @@ class DenseRAGPipeline(BasePipeline):
             job.save()
 
         chunks = self.chunker.chunk(raw_text)
+        
+        self._save_chunks(chunks)
 
         if job:
             job.progress = 50

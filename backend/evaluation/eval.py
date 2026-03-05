@@ -61,8 +61,6 @@ def calculate_retrieval_score(query, chunks, method='dense', model=None):
 
     return scores.get(f"{method}_avg", 0.0)
 
-
-
 def calculate_faithfulness(response, chunks):
     """
     Menghitung Faithfulness menggunakan BERTScore.
@@ -109,3 +107,4 @@ def calculate_answer_relevance(query, response, model=None):
     similarity_score = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
     
     return float(similarity_score)
+

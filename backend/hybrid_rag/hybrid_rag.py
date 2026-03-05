@@ -79,3 +79,23 @@ class HybridRAG(BaseRAG):
 
         # 4. Return the text of the top K results
         return [doc for doc, score in sorted_docs[:self.final_top_k]]
+    
+    def get_retrieved_scores(self, query: str) -> Dict[str, Any]:
+        """
+        Returns the RRF scores for all documents given a query.
+        Useful for evaluation purposes.
+        """
+        sparse_results = self.sparse_engine.retrieve(query)
+        dense_results = self.dense_engine.retrieve(query)
+        
+        doc_scores = defaultdict(float)
+
+        for rank, doc in enumerate(sparse_results):
+            score = 1 / (self.rrf_k + rank + 1)
+            doc_scores[doc] += score
+
+        for rank, doc in enumerate(dense_results):
+            score = 1 / (self.rrf_k + rank + 1)
+            doc_scores[doc] += score
+
+        return {"scores": dict(doc_scores)}
