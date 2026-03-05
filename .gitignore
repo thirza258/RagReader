@@ -1,7 +1,9 @@
 .env
 env/
+nenv/
 __pycache__/
 
+notebook.ipynb
 data.ipynb
 venv/
 .DS_Store

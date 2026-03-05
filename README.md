@@ -1,5 +1,6 @@
 # RAGReader 
 
+
 **Next-Generation Document QA with Multi-Method RAG & Multi-LLM Consensus**
 
 RAGReader is an advanced AI-powered application designed to revolutionize how you interact with your documents. While it functions as a high-speed document chat interface using standard Vector Embedding RAG, its true power lies in its **"Deep Dive"** capability—orchestrating multiple retrieval strategies, rigorous evaluation metrics, and a democratic voting system between the world's leading LLMs to ensure the most accurate answer possible.
