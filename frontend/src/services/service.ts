@@ -1,4 +1,4 @@
-import { apiClient } from "./apiClient";
+import { apiClient, WS_URL } from "./apiClient";
 
 const signUp = async (email: string, username: string) => {
     const response = await apiClient.post("/sign-up/", {
@@ -13,7 +13,7 @@ const signUp = async (email: string, username: string) => {
     return response.data;
 };
 
-const submitFile = async (
+const submitFile = async ( 
     file: File,
     username: string
 ) => {
@@ -96,6 +96,23 @@ const getJobStatus = async (
     return response.data;
 };
 
+const startDeepAnalysis = async (
+    query: string,
+    username: string
+) => {
+    const response = await apiClient.post("/start-analysis/", {
+        QUERY: query,
+        USER: username,
+    });
+    return response.data;
+}
+
+const getDeepAnalysisResult = async (
+    batchId: string
+) => {
+    return new WebSocket(`${WS_URL}/analysis/${batchId}/`);
+}
+
 
 const cleanSystem = async () => {
     const response = await apiClient.get("/clean/");
@@ -111,4 +128,6 @@ export default {
     submitText,
     openChat,
     getJobStatus,
+    startDeepAnalysis,
+    getDeepAnalysisResult,
 };

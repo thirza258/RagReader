@@ -1,132 +1,148 @@
-import React from "react";
+import React, { useEffect, useState, useRef } from "react";
 import DeepAnalysisCard from "../components/DeepAnalysisCard";
+import {
+  buildWebSocketUrl,
+  connectDeepAnalysisWebSocket,
+  AnalysisResult,
+} from "../services/websocket";
+import  service from "../services/service";
 
+
+const QUERY = "What is the Battle of Surabaya?"; 
+
+interface NormalizedChunk {
+  id: string | number;
+  label: string;
+  text: string;
+}
+
+interface NormalizedResult extends Omit<AnalysisResult, "retrievedChunks"> {
+  retrievedChunks: NormalizedChunk[];
+  modelAgreement: { modelName: string; status: "AGREE" | "NEUTRAL" | "DISAGREE" }[];
+}
+
+function normalizeResult(result: AnalysisResult): NormalizedResult {
+  return {
+    ...result,
+    retrievedChunks: result.retrievedChunks.map((chunk, i) => ({
+      id: chunk.id ?? `chunk-${i}`,
+      label: chunk.label || `Chunk ${i + 1}`,
+      text: chunk.text,
+    })),
+    modelAgreement: [],
+  };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 const DeepResult: React.FC = () => {
+  const [results, setResults] = useState<NormalizedResult[]>([]);
+  const [progress, setProgress] = useState<Record<string, number>>({});
+  const [isConnected, setIsConnected] = useState(false);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
-  const chunkData = [
-    {
-      method: "Hybrid Retrieval",
-      aiModel: "GPT-4o",
-      query: "What is the Battle of Surabaya?",
-      answer:
-        "The Battle of Surabaya was a major armed conflict in November 1945, marking a turning point in Indonesia’s struggle for independence.",
-  
-      retrievedChunks: [
-        {
-          id: 1,
-          label: "Chunk 1",
-          text:
-            "The Battle of Surabaya occurred in November 1945 and involved Indonesian militias resisting British-led Allied troops.",
-        },
-        {
-          id: 2,
-          label: "Chunk 2",
-          text:
-            "The conflict resulted in heavy casualties and is commemorated annually as Heroes’ Day in Indonesia.",
-        },
-      ],
-  
-      modelAgreement: [
-        { modelName: "OpenAI", status: "AGREE" },
-        { modelName: "Claude", status: "AGREE" },
-        { modelName: "Gemini", status: "NEUTRAL" },
-      ],
-  
-      evaluationMetrics: [
-        { label: "Retrieval Score", value: 0.85 },
-        { label: "Faithfulness Score", value: 0.66 },
-        { label: "Answer Relevance", value: 0.75 },
-      ],
-    },
-  
-    {
-      method: "Dense Retrieval",
-      aiModel: "Claude 3.5 Sonnet",
-      query: "What is the Battle of Surabaya?",
-      answer:
-        "The Surabaya conflict demonstrated Indonesia’s determination to resist colonial reoccupation after World War II.",
-  
-      retrievedChunks: [
-        {
-          id: "doc-7-1",
-          label: "Chunk 1",
-          text:
-            "Following Japan’s surrender, Indonesian forces resisted attempts by Allied troops to restore Dutch colonial control.",
-        },
-      ],
-  
-      modelAgreement: [
-        { modelName: "OpenAI", status: "AGREE" },
-        { modelName: "Gemini", status: "DISAGREE" },
-      ],
-  
-      evaluationMetrics: [
-        { label: "Retrieval Score", value: 0.85 },
-        { label: "Faithfulness Score", value: 0.66 },
-        { label: "Answer Relevance", value: 0.75 },
-      ],
-    },
-  
-    {
-      method: "Keyword Search",
-      aiModel: "GPT-4.1 Mini",
-      query: "What is the Battle of Surabaya?",
-      answer:
-        "Heroes’ Day in Indonesia commemorates those who fought in the Battle of Surabaya in 1945.",
-  
-      retrievedChunks: [
-        {
-          id: 101,
-          label: "Chunk 1",
-          text:
-            "November 10 is observed as Heroes’ Day in Indonesia to honor the Battle of Surabaya.",
-        },
-        {
-          id: 102,
-          label: "Chunk 2",
-          text:
-            "Thousands of Indonesian fighters and civilians were killed during the conflict.",
-        },
-      ],
+  useEffect(() => {
+    let cancelled = false;
 
-      evaluationMetrics: [
-        { label: "Retrieval Score", value: 0.85 },
-        { label: "Faithfulness Score", value: 0.66 },
-        { label: "Answer Relevance", value: 0.75 },
-      ],
-    },
-  ];
+    async function run() {
+      try {
+      
+        const username = localStorage.getItem("username") || "anonymous";
+        const { batch_id } = await service.startDeepAnalysis(QUERY, username);
 
+        if (cancelled) return;
+
+   
+        const wsUrl = buildWebSocketUrl(batch_id);
+        setIsConnected(true);
+
+        cleanupRef.current = connectDeepAnalysisWebSocket({
+          url: wsUrl,
+          query: QUERY,
+
+          onResult: (result) => {
+            const normalized = normalizeResult(result);
+            setResults((prev) => {
+              const idx = prev.findIndex((r) => r.method === result.method);
+              if (idx !== -1) {
+                const updated = [...prev];
+                updated[idx] = normalized;
+                return updated;
+              }
+              return [...prev, normalized];
+            });
+          },
+
+          onProgress: (method, value) => {
+            setProgress((prev) => ({ ...prev, [method]: value }));
+          },
+
+          onError: (err) => {
+            console.error("WebSocket error:", err);
+            setIsConnected(false);
+          },
+
+          onClose: () => {
+            setIsConnected(false);
+          },
+        });
+      } catch (error) {
+        console.error("Error starting deep analysis:", error);
+        setIsConnected(false);
+      }
+    }
+
+    run();
+
+    return () => {
+      cancelled = true;
+      cleanupRef.current?.();
+    };
+  }, []);
 
   return (
     <div className="space-y-6">
+      {/* Connection status indicator */}
+      <div className="flex items-center gap-2 text-sm text-gray-500">
+        <span
+          className={`inline-block w-2 h-2 rounded-full ${
+            isConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"
+          }`}
+        />
+        {isConnected ? "Receiving results…" : "Connection closed"}
+      </div>
+
+      {/* Loading state */}
+      {results.length === 0 && isConnected && (
+        <div className="text-center py-12 text-gray-400 animate-pulse">
+          Waiting for analysis results…
+        </div>
+      )}
+
+      {/* Result cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {chunkData.map((item, index) => {
-          const normalizedItem = {
-            ...item,
-            retrievedChunks: item.retrievedChunks?.map((chunk: any) => ({
-              ...chunk,
-              id: typeof chunk.id === 'string' || typeof chunk.id === 'number' ? chunk.id : String(chunk.id),
-              label: chunk.label || '', 
-            })) ?? [],
-            modelAgreement: item.modelAgreement
-              ? item.modelAgreement.map((ma: any) => ({
-                  modelName: ma.modelName,
-                  status:
-                    ma.status === 'AGREE' || ma.status === 'NEUTRAL' || ma.status === 'DISAGREE'
-                      ? ma.status
-                      : 'NEUTRAL',
-                }))
-              : [],
-          };
-          return (
-            <div key={index} className="overflow-hidden">
-              <DeepAnalysisCard
-                {...normalizedItem}
-              />
-            </div>
-          );
-        })}
+        {results.map((item, index) => (
+          <div key={`${item.method}-${index}`} className="overflow-hidden">
+            {/* Optional per-method progress bar */}
+            {progress[item.method] !== undefined &&
+              progress[item.method] < 100 && (
+                <div className="mb-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: `${progress[item.method]}%` }}
+                  />
+                </div>
+              )}
+
+            <DeepAnalysisCard
+              method={item.method}
+              aiModel={item.aiModel}
+              query={item.query || QUERY}
+              answer={item.answer}
+              retrievedChunks={item.retrievedChunks}
+              evaluationMetrics={item.evaluationMetrics}
+            />
+          </div>
+        ))}
       </div>
     </div>
   );
