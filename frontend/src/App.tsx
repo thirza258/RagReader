@@ -33,10 +33,6 @@ function App() {
           />
         </Route>
 
-        <Route element={<DeepResultLayout />}>
-          <Route path="/deep-result" element={<DeepResult />} />
-        </Route>
-
         <Route element={<LoginPageLayout />}>
           <Route path="/login" element={<LoginPage />} />
         </Route>

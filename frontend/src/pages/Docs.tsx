@@ -9,7 +9,7 @@ const Docs: React.FC = () => {
     <div className="my-12 min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
       <main className="container mx-auto px-4 py-12 max-w-5xl">
         
-        {/* --- Hero Section --- */}
+        
         <section className="text-center mb-20 space-y-6">
           <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary pb-2">
             Intelligent RAG Workflow

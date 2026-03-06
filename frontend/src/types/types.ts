@@ -9,13 +9,7 @@ export type EvalScore = {
 export type Message = {
   user: UserRole;
   text: string;
-  evalScore?: EvalScore;
-};
-
-export type ChatResponse = {
-  status: number;
-  message: string;
-  data: string;
+  conversationId?: string;
 };
 
 export type EmbeddingStatus = "embedded" | "pending" | "failed";

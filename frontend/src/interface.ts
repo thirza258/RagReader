@@ -5,5 +5,6 @@ export interface ChatResponse {
   data: {
     answer: string;
     context?: string[];
+    conversation_id?: string;
   };
 }

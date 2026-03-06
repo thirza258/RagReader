@@ -51,7 +51,7 @@ export interface EvaluationMetric {
 export interface AnalysisResult {
   method: string;
   aiModel: string;
-  query?: string;
+  query: string;
   answer: string;
   retrievedChunks: RetrievedChunk[];
   evaluationMetrics: EvaluationMetric[];
@@ -62,6 +62,7 @@ export interface AnalysisResult {
 export interface WebSocketMessage {
   status?: string;
   method?: string;
+  query?: string;
   aiModel?: string;
   progress?: number;
   batch_id?: string;
@@ -116,7 +117,7 @@ export function transformToAnalysisResult(
     return {
       method: msg.method ?? "Unknown",
       aiModel: msg.aiModel ?? "Unknown",
-      query,
+      query: msg.query ?? query ?? "Unknown",
       answer: `Error: ${msg.error}`,
       retrievedChunks: [],
       evaluationMetrics: DUMMY_METRICS,
@@ -136,7 +137,7 @@ export function transformToAnalysisResult(
   return {
     method: msg.method ?? "Unknown",
     aiModel: msg.aiModel ?? "Unknown",
-    query,
+    query: msg.query ?? query ?? "Unknown",
     answer: msg.answer.answer,
     retrievedChunks: chunks,
     evaluationMetrics: DUMMY_METRICS,
@@ -151,6 +152,7 @@ export type OnErrorCallback = (error: Event) => void;
 export interface DeepAnalysisServiceOptions {
   url: string;
   query?: string;
+  onOpen?: () => void;
   onResult: OnResultCallback;
   onProgress?: OnProgressCallback;
   onError?: OnErrorCallback;
@@ -165,15 +167,17 @@ export interface DeepAnalysisServiceOptions {
 export function connectDeepAnalysisWebSocket(
   options: DeepAnalysisServiceOptions
 ): () => void {
-  const { url, query, onResult, onProgress, onError, onClose } = options;
+  const { url, query, onOpen, onResult, onProgress, onError, onClose } = options;
 
   const ws = new WebSocket(url);
 
-  ws.onmessage = (event: MessageEvent) => {
-    const raw: string =
-      typeof event.data === "string" ? event.data : String(event.data);
+  ws.onopen = () => {
+    if(onOpen) onOpen();
+  }
 
-    // Messages may be newline-separated; split and process each JSON block
+  ws.onmessage = (event: MessageEvent) => {
+    const raw: string = typeof event.data === "string" ? event.data : String(event.data);
+
     const lines = raw.split("\n");
     let buffer = "";
 
@@ -211,9 +215,16 @@ export function connectDeepAnalysisWebSocket(
     onClose?.();
   };
 
+  
+
   return () => {
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
       ws.close();
     }
   };
+}
+
+export function stopAllWebSockets(cleanups: (() => void)[]) {
+  cleanups.forEach((cleanup) => cleanup());
+  cleanups.length = 0;
 }

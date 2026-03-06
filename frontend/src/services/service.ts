@@ -97,12 +97,10 @@ const getJobStatus = async (
 };
 
 const startDeepAnalysis = async (
-    query: string,
-    username: string
+    conversation_id: string
 ) => {
     const response = await apiClient.post("/start-analysis/", {
-        QUERY: query,
-        USER: username,
+        conversation_id: conversation_id
     });
     return response.data;
 }

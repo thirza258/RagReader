@@ -7,6 +7,7 @@ import {
   Cpu,  
   Play 
 } from "lucide-react";
+import { stopAllWebSockets } from "../services/websocket";
 
 // --- Types ---
 interface DeepSidebarProps {
@@ -295,6 +296,17 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) =>
               </label>
             ))}
           </div>
+        </section>
+
+        <section>
+            <div className="flex items-center gap-2 mb-3 text-[hsl(var(--primary))]">
+              <button onClick={() => stopAllWebSockets([])}> 
+                <Play size={16} />
+                Stop Analysis
+              </button>
+              <h3 className="text-xs font-bold uppercase tracking-wider">Websocket Test</h3>
+             </div>
+
         </section>
 
       </div>

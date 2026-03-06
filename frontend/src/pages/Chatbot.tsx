@@ -36,6 +36,7 @@ function Chatbot() {
       const botMessage: Message = {
         user: "bot",
         text: response.data.answer, 
+        conversationId: response.data.conversation_id,
       };
   
       setMessages((prev) => [...prev, botMessage]);
@@ -65,7 +66,7 @@ function Chatbot() {
           user={msg.user}
           text={msg.text}
           onDeepAnalysis={
-            () => navigate("/deep-result")
+            () => navigate(`/deep-result/${msg.conversationId}`)
           }
         />
       ))}
