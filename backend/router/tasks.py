@@ -38,6 +38,7 @@ def run_single_analysis(batch_id, username, query, variant_config):
         ]
         
         AnalysisResult.objects.create(
+            query=query,
             batch_id=batch_id,
             method=variant_config["method"],
             ai_model=variant_config["model"],

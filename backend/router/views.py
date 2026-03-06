@@ -13,16 +13,16 @@ from utils.insert_file import get_loader
 from router.models import (
     Document, 
     GuestUser, Job,
-    AnalysisBatch, AnalysisResult, Conversation
+    AnalysisBatch, AnalysisResult, Conversation, ConversationHistory
 )
 from router.models import Job
-from router.tasks import initialize_rag_task, run_single_analysis
+from router.tasks import initialize_rag_task
 
 from rag.rag_service import rag_registry
 from router.serializers import (InsertDataSerializer, 
 InsertTextSerializer, 
 InsertURLSerializer, 
-QuerySerializer, )
+QuerySerializer )
 from common.constant import CONFIG_VARIANTS
 from common.schema import get_responses
 
@@ -120,16 +120,28 @@ class InsertTextView(GenericAPIView):
             return get_responses().response_500(error=str(e))
 
 class OpenChatView(APIView):
+    def response_adjuster(self, job):
+        return {
+            "job_id" : job.id,
+            "status" : "PENDING",
+            "progress" : 0,
+            "username": job.user.username
+        }
+        
+    def create_job(self, user: GuestUser) -> Job:
+        job = Job.objects.create(
+            user=user,
+            status=Job.Status.PENDING,
+            progress=0
+        )
+        return job
+
     def post(self, request):
         try:
             username = request.data.get("USER")
             user = GuestUser.objects.get(username=username) 
 
-            job = Job.objects.create(
-                user=user,
-                status=Job.Status.PENDING,
-                progress=0
-            )
+            job = self.create_job(user)
 
             method = CONFIG_VARIANTS[0]["method"]
             model_config = CONFIG_VARIANTS[0]["model"]
@@ -141,35 +153,64 @@ class OpenChatView(APIView):
                 model_config=model_config
             ))
             
-            return get_responses().response_202(message={
-                "job_id": job.id,
-                "status": "PENDING",      
-                "progress": 0,
-                "username": username
-            })
+            return get_responses().response_202(message=self.response_adjuster(job))
 
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
 class JobStatusView(APIView):
+    def responses_adjuster(self, job):
+        return {
+            "job_id": job.id,
+            "status": job.status,      
+            "progress": job.progress,
+            "username": job.user.username,
+            "error": job.error_message,
+            "updated_at": job.updated_at
+        }
+    
     def get(self, request, job_id):
         try:
             job = Job.objects.get(id=job_id)
-            return get_responses().response_200(response={
-                "job_id": job.id,
-                "status": job.status,      
-                "progress": job.progress,
-                "username": job.user.username,
-                "error": job.error_message,
-                "updated_at": job.updated_at
-            })
+            return get_responses().response_200(response=self.responses_adjuster(job))
         except Job.DoesNotExist:
             return get_responses().response_404(error="Job not found")
+        except Exception as e:
+            return get_responses().response_500(error=str(e))
+        
+class ConversationHistoryView(GenericAPIView):
+    def get(self, request, username):
+        try:
+            user = GuestUser.objects.get(username=username)
+            conversation_histories = ConversationHistory.objects.filter(user=user).select_related('conversation').order_by('-created_at')
+            data = [{
+                "query": history.conversation.query,
+                "response": history.conversation.response,
+                "context": history.conversation.context,
+                "created_at": history.created_at
+            } for history in conversation_histories]
+            return get_responses().response_200(response=data)
+        except GuestUser.DoesNotExist:
+            return get_responses().response_404(error="User not found")
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
 class QueryView(GenericAPIView):
     serializer_class = QuerySerializer
+    
+    def save_conversation(self, username: str, query: str, answer: str, context: str) -> Conversation:
+        user = GuestUser.objects.get(username=username)
+        conversation = Conversation.objects.create(
+            user=user,
+            query=query,
+            response=answer,
+            context=context
+        )
+        ConversationHistory.objects.create(
+            user=user,
+            conversation=conversation
+        )
+        return conversation
 
     def post(self, request):
         try:
@@ -188,13 +229,12 @@ class QueryView(GenericAPIView):
                  return get_responses().response_400(error=f"System is still initializing. Current status: {last_job.status}")
 
             answer = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).run(username, query)
+            retrieved_chunks = answer.get("context", [])
+            llm_answer = answer.get("answer", "")
             
-            answer_record = Conversation.objects.create(
-                user=GuestUser.objects.get(username=username),
-                query=query,
-                response=answer,
-                context=""
-            )
+            answer_record = self.save_conversation(username, query, llm_answer, "\n\n".join(retrieved_chunks))
+            
+            answer["conversation_id"] = answer_record.id
             
             return get_responses().response_200(response=answer)
         except Exception as e:
@@ -202,10 +242,23 @@ class QueryView(GenericAPIView):
 
 
 class StartAnalysisView(GenericAPIView):
+    def create_analysis_batch(self, user: GuestUser, conversation: Conversation, query: str, job_id: str) -> AnalysisBatch:
+        batch = AnalysisBatch.objects.create(
+            user=user,
+            conversation=conversation,
+            query=query,
+            job_id=job_id,
+            total_variants=len(CONFIG_VARIANTS)
+        )
+        return batch
+    
     def post(self, request):
         try:
-            username = request.data.get("USER")
-            query = request.data.get("QUERY")
+            conversation_id = request.data.get("conversation_id")
+            
+            current_conversation = Conversation.objects.get(id=conversation_id)
+            username = current_conversation.user.username
+            query = current_conversation.query
             
             batch_id = str(uuid.uuid4())
             
@@ -214,17 +267,13 @@ class StartAnalysisView(GenericAPIView):
                 "query": query
             }, timeout=300)
             
-            analysis_batch = AnalysisBatch.objects.create(
-                user=GuestUser.objects.get(username=username),
-                query=query,
-                job_id=batch_id,
-                total_variants=len(CONFIG_VARIANTS)
-            )
-            analysis_batch.save()
-
+            analysis_batch = self.create_analysis_batch(current_conversation.user, current_conversation, query, job_id=batch_id)
+            current_batch = analysis_batch.job_id
+            
             response = {
                 "message": "Analysis initiated",
-                "batch_id": batch_id,
+                "batch_id": current_batch,
+                "query": query,
                 "expected_count": len(CONFIG_VARIANTS)
             }
             
@@ -236,7 +285,6 @@ class StartAnalysisView(GenericAPIView):
 
 class AnalysisStatusView(GenericAPIView):
     def get(self, request, batch_id):
-        # 1. Simulate DB Lookup
         try:
             batch_id = uuid.UUID(batch_id)
             analysis_batch = AnalysisBatch.objects.get(job_id=batch_id)
