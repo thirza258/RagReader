@@ -1,6 +1,5 @@
 import uuid
 
-from django.shortcuts import render
 from django.db import transaction
 from django.core.cache import cache
 from rest_framework.views import APIView
@@ -13,16 +12,18 @@ from utils.insert_file import get_loader
 from router.models import (
     Document, 
     GuestUser, Job,
-    AnalysisBatch, AnalysisResult, Conversation, ConversationHistory
+    AnalysisBatch, AnalysisResult, 
+    Conversation, ConversationHistory
 )
-from router.models import Job
 from router.tasks import initialize_rag_task
 
 from rag.rag_service import rag_registry
-from router.serializers import (InsertDataSerializer, 
-InsertTextSerializer, 
-InsertURLSerializer, 
-QuerySerializer )
+from router.serializers import (
+    InsertDataSerializer, 
+    InsertTextSerializer, 
+    InsertURLSerializer, 
+    QuerySerializer 
+)
 from common.constant import CONFIG_VARIANTS
 from common.schema import get_responses
 
@@ -240,7 +241,6 @@ class QueryView(GenericAPIView):
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
-
 class StartAnalysisView(GenericAPIView):
     def create_analysis_batch(self, user: GuestUser, conversation: Conversation, query: str, job_id: str) -> AnalysisBatch:
         batch = AnalysisBatch.objects.create(
@@ -281,7 +281,6 @@ class StartAnalysisView(GenericAPIView):
             
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class AnalysisStatusView(GenericAPIView):
     def get(self, request, batch_id):

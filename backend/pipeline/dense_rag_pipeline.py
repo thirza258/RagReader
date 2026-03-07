@@ -214,7 +214,6 @@ class DenseRAGPipeline(BasePipeline):
         if not document.extracted_text_path:
             raise ValueError("Document has no text source path.")
 
-
         raw_text = self.loader.load(document.extracted_text_path)
         
         if job:
@@ -222,8 +221,6 @@ class DenseRAGPipeline(BasePipeline):
             job.save()
 
         chunks = self.chunker.chunk(raw_text)
-        
-        self._save_chunks(chunks)
 
         if job:
             job.progress = 50
