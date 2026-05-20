@@ -1,6 +1,5 @@
 import React from "react";
 import { steps } from "../components/data/DocsData";
-import landingPageImage from "../assets/docs/docs_landingpage.png";
 
 const Docs: React.FC = () => {
   return (

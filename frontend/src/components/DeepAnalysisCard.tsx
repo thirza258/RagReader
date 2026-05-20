@@ -82,7 +82,7 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
             </div>
 
             {retrievedChunks.length > 0 ? (
-              retrievedChunks.map((chunk, index) => (
+              retrievedChunks.map((chunk) => (
                 <div
                   key={chunk.id}
                   className="bg-slate-800/70 rounded-lg border border-slate-700 overflow-hidden transition-colors hover:bg-slate-800"

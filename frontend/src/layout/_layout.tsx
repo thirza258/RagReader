@@ -7,10 +7,7 @@ import { DeepResultContextType } from "../types/types";
 import { useState } from "react";
 
 const ChatLayout = () => {
-  const [sharedIds, setSharedIds] = useState<{ username: string | null; documentId: string | null }>({
-    username: null,
-    documentId: null
-  });
+
   
   return (
     <div className="flex flex-col h-screen overflow-hidden">

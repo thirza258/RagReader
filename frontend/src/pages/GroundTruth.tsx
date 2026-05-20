@@ -1,8 +1,7 @@
 import React, { useState } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
-  Save,
   CheckCircle2,
   AlertCircle,
   ChevronDown,
@@ -15,8 +14,6 @@ import GroundTruthChunk from "../components/GroundTruthChunk";
 
 import GroundTruthResponse from "../components/GroundTruthResponse";
 
-const cn = (...classes: (string | undefined | boolean)[]) =>
-  classes.filter(Boolean).join(" ");
 
 const ExpandablePanel: React.FC<{
   title: string;
@@ -42,8 +39,6 @@ const ExpandablePanel: React.FC<{
 
 const GroundTruthSelector: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
 
   // Extract IDs
   const { conversationId, documentId } = useParams<{
@@ -84,7 +79,7 @@ const GroundTruthSelector: React.FC = () => {
   setSubmitError("");
 
   try {
-    const [chunkResponse, textResponse] = await Promise.all([
+    const [textResponse] = await Promise.all([
       service.CreateGroundTruthChunk(conversationId, Array.from(selectedIds)),
       service.CreateGroundTruthResponse(conversationId, groundTruth),
     ]);
@@ -93,15 +88,12 @@ const GroundTruthSelector: React.FC = () => {
       throw new Error(textResponse.message || "Failed to submit response.");
     }
 
-    // ✅ Only called after both ground truth calls succeed
     const { batch_id, query, document_id } = await service.startDeepAnalysis(conversationId);
 
-    // ✅ Persist so DeepResult can recover on refresh
     localStorage.setItem(`batch_id_${conversationId}`, batch_id);
     localStorage.setItem("document_id", document_id);
     localStorage.setItem("conversation_id", conversationId);
 
-    // ✅ Pass analysis data to DeepResult via route state
     navigate(`/deep-result/${conversationId}`, {
       state: { batch_id, query, document_id },
     });
@@ -109,7 +101,9 @@ const GroundTruthSelector: React.FC = () => {
     console.error("Submission error:", error);
     setSubmitError("Failed to save the ground truth. Please try again.");
   } finally {
-    setIsSubmitting(false);
+    if (isSubmitting) {
+      setIsSubmitting(false);
+    }
   }
 };
 

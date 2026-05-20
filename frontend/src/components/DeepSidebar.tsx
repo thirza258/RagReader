@@ -8,7 +8,6 @@ import {
   Play 
 } from "lucide-react";
 import { stopAllWebSockets } from "../services/websocket";
-import { useNavigate } from "react-router-dom";
 import { DeepAnalysisConfig } from "../interface";
 
 interface DeepSidebarProps {
@@ -22,7 +21,7 @@ interface DeepSidebarProps {
 const RETRIEVAL_OPTIONS = ["Dense Retrieval", "Sparse Retrieval", "Hybrid Retrieval"];
 const AI_OPTIONS = ["GPT-4o", "Gemini Pro", "Claude 3.5 Sonnet"];
 
-const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, conversationId, documentId, onBack, onAnalyze }) => {
+const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, onBack, onAnalyze }) => {
   const [useReranker, setUseReranker] = useState<boolean>(false);
   const [chunkStrategy, setChunkStrategy] = useState<'custom' | 'paragraph' | 'semantic'>('custom')
   const [topK, setTopK] = useState<number>(5);
@@ -34,8 +33,6 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, conversationId, documen
     Dense: false,
     Reranker: false,
   });
-
-  const navigate = useNavigate();
 
   const [models, setModels] = useState<Record<string, boolean>>({
     "GPT-4o": true,
@@ -170,7 +167,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({ file, conversationId, documen
                   value={strategy}
                   checked={chunkStrategy === strategy}
                   onChange={() => {
-                    setChunkStrategy(strategy as any)
+                    setChunkStrategy(strategy as 'custom' | 'paragraph' | 'semantic');
                     if (strategy !== 'custom') setChunkSize('')
                   }}
                 />
