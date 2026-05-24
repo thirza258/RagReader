@@ -1,4 +1,5 @@
-import { apiClient, WS_URL } from "./apiClient";
+import { apiClient } from "./apiClient";
+
 
 const signUp = async (email: string, username: string) => {
     const response = await apiClient.post("/sign-up/", {
@@ -105,11 +106,7 @@ const startDeepAnalysis = async (
     return response.data;
 }
 
-const getDeepAnalysisResult = async (
-    batchId: string
-) => {
-    return new WebSocket(`${WS_URL}/analysis/${batchId}/`);
-}
+
 
 
 const cleanSystem = async () => {
@@ -236,7 +233,6 @@ export default {
     openChat,
     getJobStatus,
     startDeepAnalysis,
-    getDeepAnalysisResult,
     createChunk,
     CreateGroundTruthChunk,
     CreateGroundTruthResponse,

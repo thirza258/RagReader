@@ -15,6 +15,9 @@ import os
 from dotenv import load_dotenv
 import sys
 import dj_database_url
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -38,10 +41,6 @@ SECRET_KEY = os.getenv("SECRET_KEY", "secret-key-for-development")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
-
-CORS_ORIGIN_ALLOW_ALL = True
-CORS_ALLOW_CREDENTIALS = True
-
 
 # Application definition
 
@@ -71,7 +70,7 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
 }
 
-CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOW_METHODS = [
@@ -93,7 +92,14 @@ CORS_ALLOW_HEADERS = [
 ]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 CHANNEL_LAYERS = {
@@ -215,10 +221,7 @@ LOGGING = {
     },
 }
 
-CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/0"
+
 
 
 # Static files (CSS, JavaScript, Images)

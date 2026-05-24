@@ -1,29 +1,20 @@
-import { AnalysisResult, RetrievedChunk, WebSocketMessage, DeepAnalysisServiceOptions, StartAnalysisResponse } from "../interface";
+import { AnalysisResult, RetrievedChunk, WebSocketMessage, DeepAnalysisServiceOptions } from "../interface";
+const protocol = window.location.protocol === "https:" ? "wss" : "ws";
 
-const API_BASE_URL = "http://localhost:8000";
-const WS_BASE_URL = "ws://localhost:8000";    
+export const WS_BASE_URL =
+    import.meta.env.VITE_WS_URL ||
+    `${protocol}://${window.location.host}`;  
 
 /**
  * Calls the REST endpoint to initiate a deep analysis job.
  * Returns the batch_id used to subscribe to the WebSocket stream.
  */
-export async function startDeepAnalysis(
-  query: string,
-  username: string
-): Promise<StartAnalysisResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/analysis/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, username }),
-  });
 
-  if (!response.ok) {
-    throw new Error(`Failed to start analysis: ${response.statusText}`);
-  }
-
-  return response.json();
+export const getDeepAnalysisResult = async (
+    batchId: string
+) => {
+    return new WebSocket(`${WS_BASE_URL}/analysis/${batchId}/`);
 }
-
 /**
  * Builds the WebSocket URL from a batch_id.
  */
