@@ -4,6 +4,7 @@ nenv/
 __pycache__/
 
 test_dataset.pdf
+postgres/
 
 data.ipynb
 venv/

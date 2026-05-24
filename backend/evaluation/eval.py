@@ -229,15 +229,15 @@ def evaluate_response(response, ground_truth_response):
         print("evaluate_response:", response, ground_truth_response)
         scores = scorer.score(ground_truth_response, response)
         
-        bert_score = score([response], [ground_truth_response], lang='en', verbose=False, device="cuda")
+        # bert_score = score([response], [ground_truth_response], lang='en', verbose=False, device="cuda")
         
         return {
             "rougeL_precision": scores['rougeL'].precision,
             "rougeL_recall": scores['rougeL'].recall,
             "rougeL_f1": scores['rougeL'].fmeasure,
-            "bert_precision": bert_score[0].item(),
-            "bert_recall": bert_score[1].item(),
-            "bert_f1": bert_score[2].item()
+            "bert_precision": 0.0,
+            "bert_recall": 0.0,
+            "bert_f1": 0.0
         }
     except Exception as e:
         print(f"Error in evaluate_response: {e}")
