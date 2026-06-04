@@ -54,11 +54,6 @@ class HybridRAG(BaseRAG):
         sparse_results = self.sparse_engine.retrieve(query)
         dense_results = self.dense_engine.retrieve(query)
 
-        logger.debug(
-            f"Sparse docs: {len(self.sparse_engine.documents)}, "
-            f"Dense docs: {len(self.dense_engine.documents)}"
-        )
-
         seen: set = set()
         candidates: List[str] = []
         for r in sparse_results + dense_results:
@@ -73,7 +68,7 @@ class HybridRAG(BaseRAG):
     def _rerank(self, query: str, candidates: List[str]) -> List[str]:
         try:
             pairs = [(query, doc) for doc in candidates]
-            scores = self._cross_encoder.predict(pairs)  # np.ndarray
+            scores = self._cross_encoder.predict(pairs)  
             ranked = np.argsort(scores)[::-1]
             return [candidates[i] for i in ranked]
         except Exception as exc:
