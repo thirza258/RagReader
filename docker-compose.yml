@@ -4,6 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: ragreader_backend
+    restart: unless-stopped
     command: daphne -b 0.0.0.0 -p 8000 ragreader.asgi:application
     ports:
       - "8050:8000"
@@ -12,7 +13,6 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
-  
     env_file:
       - ./backend/.env
     volumes:
@@ -24,6 +24,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: ragreader_worker
+    restart: unless-stopped
     command: celery -A ragreader worker -l info
     depends_on:
       redis:
@@ -35,13 +36,13 @@ services:
     volumes:
       - media:/app/media
       - vectorstores:/app/vector_stores
-    
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: ragreader_frontend
+    restart: unless-stopped
     ports:
       - "5150:5176"
     env_file:
@@ -50,12 +51,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ragreader_redis
+    restart: unless-stopped
     ports:
       - "6350:6379"
 
   postgres:
     image: postgres:16-alpine
     container_name: ragreader_postgres
+    restart: unless-stopped
     ports:
       - "5433:5432"
     environment:
