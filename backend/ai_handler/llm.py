@@ -64,7 +64,6 @@ class OpenRouterLLM(BaseLLM):
     def __init__(self, model: str, temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
         
-        # OpenRouter Configuration
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
@@ -101,4 +100,12 @@ class GeminiLLM(OpenRouterLLM):
     Default model: google/gemini-pro-1.5
     """
     def __init__(self, model: str = "google/gemini-pro-1.5", temperature: float = 0.0, api_key: str = ""):
+        super().__init__(model, temperature, api_key)
+        
+class MistralLLM(OpenRouterLLM):
+    """
+    Mistral models via OpenRouter.
+    Default model: mistral/mistral-7b-instruct-v0.1.Q4_0.gguf
+    """
+    def __init__(self, model: str = "mistralai/mistral-nemo", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)

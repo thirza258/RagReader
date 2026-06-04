@@ -273,7 +273,7 @@ class DenseRAGPipeline(BasePipeline):
 
             ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
             if ground_truth_response:
-                evaluation_response_result = evaluate_response(result["answer"], ground_truth_response.response)
+                evaluation_response_result = evaluate_response(result["answer"], ground_truth_response.response, chunks=[doc["text"] for doc in result.get("context", [])])
             else:
                 logger.warning(f"No ground truth response for conversation {conversation_id}")
             
