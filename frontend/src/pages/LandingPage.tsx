@@ -1,15 +1,11 @@
 import React from "react";
 import {
-  BarChart3,
   BrainCircuit,
-  ChevronRight,
   Database,
   Layers,
   Library,
-  Microscope,
   Network,
   Search,
-  Share2,
   Vote,
 } from "lucide-react";
 import service from "../services/service";
@@ -34,11 +30,7 @@ const Card = ({
   </div>
 );
 
-const Badge = ({ children }: { children: React.ReactNode }) => (
-  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-    {children}
-  </span>
-);
+
 
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -272,7 +264,7 @@ const LandingPage: React.FC = () => {
       {/* --- Benefits / Methodologies Grid --- */}
       <section id="features" className="py-20 bg-slate-900/20">
         <div className="container mx-auto px-6">
-          <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             <Card>
               <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-lg flex items-center justify-center mb-4">
                 <Database className="w-6 h-6" />
@@ -307,143 +299,17 @@ const LandingPage: React.FC = () => {
                 Hybrid Retrieval
               </h3>
               <p className="text-sm text-slate-400">
-                Combines dense and sparse scores (RRF) for the most robust
+                Combines dense and sparse scores and adds reranking for the most robust
                 retrieval performance.
               </p>
             </Card>
 
-            <Card>
-              <div className="w-12 h-12 bg-green-500/20 text-green-400 rounded-lg flex items-center justify-center mb-4">
-                <Share2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white mb-2">
-                Iterative Retrieval
-              </h3>
-              <p className="text-sm text-slate-400">
-                Second-pass analysis using cross-encoders to re-order results
-                for maximum relevance.
-              </p>
-            </Card>
-
-            <Card>
-              <div className="w-12 h-12 bg-green-500/20 text-green-400 rounded-lg flex items-center justify-center mb-4">
-                <Share2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white mb-2">
-                Reranker Retrieval
-              </h3>
-              <p className="text-sm text-slate-400">
-                Second-pass analysis using cross-encoders to re-order results
-                for maximum relevance.
-              </p>
-            </Card>
+            
           </div>
         </div>
       </section>
 
-      {/* --- Popular Analysis Modules (The "Courses" section) --- */}
-      <section className="py-24 bg-gradient-to-b from-slate-950 to-blue-950/20">
-        <div className="container mx-auto px-6">
-          <div className="flex justify-between items-end mb-12">
-            <div>
-              <h2 className="text-3xl font-bold text-white mb-2">
-                Advanced Analysis Modules
-              </h2>
-              <p className="text-slate-400">
-                Drill down into your data with our specialized tools.
-              </p>
-            </div>
-            <a
-              href="#"
-              className="hidden md:flex items-center text-cyan-400 hover:text-cyan-300"
-            >
-              View all modules <ChevronRight className="w-4 h-4" />
-            </a>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {/* Module 1 */}
-            <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-700 hover:border-cyan-500/50 transition-all group">
-              <div className="h-48 bg-slate-800 relative group-hover:scale-105 transition-transform duration-500">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <BarChart3 className="w-16 h-16 text-slate-600 group-hover:text-cyan-400 transition-colors" />
-                </div>
-              </div>
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-3">
-                  <Badge>Metrics</Badge>
-                  <span className="text-slate-500 text-sm">Real-time</span>
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">
-                  Evaluation Suite
-                </h3>
-                <p className="text-slate-400 text-sm mb-4">
-                  Calculate MRR (Mean Reciprocal Rank), Precision@K, and
-                  Recall@K instantly.
-                </p>
-                <div className="flex items-center justify-between border-t border-slate-700 pt-4">
-                  <div className="flex -space-x-2">
-                    <div className="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-900"></div>
-                    <div className="w-8 h-8 rounded-full bg-slate-600 border-2 border-slate-900"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Module 2 */}
-            <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-700 hover:border-cyan-500/50 transition-all group">
-              <div className="h-48 bg-slate-800 relative group-hover:scale-105 transition-transform duration-500">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Vote className="w-16 h-16 text-slate-600 group-hover:text-purple-400 transition-colors" />
-                </div>
-              </div>
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-3">
-                  <Badge>Consensus</Badge>
-                  <span className="text-slate-500 text-sm">3 Models</span>
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">
-                  3-AI Voting Engine
-                </h3>
-                <p className="text-slate-400 text-sm mb-4">
-                  Orchestrate GPT-4, Claude 3, and Gemini to vote on the best
-                  answer for correctness.
-                </p>
-                <div className="flex items-center justify-between border-t border-slate-700 pt-4">
-                  <div className="text-xs text-slate-500">
-                    Accuracy boost: <span className="text-green-400">+14%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Module 3 */}
-            <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-700 hover:border-cyan-500/50 transition-all group">
-              <div className="h-48 bg-slate-800 relative group-hover:scale-105 transition-transform duration-500">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Microscope className="w-16 h-16 text-slate-600 group-hover:text-pink-400 transition-colors" />
-                </div>
-              </div>
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-3">
-                  <Badge>Deep Dive</Badge>
-                  <span className="text-slate-500 text-sm">Interactive</span>
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">
-                  Deep Analysis
-                </h3>
-                <p className="text-slate-400 text-sm mb-4">
-                  Click any generated answer to trace back the source chunks and
-                  view reranker scores.
-                </p>
-                <div className="flex items-center justify-between border-t border-slate-700 pt-4">
-                  <span className="text-slate-500 text-xs">Visual tracing</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      
 
       {/* --- Footer --- */}
       <footer className="bg-slate-950 border-t border-slate-800 pt-16 pb-8">
@@ -497,26 +363,7 @@ const LandingPage: React.FC = () => {
                 </li>
               </ul>
             </div>
-            <div>
-              <h4 className="text-white font-semibold mb-4">Company</h4>
-              <ul className="space-y-2 text-sm text-slate-400">
-                <li>
-                  <a href="#" className="hover:text-cyan-400">
-                    About
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-cyan-400">
-                    Careers
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-cyan-400">
-                    Contact
-                  </a>
-                </li>
-              </ul>
-            </div>
+
           </div>
           <div className="border-t border-slate-800 pt-8 text-center text-slate-600 text-sm">
             © 2024 RAG Reader Inc. All rights reserved.
