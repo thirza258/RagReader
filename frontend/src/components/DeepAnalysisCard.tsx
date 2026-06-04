@@ -32,9 +32,9 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
     rougeL_precision: "ROUGE-L Precision",
     rougeL_recall: "ROUGE-L Recall",
     rougeL_f1: "ROUGE-L F1",
-    bert_precision: "BERTScore Precision",
-    bert_recall: "BERTScore Recall",
-    bert_f1: "BERTScore F1",
+      faithfulness: "Faithfulness",
+      answer_relevance: "Answer Relevance",
+      answer_coverage: "Answer Coverage"
   };
 
   const getMetricLabel = (name: string): string =>

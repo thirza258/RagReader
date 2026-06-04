@@ -20,7 +20,7 @@ export interface RetrievedChunk {
 
 export interface EvaluationMetric {
   chunk_evaluation: Record<string, number>;
-    response_evaluation: Record<string, number>;
+    response_evaluation: Record<string, number | string>;
     retrieval_score?: { chunk_id: string; score: number }[];
 }
 
