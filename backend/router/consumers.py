@@ -9,6 +9,10 @@ from router.models import AnalysisBatch, AnalysisResult, GuestUser
 from rag.rag_service import rag_registry
 from common.constant import CONFIG_VARIANTS
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class AnalysisConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         try:
@@ -123,6 +127,8 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                     llm_answer = response.get("answer", "")
                     context = response.get("context", [])
                     evaluation = response.get("evaluation", {})
+                    
+                    logger.info(f"Evaluation for method {method} and model {model}: {evaluation}")
                     
                     retrieved_chunks = [
                         {"id": doc["chunk_id"], "text": doc["text"], "score": doc.get("score")}

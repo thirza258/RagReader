@@ -1,13 +1,13 @@
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: ragreader_backend
-    restart: unless-stopped
-    command: daphne -b 0.0.0.0 -p 8000 ragreader.asgi:application
+      context: ${BACKEND_CONTEXT:-./backend}
+      dockerfile: ${BACKEND_DOCKERFILE:-Dockerfile}
+    container_name: ${BACKEND_CONTAINER_NAME:-ragreader_backend}
+    restart: ${RESTART_POLICY:-unless-stopped}
+    command: ${BACKEND_COMMAND:-daphne -b 0.0.0.0 -p 8000 ragreader.asgi:application}
     ports:
-      - "8050:8000"
+      - "${BACKEND_PORT:-8050}:8000"
     depends_on:
       redis:
         condition: service_started
@@ -21,11 +21,11 @@ services:
 
   worker:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: ragreader_worker
-    restart: unless-stopped
-    command: celery -A ragreader worker -l info
+      context: ${BACKEND_CONTEXT:-./backend}
+      dockerfile: ${BACKEND_DOCKERFILE:-Dockerfile}
+    container_name: ${WORKER_CONTAINER_NAME:-ragreader_worker}
+    restart: ${RESTART_POLICY:-unless-stopped}
+    command: ${WORKER_COMMAND:-celery -A ragreader worker -l info}
     depends_on:
       redis:
         condition: service_started
@@ -39,36 +39,36 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: ragreader_frontend
-    restart: unless-stopped
+      context: ${FRONTEND_CONTEXT:-./frontend}
+      dockerfile: ${FRONTEND_DOCKERFILE:-Dockerfile}
+    container_name: ${FRONTEND_CONTAINER_NAME:-ragreader_frontend}
+    restart: ${RESTART_POLICY:-unless-stopped}
     ports:
-      - "5150:5176"
+      - "${FRONTEND_PORT:-5150}:5176"
     env_file:
       - ./frontend/.env
 
   redis:
-    image: redis:7-alpine
-    container_name: ragreader_redis
-    restart: unless-stopped
+    image: redis:${REDIS_VERSION:-7-alpine}
+    container_name: ${REDIS_CONTAINER_NAME:-ragreader_redis}
+    restart: ${RESTART_POLICY:-unless-stopped}
     ports:
-      - "6350:6379"
+      - "${REDIS_PORT:-6350}:6379"
 
   postgres:
-    image: postgres:16-alpine
-    container_name: ragreader_postgres
-    restart: unless-stopped
+    image: postgres:${POSTGRES_VERSION:-16-alpine}
+    container_name: ${POSTGRES_CONTAINER_NAME:-ragreader_postgres}
+    restart: ${RESTART_POLICY:-unless-stopped}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
-      POSTGRES_DB: mydatabase
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
-      - ./postgres:/var/lib/postgresql/data
+      - ${POSTGRES_DATA_PATH:-./postgres}:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-myuser} -d ${POSTGRES_DB:-mydatabase}"]
       interval: 5s
       timeout: 5s
       retries: 5

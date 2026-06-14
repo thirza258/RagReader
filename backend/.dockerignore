@@ -1,0 +1,59 @@
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+venv/
+.venv/
+env/
+nenv/
+
+# Database / data files
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.tmp
+.tmp/
+
+# Vector stores & media
+vector_stores/
+vectorstore/
+media/
+
+# Experiments / notebooks
+experiment/data/
+experiment/models/
+experiment/chroma-data/
+experiment/results/
+*.ipynb
+
+# Misc local files
+misc/
+chunks.txt

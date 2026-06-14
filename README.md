@@ -59,37 +59,57 @@ Or Running it with fill the .env.example to .env and then
 *   **LLM Backend:** Powered by OpenAI GPT for rapid and coherent response generation.
 
 ### 2. Deep Dive Mode (The "Click" Feature)
-When accuracy is paramount, click the answer to trigger a comprehensive analysis pipeline:
-*   **Retrieval Method:** simultaneously employs:
-    *   **Dense RAG:** Semantic search.
-    *   **Sparse RAG:** Keyword-based search BM25.
-    *   **Hybrid RAG:** Combining semantic and keyword scores with reranking model.
+When accuracy is paramount, click the answer to trigger a comprehensive analysis pipeline that runs your query through **9 independent pipelines** — every combination of retrieval method and LLM:
+
+*   **3 Retrieval Methods:**
+    *   **Dense RAG:** Semantic vector search using embeddings.
+    *   **Sparse RAG:** Keyword-based search with BM25.
+    *   **Hybrid RAG:** Combines semantic and keyword scores with a cross-encoder reranker.
+*   **3 LLMs:**
+    *   **OpenAI GPT-4o-mini**
+    *   **Anthropic Claude Haiku 4.5**
+    *   **Google Gemini 3 Flash**
+
+Results from all 9 pipelines are streamed live via WebSocket, so you can compare answers, context, and evaluation scores in real time.
    
 
 ### 3. Evaluation & Validation
-*   **Metrics:** Automatically calculates **MRR (Mean Reciprocal Rank)** , **Recall@K**,  and **Precision@K** scores to grade the quality of retrieved data.
-*   **RAGAs:** : 
+Each Deep Dive analysis is automatically evaluated against ground-truth data (if provided) using two layers of metrics:
+
+**Retrieval Quality** — how well the system finds the right chunks:
+*   **Precision@K** — fraction of retrieved chunks that are relevant.
+*   **Recall@K** — fraction of relevant chunks that were retrieved.
+*   **F1@K** — harmonic mean of Precision@K and Recall@K.
+
+**Response Quality** — how good the generated answer is:
+*   **ROUGE-L** (Precision, Recall, F1) — measures textual overlap with the ground-truth answer using longest common subsequence.
+*   **Faithfulness** (1–5) — LLM-judged: is the answer factually grounded in the retrieved chunks, or does it hallucinate?
+*   **Answer Relevance** (1–5) — LLM-judged: how well does the answer address the retrieved context?
+*   **Answer Coverage** (1–5) — LLM-judged: does the answer cover all the important points from the retrieved chunks?
+
+These metrics are calculated for every combination of retrieval method × LLM model, giving you a comprehensive view of which pipeline performs best for your documents.
     
 
 
 ## Tech Stack
 
-*   **LLM Orchestration:** OpenAI GPT, Anthropic Claude, Google Gemini.
+*   **LLM Orchestration:** OpenAI GPT-4o-mini, Anthropic Claude Haiku 4.5, Google Gemini 3 Flash.
+*   **Evaluation LLM:** Mistral Nemo (via OpenRouter) for faithfulness/relevance/coverage scoring.
 *   **Embedding Models:** OpenAI Embeddings and Mini LM.
-*   **Retrieval:** Hybrid Search, Dense, Sparse, Reranker
-*   **Framework:** LangChain.
+*   **Retrieval:** Dense (vector), Sparse (BM25), Hybrid (semantic + keyword + reranker).
+*   **Evaluation Metrics:** Precision@K, Recall@K, F1@K, ROUGE-L, Faithfulness, Answer Relevance, Answer Coverage.
+*   **Framework:** LangChain, Django, Celery, Redis, Django Channels (WebSocket).
 *   **Frontend:** React, Vite, Tailwind.
-*   **Backend:** Django for the AI/RAG API
 
 ## Usage Guide
 
 1.  **Upload:** Drag and drop your PDF, TXT, or MD files into the sidebar.
 2.  **Ask:** Type your question in the chat input.
 3.  **Read:** Get an immediate answer via Standard Dense RAG.
-4.  **Deep Dive:** **Click the answer** to watch your query run through all AIs and methods.
+4.  **Deep Dive:** **Click the answer** to watch your query run through all 9 pipelines (3 retrieval methods × 3 LLMs).
     *   See each retrieval, reranking, and evaluation performed by the system and every AI model.
-    *   Observe MRR and other metrics calculated at each step.
-    *   See whether the answer is good in semantic (RAGAs)
+    *   Observe Precision@K, Recall@K, F1@K, ROUGE-L, Faithfulness, Answer Relevance, and Answer Coverage calculated for each variant.
+    *   Compare answers across models and methods to find the most accurate response.
 
 ---
 

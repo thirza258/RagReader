@@ -1,3 +1,5 @@
+import json
+import re
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -110,16 +112,42 @@ def evaluate_chunks(chunks, ground_truth_chunks):
             "f1_k": 0.0
         }
     
+def _parse_llm_score(raw_response: str, key: str) -> float:
+    """
+    Parse the LLM's JSON response and extract the numeric score, normalized to 0–1.
+
+    The LLM is prompted to return JSON like {"faithfulness": 4, "justification": "..."}
+    with scores on a 1–5 scale. This function extracts the score and divides by 5
+    so it is consistent with the 0–1 range used by ROUGE-L and retrieval metrics.
+    """
+    try:
+        data = json.loads(raw_response)
+        score = float(data.get(key, 0))
+        return score / 5.0
+    except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+        # Fallback: try to find the first integer in the raw text
+        try:
+            numbers = re.findall(r'\d+', raw_response)
+            if numbers:
+                return float(numbers[0]) / 5.0
+        except (ValueError, TypeError):
+            pass
+        return 0.0
+
+
 def evaluate_response(response, ground_truth_response, chunks=None):
     """
-    Evaluasi jawaban dengan menghitung ROUGE-L Score.
-    
+    Evaluasi jawaban dengan menghitung ROUGE-L Score, Faithfulness,
+    Answer Relevance, dan Answer Coverage.
+
     Args:
         response (str): Jawaban dari AI.
         ground_truth_response (str): Jawaban yang benar (ground truth).
-        
+        chunks (list, optional): List teks chunk yang diretrieve.
+
     Returns:
-        dict: Dictionary berisi skor ROUGE-L Precision, Recall, dan F1.
+        dict: Dictionary berisi skor ROUGE-L Precision, Recall, F1,
+              faithfulness, answer_relevance, dan answer_coverage (semua 0–1).
     """
     try:
         scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
@@ -127,12 +155,12 @@ def evaluate_response(response, ground_truth_response, chunks=None):
         faithfulness_prompt = build_faithfulness_prompt(response, "\n".join(chunks) if chunks else "")
         relevance_prompt = build_relevance_prompt(response, "\n".join(chunks) if chunks else "")
         coverage_prompt = build_coverage_prompt(response, "\n".join(chunks) if chunks else "")
-        
+
         mistral = MistralLLM()
-        faithfulness_score = mistral._call_api(faithfulness_prompt)
-        relevance_score = mistral._call_api(relevance_prompt)
-        coverage_score = mistral._call_api(coverage_prompt)
-        
+        faithfulness_score = _parse_llm_score(mistral._call_api(faithfulness_prompt), "faithfulness")
+        relevance_score = _parse_llm_score(mistral._call_api(relevance_prompt), "relevance")
+        coverage_score = _parse_llm_score(mistral._call_api(coverage_prompt), "coverage")
+
         return {
             "rougeL_precision": scores['rougeL'].precision,
             "rougeL_recall": scores['rougeL'].recall,

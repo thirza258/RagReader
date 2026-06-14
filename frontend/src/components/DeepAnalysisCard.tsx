@@ -41,8 +41,11 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
     METRIC_LABEL_MAP[name] ??
     name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const formatMetricValue = (value: number): string =>
-    (value * 100).toFixed(1) + "%";
+  const formatMetricValue = (value: number | string): string => {
+    const num = typeof value === "string" ? parseFloat(value) : value;
+    if (isNaN(num)) return "N/A";
+    return (num * 100).toFixed(1) + "%";
+  };
   return (
     <div className={`relative ${className}`}>
       <div className="relative z-10 bg-slate-900 border border-slate-700 rounded-2xl p-4 shadow-2xl  ">
