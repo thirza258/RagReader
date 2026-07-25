@@ -93,10 +93,6 @@
 #           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
 #           OPEN_ROUTER_KEY=${{ secrets.OPEN_ROUTER_KEY }}
 
-#           LANGSMITH_TRACING=false
-#           LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}
-#           LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}
-#           LANGSMITH_PROJECT=${{ secrets.LANGSMITH_PROJECT }}
 #           ENV
 
 #           mkdir -p frontend

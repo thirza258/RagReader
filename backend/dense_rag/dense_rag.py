@@ -1,6 +1,6 @@
-import os
 import numpy as np
 from typing import List, Dict, Any, Optional
+from django.conf import settings
 from openai import OpenAI
 from sklearn.metrics.pairwise import cosine_similarity
 from rag.base_rag import BaseRAG
@@ -17,9 +17,9 @@ class DenseRAG(BaseRAG):
         """
         super().__init__(config)
         
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = settings.OPENROUTER_API_KEY
         if not api_key:
-            raise ValueError("OPENROUTER_API_KEY not found in environment variables.")
+            raise ValueError("OPENROUTER_API_KEY not found in settings.")
         
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",

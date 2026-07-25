@@ -1,22 +1,22 @@
-from langchain_openai import ChatOpenAI
 from common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
 from abc import ABC, abstractmethod
 from typing import Optional
-import os
+from django.conf import settings
 from openai import OpenAI
+
+# All LLMs are routed through OpenRouter using a single API key.
+# Provider-specific classes just set the appropriate model prefix.
+
 
 class BaseLLM(ABC):
     def __init__(self, model: str, temperature: float = 0.0, api_key: Optional[str] = None):
         self.model = model
         self.temperature = temperature
-        self.api_key = api_key
+        self.api_key = api_key or settings.OPENROUTER_API_KEY
 
     @abstractmethod
     def _call_api(self, prompt: str) -> str:
-        """
-        Abstract method that child classes must implement.
-        This handles the specific API call to the provider.
-        """
+        """Abstract method that child classes must implement."""
         pass
 
     def generate(self, prompt: str) -> str:
@@ -39,38 +39,18 @@ class BaseLLM(ABC):
         return self._call_api(formatted_prompt)
 
 
-class OpenAILLM(BaseLLM):
-    def __init__(self, model: str = "gpt-4o", temperature: float = 0.0, api_key: str = ""):
-        super().__init__(model, temperature, api_key)
-        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+class OpenRouterBase(BaseLLM):
+    """Base class for OpenRouter-routed models using the OpenAI-compatible API."""
 
-    def _call_api(self, prompt: str) -> str:
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature
-            )
-            return (response.choices[0].message.content or "").strip()
-        except Exception as e:
-            return f"OpenAI Error: {e}"
-
-
-class OpenRouterLLM(BaseLLM):
-    """
-    Base class for any model routed via OpenRouter.
-    It uses the OpenAI SDK but points to the OpenRouter URL.
-    """
     def __init__(self, model: str, temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
-        
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
+            api_key=self.api_key,
             default_headers={
-                "HTTP-Referer": "https://rag.nevatal.tech", 
-                "X-Title": "RagReader"
-            }
+                "HTTP-Referer": "https://rag.nevatal.tech",
+                "X-Title": "RagReader",
+            },
         )
 
     def _call_api(self, prompt: str) -> str:
@@ -78,34 +58,32 @@ class OpenRouterLLM(BaseLLM):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature
+                temperature=self.temperature,
             )
             return (response.choices[0].message.content or "").strip()
         except Exception as e:
             return f"OpenRouter Error ({self.model}): {e}"
 
 
-class ClaudeLLM(OpenRouterLLM):
-    """
-    Anthropic models via OpenRouter.
-    Default model: anthropic/claude-3.5-sonnet
-    """
+class OpenAILLM(OpenRouterBase):
+    """OpenAI models via OpenRouter (e.g. openai/gpt-4o, openai/gpt-4o-mini)."""
+    def __init__(self, model: str = "openai/gpt-4o", temperature: float = 0.0, api_key: str = ""):
+        super().__init__(model, temperature, api_key)
+
+
+class ClaudeLLM(OpenRouterBase):
+    """Anthropic models via OpenRouter (e.g. anthropic/claude-3.5-sonnet)."""
     def __init__(self, model: str = "anthropic/claude-3.5-sonnet", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
 
 
-class GeminiLLM(OpenRouterLLM):
-    """
-    Google models via OpenRouter.
-    Default model: google/gemini-pro-1.5
-    """
-    def __init__(self, model: str = "google/gemini-pro-1.5", temperature: float = 0.0, api_key: str = ""):
+class GeminiLLM(OpenRouterBase):
+    """Google models via OpenRouter (e.g. google/gemini-2.0-flash)."""
+    def __init__(self, model: str = "google/gemini-2.0-flash", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
-        
-class MistralLLM(OpenRouterLLM):
-    """
-    Mistral models via OpenRouter.
-    Default model: mistral/mistral-7b-instruct-v0.1.Q4_0.gguf
-    """
+
+
+class MistralLLM(OpenRouterBase):
+    """Mistral models via OpenRouter (e.g. mistralai/mistral-nemo)."""
     def __init__(self, model: str = "mistralai/mistral-nemo", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)

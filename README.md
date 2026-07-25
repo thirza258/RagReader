@@ -12,8 +12,27 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 ### Prerequisites
 - **Python 3.9+** and **npm** installed.
 - **Redis server** installed and running.
+- **PostgreSQL** (for production mode; SQLite is used in development).
 
 ### Steps
+
+#### Option 1: Docker (Recommended)
+
+1. **Configure environment**  
+   ```bash
+   cp .env.example .env
+   cp .env.example backend/.env
+   cp frontend/.env.example frontend/.env
+   ```
+   Edit each `.env` file and fill in your API keys and credentials.
+
+2. **Start all services**  
+   ```bash
+   docker compose up -d --build
+   ```
+   The app will be available at [http://localhost:5150](http://localhost:5150).
+
+#### Option 2: Manual Setup
 
 1. **Start Redis server**  
    Make sure Redis is running.  
@@ -28,28 +47,24 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 2. **Start Celery worker**  
    From the backend directory, start a Celery worker for background tasks:  
    ```bash
+   cd backend
    celery -A ragreader worker --loglevel=info
    ```
 
 3. **Run Django backend**  
-   Start the backend server:  
+   From the backend directory:  
    ```bash
    python manage.py runserver
    ```
 
 4. **Run the frontend**  
-   From the frontend directory, start the development server:  
+   From the frontend directory:  
    ```bash
    npm install     
    npm run dev
    ```
 
 Once all services are running, access the app at [http://localhost:5173](http://localhost:5173) (or as indicated in the terminal).
-
-Or Running it with fill the .env.example to .env and then
-   ```bash
-    docker compose up -d --build
-   ```
 
 
 ## Key Features
@@ -131,6 +146,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## Citation
 
+```bibtex
 @misc{es2025ragasautomatedevaluationretrieval,
       title={Ragas: Automated Evaluation of Retrieval Augmented Generation}, 
       author={Shahul Es and Jithin James and Luis Espinosa-Anke and Steven Schockaert},
@@ -140,3 +156,4 @@ Distributed under the MIT License. See `LICENSE` for more information.
       primaryClass={cs.CL},
       url={https://arxiv.org/abs/2309.15217}, 
 }
+```
