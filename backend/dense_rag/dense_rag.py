@@ -39,7 +39,7 @@ class DenseRAG(BaseRAG):
         Helper to call OpenAI API. Handles batching automatically if list is small,
         """
         cleaned_texts = [text.replace("\n", " ") for text in texts]
-        
+
         try:
             response = self.client.embeddings.create(
                 input=cleaned_texts,
@@ -47,8 +47,7 @@ class DenseRAG(BaseRAG):
             )
             return [data.embedding for data in response.data]
         except Exception as e:
-            print(f"Error calling OpenAI Embeddings API: {e}")
-            return []
+            raise RuntimeError(f"Embeddings API call failed ({self.model}): {e}") from e
 
     def index_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
@@ -64,11 +63,11 @@ class DenseRAG(BaseRAG):
         
         embeddings = self._get_embeddings(texts)
         
-        if embeddings:
-            self.document_vectors = np.array(embeddings)
-            print("Indexing complete. Vectors stored in memory.")
-        else:
-            print("Indexing failed: No embeddings returned.")
+        if not embeddings:
+            raise RuntimeError("Indexing failed: no embeddings returned.")
+
+        self.document_vectors = np.array(embeddings)
+        print("Indexing complete. Vectors stored in memory.")
             
 
     def retrieve(self, query: str) -> List[str]:
@@ -81,12 +80,12 @@ class DenseRAG(BaseRAG):
             print("Warning: Database is empty.")
             return []
 
-        query_embedding_list = self._get_embeddings([query])[0]
-        
-        if not query_embedding_list:
+        query_embeddings = self._get_embeddings([query])
+
+        if not query_embeddings:
             return []
-            
-        query_vector = np.array(query_embedding_list).reshape(1, -1) 
+
+        query_vector = np.array(query_embeddings[0]).reshape(1, -1)
 
         similarities = cosine_similarity(query_vector, self.document_vectors).flatten()
 

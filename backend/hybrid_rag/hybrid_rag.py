@@ -26,6 +26,7 @@ class HybridRAG(BaseRAG):
 
         self.final_top_k = config.get("top_k", 3)
         self.child_top_k = config.get("child_top_k", 10)
+        self.rrf_k = config.get("rrf_k", 60)
         self.reranker_model = config.get("reranker_model", "cross-encoder/ms-marco-MiniLM-L6-v2")
 
         print(f"Initializing Hybrid Engine (fetching top {self.child_top_k} from children)...")
@@ -55,22 +56,32 @@ class HybridRAG(BaseRAG):
         dense_results = self.dense_engine.retrieve(query)
 
         seen: set = set()
-        candidates: List[str] = []
+        candidates: List[Dict[str, Any]] = []
         for r in sparse_results + dense_results:
             text = r["text"].strip()
             if text not in seen:
                 seen.add(text)
-                candidates.append(text)
+                candidates.append(r)
 
         reranked = self._rerank(query, candidates)
         return reranked[: self.final_top_k]
 
-    def _rerank(self, query: str, candidates: List[str]) -> List[str]:
+    def _rerank(self, query: str, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rerank candidate chunk dicts with the cross-encoder.
+
+        Keeps the {text, chunk_id, score} contract shared by all engines —
+        `score` is replaced with the cross-encoder relevance score.
+        """
+        if not candidates:
+            return []
         try:
-            pairs = [(query, doc) for doc in candidates]
-            scores = self._cross_encoder.predict(pairs)  
+            pairs = [(query, doc["text"]) for doc in candidates]
+            scores = self._cross_encoder.predict(pairs)
             ranked = np.argsort(scores)[::-1]
-            return [candidates[i] for i in ranked]
+            return [
+                {**candidates[i], "score": float(scores[i])}
+                for i in ranked
+            ]
         except Exception as exc:
             logger.error(f"Reranking error: {exc}")
             return candidates
@@ -86,11 +97,9 @@ class HybridRAG(BaseRAG):
         doc_scores = defaultdict(float)
 
         for rank, doc in enumerate(sparse_results):
-            score = 1 / (self.rrf_k + rank + 1)
-            doc_scores[doc] += score
+            doc_scores[doc["text"]] += 1 / (self.rrf_k + rank + 1)
 
         for rank, doc in enumerate(dense_results):
-            score = 1 / (self.rrf_k + rank + 1)
-            doc_scores[doc] += score
+            doc_scores[doc["text"]] += 1 / (self.rrf_k + rank + 1)
 
         return {"scores": dict(doc_scores)}

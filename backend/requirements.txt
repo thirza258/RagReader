@@ -1,6 +1,6 @@
 beautifulsoup4
 bert-score
-roug  e-score
+rouge-score
 celery
 daphne
 channels

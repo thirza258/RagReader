@@ -52,7 +52,6 @@ export function transformToAnalysisResult(
   query?: string
 ): AnalysisResult | null {
   if (msg.status === "INITIALIZING" || msg.status === "COMPLETE") return null;
-  if (!msg.answer) return null;
 
   if (msg.error) {
     return {
@@ -71,6 +70,8 @@ export function transformToAnalysisResult(
       error: msg.error,
     };
   }
+
+  if (!msg.answer) return null;
 
   const chunks: RetrievedChunk[] = (msg.context ?? []).map((chunk) => ({
     id: chunk.chunk_id,

@@ -38,7 +38,7 @@ class SparseRAG(BaseRAG):
         """
         Helper to lowercase, remove punctuation, and tokenize text.
         """
-        text = re.sub(f'[^a-zA-Z0-9\s]', '', text.lower())
+        text = re.sub(r'[^a-zA-Z0-9\s]', '', text.lower())
         tokens = word_tokenize(text)
         return [w for w in tokens if w not in self.stop_words]
 

@@ -1,6 +1,10 @@
+import logging
+
 from celery import shared_task
 from .models import Job, AnalysisBatch, AnalysisResult
 from rag.rag_service import rag_registry
+
+logger = logging.getLogger(__name__)
 
 @shared_task(bind=True)
 def initialize_rag_task(self, job_id, username, method, model_config):
@@ -28,6 +32,7 @@ def initialize_rag_task(self, job_id, username, method, model_config):
 @shared_task(bind=True)
 def run_single_analysis(self, batch_id, username, query, variant_config):
     try:
+        batch = AnalysisBatch.objects.get(job_id=batch_id)
         engine = rag_registry.get_engine(variant_config["method"], variant_config["model"])
         response = engine.run(username, query)
 
@@ -53,7 +58,7 @@ def run_single_analysis(self, batch_id, username, query, variant_config):
 
         AnalysisResult.objects.create(
             query=query,
-            batch_id=batch_id,
+            batch=batch,
             method=variant_config["method"],
             ai_model=variant_config["model"],
             answer=response.get("answer", ""),
@@ -62,4 +67,5 @@ def run_single_analysis(self, batch_id, username, query, variant_config):
         )
         return True
     except Exception as e:
+        logger.error(f"run_single_analysis failed for batch {batch_id}: {e}", exc_info=True)
         return False

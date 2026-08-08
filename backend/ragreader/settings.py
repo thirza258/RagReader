@@ -167,13 +167,24 @@ if DEVELOPMENT_MODE is True:
             "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
         }
     }
-else:
-    if len(sys.argv) > 0 and sys.argv[1] != 'collectstatic':
-        if os.getenv("DATABASE_URL", None) is None:
-            raise Exception("DATABASE_URL environment variable not defined")
-        DATABASES = {
-            "default": dj_database_url.parse(os.environ.get("DATABASE_URL")),
+elif os.getenv("DATABASE_URL"):
+    DATABASES = {
+        "default": dj_database_url.parse(os.environ["DATABASE_URL"]),
+    }
+elif "collectstatic" in sys.argv:
+    # collectstatic never touches the database; a dummy sqlite config keeps
+    # Django's system checks happy without requiring DATABASE_URL.
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
         }
+    }
+else:
+    raise Exception(
+        "DATABASE_URL environment variable not defined "
+        "(set DATABASE_URL, or DEVELOPMENT_MODE=True to use sqlite)"
+    )
 
 
 # Password validation

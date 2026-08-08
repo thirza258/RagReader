@@ -1,5 +1,3 @@
-from importlib.resources import path
-from os import path
 import os
 import pickle
 import logging
@@ -32,7 +30,8 @@ logger = logging.getLogger(__name__)
 class DenseRAGPipeline(BasePipeline):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        
+
+        self.method = "dense"
         self.rag = DenseRAG(config)
         self.llm = self._initialize_llm(config.get("llm_model", "openai"))
         self.chunker = DocumentChunker(
@@ -131,16 +130,24 @@ class DenseRAGPipeline(BasePipeline):
         if doc_vector:
             logger.info("Existing index found. Loading into memory.")
             success = self._load_state(doc_vector.vectorstore_location)
+            if success:
+                return True
 
-            if not success:
-                raise RuntimeError("Index record exists but file load failed.")
-
-            return True
+            logger.warning("Corrupt or missing index. Deleting record and re-indexing...")
+            self._discard_bad_index(doc_vector)
 
         self._build_index(username, document)
 
         logger.info("Initialization Complete.")
         return True
+
+    def _discard_bad_index(self, doc_vector) -> None:
+        try:
+            if os.path.exists(doc_vector.vectorstore_location):
+                os.remove(doc_vector.vectorstore_location)
+            doc_vector.delete()
+        except Exception as e:
+            logger.error(f"Failed to clean up bad index: {e}")
 
     def _save_chunks(self, chunks: list) -> str:
         """
@@ -174,18 +181,7 @@ class DenseRAGPipeline(BasePipeline):
         if not self.rag.documents or len(self.rag.documents) == 0:
             logger.warning("No documents found in memory. Initializing...")
 
-            doc_vector = DocumentVector.objects.filter(
-                document=document,
-                status="ready",
-                method="dense"
-            ).last()
-
-            if not doc_vector:
-                raise ValueError("No ready index found for this document.")
-
-            success = self._load_state(doc_vector.vectorstore_location)
-            if not success:
-                raise RuntimeError("Index record exists but file load failed.")
+            self.init(document.user.username)
 
             if not self.rag.documents or len(self.rag.documents) == 0:
                 raise RuntimeError("State loaded from disk, but memory is still empty.")
@@ -244,47 +240,43 @@ class DenseRAGPipeline(BasePipeline):
         """
         evaluates retrieved chunks and answer against ground truth.
         """
-        try:
-            logger.info(f"Running Analysis for conversation {conversation_id}...")
+        logger.info(f"Running Analysis for conversation {conversation_id}...")
 
-            document = Document.objects.get(id=document_id)
-            conversation = Conversation.objects.get(id=conversation_id)
+        document = Document.objects.get(id=document_id)
+        conversation = Conversation.objects.get(id=conversation_id)
 
-            result = self._run_core(document, conversation.query)
+        result = self._run_core(document, conversation.query)
 
-            retrieved_docs = result.pop("retrieved_docs", [])
+        retrieved_docs = result.pop("retrieved_docs", [])
 
-            if not retrieved_docs:
-                result["evaluation"] = {}
-                return result
-
-            retrieved_ids = set(result["chunk_ids"])
-
-            ground_truth_qs = GroundTruthChunk.objects.filter(conversation=conversation)
-
-            if not ground_truth_qs.exists():
-                logger.warning(f"No ground truth chunks for conversation {conversation_id}")
-
-            ground_truth_ids = set(
-                ground_truth_qs.values_list("chunk_id", flat=True)
-            )
-            
-            evaluation_chunks_results = evaluate_chunks(retrieved_ids, ground_truth_ids)
-
-            ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
-            if ground_truth_response:
-                evaluation_response_result = evaluate_response(result["answer"], ground_truth_response.response, chunks=[doc["text"] for doc in result.get("context", [])])
-            else:
-                logger.warning(f"No ground truth response for conversation {conversation_id}")
-            
-            result["evaluation"] = {
-                "chunk_evaluation": evaluation_chunks_results,
-                "response_evaluation": evaluation_response_result if ground_truth_response else {}
-            }
+        if not retrieved_docs:
+            result["evaluation"] = {}
             return result
-        except Exception as e:
-            logger.error(f"Error in run_analysis: {e}")
-            return {"error": str(e)}
+
+        retrieved_ids = set(result["chunk_ids"])
+
+        ground_truth_qs = GroundTruthChunk.objects.filter(conversation=conversation)
+
+        if not ground_truth_qs.exists():
+            logger.warning(f"No ground truth chunks for conversation {conversation_id}")
+
+        ground_truth_ids = set(
+            ground_truth_qs.values_list("chunk_id", flat=True)
+        )
+
+        evaluation_chunks_results = evaluate_chunks(retrieved_ids, ground_truth_ids)
+
+        ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
+        if ground_truth_response:
+            evaluation_response_result = evaluate_response(result["answer"], ground_truth_response.response, chunks=[doc["text"] for doc in result.get("context", [])])
+        else:
+            logger.warning(f"No ground truth response for conversation {conversation_id}")
+
+        result["evaluation"] = {
+            "chunk_evaluation": evaluation_chunks_results,
+            "response_evaluation": evaluation_response_result if ground_truth_response else {}
+        }
+        return result
 
     
     def init_job(self, username: str, job=None) -> bool:
@@ -315,11 +307,11 @@ class DenseRAGPipeline(BasePipeline):
                 job.save()
 
             success = self._load_state(doc_vector.vectorstore_location)
+            if success:
+                return True
 
-            if not success:
-                raise RuntimeError("Index record exists but file load failed.")
-
-            return True
+            logger.warning("Corrupt or missing index. Deleting record and re-indexing...")
+            self._discard_bad_index(doc_vector)
 
         if job:
             job.progress = 20

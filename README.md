@@ -26,11 +26,20 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
    ```
    Edit each `.env` file and fill in your API keys and credentials.
 
-2. **Start all services**  
+2. **Deploy (tests run first, deploy aborts if they fail)**  
    ```bash
-   docker compose up -d --build
+   ./deploy.sh
    ```
-   The app will be available at [http://localhost:5150](http://localhost:5150).
+   The script builds the backend image, runs the Django test suite inside it,
+   type-checks and builds the frontend, then starts all services and waits for
+   the backend health check. The app will be available at
+   [http://localhost:5150](http://localhost:5150).
+
+   Other modes:
+   ```bash
+   ./deploy.sh test         # run the test gate only (no deploy)
+   ./deploy.sh --skip-tests # emergency deploy without the test gate
+   ```
 
 #### Option 2: Manual Setup
 
@@ -65,6 +74,20 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
    ```
 
 Once all services are running, access the app at [http://localhost:5173](http://localhost:5173) (or as indicated in the terminal).
+
+### Running the tests
+
+The backend test suite is hermetic — it needs no Redis, database server,
+network access, or API keys:
+
+```bash
+cd backend
+DEVELOPMENT_MODE=True RAG_DISABLE_ENGINE_INIT=1 python manage.py test
+```
+
+`RAG_DISABLE_ENGINE_INIT=1` skips loading the RAG engines (embedding clients,
+cross-encoder downloads) so the suite runs fast anywhere. The same suite is
+executed inside the backend Docker image by `./deploy.sh` before every deploy.
 
 
 ## Key Features

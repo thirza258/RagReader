@@ -88,7 +88,7 @@ class RAGResponse(BaseModel):
         , content_type="application/json"
         )
 
-    
+    @staticmethod
     def response_404(error: str):
         return JsonResponse({
             "status": 404,

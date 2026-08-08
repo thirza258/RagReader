@@ -7,7 +7,7 @@ from evaluation.models import Chunk, GroundTruthChunk, GroundTruthResponse
 from router.models import Conversation, GuestUser, Document, AnalysisBatch, AnalysisResult
 from common.chunker import DocumentChunker
 from common.schema import get_responses
-from .eval import evaluate_chunks
+from .eval import evaluate_chunks, evaluate_response
 
 from utils.insert_file import DataLoader
 
@@ -235,11 +235,31 @@ class GroundTruthResponseEvaluationView(APIView):
         try:
             conversation_id = request.data.get("conversation_id")
             response_text = request.data.get("response")
-            
+
+            if not conversation_id or not response_text:
+                return Response(
+                    {"error": "conversation_id and response are required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             conversation = Conversation.objects.get(id=conversation_id)
-            gt_responses = GroundTruthResponse.objects.filter(conversation=conversation)
-            
-            pass
+            ground_truth = GroundTruthResponse.objects.filter(conversation=conversation).first()
+
+            if not ground_truth:
+                return Response(
+                    {"error": "No ground truth response found for this conversation"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            scores = evaluate_response(response_text, ground_truth.response)
+
+            return Response(
+                {
+                    "conversation_id": conversation.id,
+                    "scores": scores,
+                },
+                status=status.HTTP_200_OK
+            )
         except Conversation.DoesNotExist:
             return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:

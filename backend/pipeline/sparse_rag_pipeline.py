@@ -29,6 +29,7 @@ class SparseRAGPipeline(BasePipeline):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
 
+        self.method = "sparse"
         self.rag = SparseRAG(config)
 
         self.llm = self._initialize_llm(config.get("llm_model", "openai"))
@@ -127,15 +128,24 @@ class SparseRAGPipeline(BasePipeline):
             logger.info("Existing index found. Loading into memory.")
 
             success = self._load_state(doc_vector.vectorstore_location)
-            if not success:
-                raise RuntimeError("Index record exists but file load failed.")
+            if success:
+                return True
 
-            return True
+            logger.warning("Corrupt or missing index. Deleting record and re-indexing...")
+            self._discard_bad_index(doc_vector)
 
         self._build_index(username, document)
 
         logger.info("Initialization Complete.")
         return True
+
+    def _discard_bad_index(self, doc_vector) -> None:
+        try:
+            if os.path.exists(doc_vector.vectorstore_location):
+                os.remove(doc_vector.vectorstore_location)
+            doc_vector.delete()
+        except Exception as e:
+            logger.error(f"Failed to clean up bad index: {e}")
 
     def _run_core(self, document: Document, query: str) -> Dict[str, Any]:
         """
@@ -146,18 +156,7 @@ class SparseRAGPipeline(BasePipeline):
         if not self.rag.documents or len(self.rag.documents) == 0:
             logger.warning("No documents found in memory. Initializing...")
 
-            doc_vector = DocumentVector.objects.filter(
-                document=document,
-                status="ready",
-                method="sparse"
-            ).last()
-
-            if not doc_vector:
-                raise ValueError("No ready index found for this document.")
-
-            success = self._load_state(doc_vector.vectorstore_location)
-            if not success:
-                raise RuntimeError("Index record exists but file load failed.")
+            self.init(document.user.username)
 
             if not self.rag.documents or len(self.rag.documents) == 0:
                 raise RuntimeError("State loaded from disk, but memory is still empty. The .pkl file might be corrupt or empty.")
@@ -282,14 +281,14 @@ class SparseRAGPipeline(BasePipeline):
             logger.info("Existing index found. Loading into memory.")
 
             success = self._load_state(doc_vector.vectorstore_location)
-            if not success:
-                raise RuntimeError("Index record exists but file load failed.")
+            if success:
+                if job:
+                    job.progress = 80
+                    job.save()
+                return True
 
-            if job:
-                job.progress = 80
-                job.save()
-
-            return True
+            logger.warning("Corrupt or missing index. Deleting record and re-indexing...")
+            self._discard_bad_index(doc_vector)
 
         if job:
             job.progress = 20

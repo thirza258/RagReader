@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 class HybridRAGPipeline(BasePipeline):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        
+
+        self.method = "hybrid"
         self.rag = HybridRAG(config)
         
         self.llm = self._initialize_llm(config.get("llm_model", "openai"))

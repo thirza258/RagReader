@@ -1,12 +1,6 @@
 import json
 import re
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-from rank_bm25 import BM25Okapi
 from rouge_score import rouge_scorer
-from ai_handler.llm import OpenAILLM, ClaudeLLM, GeminiLLM
-from typing import Any
 
 from ai_handler.llm import MistralLLM
 
@@ -120,19 +114,36 @@ def _parse_llm_score(raw_response: str, key: str) -> float:
     with scores on a 1–5 scale. This function extracts the score and divides by 5
     so it is consistent with the 0–1 range used by ROUGE-L and retrieval metrics.
     """
-    try:
-        data = json.loads(raw_response)
-        score = float(data.get(key, 0))
-        return score / 5.0
-    except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
-        # Fallback: try to find the first integer in the raw text
-        try:
-            numbers = re.findall(r'\d+', raw_response)
-            if numbers:
-                return float(numbers[0]) / 5.0
-        except (ValueError, TypeError):
-            pass
+    if not raw_response or not isinstance(raw_response, str):
         return 0.0
+
+    score = None
+
+    # The model may wrap the JSON in markdown fences or prose — parse the
+    # first {...} block rather than the raw string.
+    match = re.search(r"\{.*\}", raw_response, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            score = float(data.get(key, 0))
+        except (json.JSONDecodeError, ValueError, TypeError):
+            score = None
+
+    if score is None:
+        # Fallback: first number in the raw text
+        numbers = re.findall(r"\d+(?:\.\d+)?", raw_response)
+        if numbers:
+            try:
+                score = float(numbers[0])
+            except (ValueError, TypeError):
+                score = None
+
+    # Scores are on a 1–5 scale; anything outside [0, 5] is parser garbage
+    # (e.g. an HTTP status code in an error message), not a rating.
+    if score is None or not 0.0 <= score <= 5.0:
+        return 0.0
+
+    return score / 5.0
 
 
 def evaluate_response(response, ground_truth_response, chunks=None):
@@ -157,9 +168,17 @@ def evaluate_response(response, ground_truth_response, chunks=None):
         coverage_prompt = build_coverage_prompt(response, "\n".join(chunks) if chunks else "")
 
         mistral = MistralLLM()
-        faithfulness_score = _parse_llm_score(mistral._call_api(faithfulness_prompt), "faithfulness")
-        relevance_score = _parse_llm_score(mistral._call_api(relevance_prompt), "relevance")
-        coverage_score = _parse_llm_score(mistral._call_api(coverage_prompt), "coverage")
+
+        def _llm_score(prompt: str, key: str) -> float:
+            try:
+                return _parse_llm_score(mistral._call_api(prompt), key)
+            except Exception as e:
+                print(f"LLM-judged metric '{key}' failed: {e}")
+                return 0.0
+
+        faithfulness_score = _llm_score(faithfulness_prompt, "faithfulness")
+        relevance_score = _llm_score(relevance_prompt, "relevance")
+        coverage_score = _llm_score(coverage_prompt, "coverage")
 
         return {
             "rougeL_precision": scores['rougeL'].precision,

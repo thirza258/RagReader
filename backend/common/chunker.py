@@ -91,7 +91,7 @@ class DocumentChunker:
         try:
             embeddings_resp = self.client.embeddings.create(
                 input=sentences,
-                model="text-embedding-3-small"
+                model="openai/text-embedding-3-small"
             )
             vecs =[d.embedding for d in embeddings_resp.data]
         except Exception as e:

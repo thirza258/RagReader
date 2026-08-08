@@ -62,7 +62,7 @@ class OpenRouterBase(BaseLLM):
             )
             return (response.choices[0].message.content or "").strip()
         except Exception as e:
-            return f"OpenRouter Error ({self.model}): {e}"
+            raise RuntimeError(f"OpenRouter call failed ({self.model}): {e}") from e
 
 
 class OpenAILLM(OpenRouterBase):

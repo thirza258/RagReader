@@ -54,10 +54,14 @@ class BasePipeline(ABC):
             "Output:"
         )
         
-        raw_response = self.llm.prompt_generate(prompt)
-        
+        try:
+            raw_response = self.llm.prompt_generate(prompt)
+        except Exception as e:
+            logger.warning(f"Query optimization failed ({e}). Falling back to original query.")
+            return query
+
         optimized_query = self._validate_and_clean_query(raw_response, query)
-        
+
         logger.info(f"Original Query: '{query}' -> Optimized: '{optimized_query}'")
         return optimized_query
 
@@ -88,7 +92,7 @@ class BasePipeline(ABC):
         return cleaned
     
     def _initialize_llm(self, model_name: str):
-        if model_name.startswith("gpt-") or model_name.startswith("text-"):
+        if model_name.startswith(("openai/", "gpt-", "text-")):
             from ai_handler.llm import OpenAILLM
             return OpenAILLM(
                 model=model_name,
@@ -110,17 +114,25 @@ class BasePipeline(ABC):
             raise ValueError(f"Unsupported LLM model: {model_name}")
         
     def is_initialized(self, username):
-        """Check if this engine variant is already initialized for the user"""
-        user_vector_dir = os.path.join(self.vector_store_root, username)
-        
-        if not os.path.exists(user_vector_dir):
+        """Check if this engine variant is already initialized for the user.
+
+        An engine counts as initialized when a ready DocumentVector record
+        exists for the user's latest document AND the index file it points
+        to is still on disk.
+        """
+        from router.models import DocumentVector
+
+        document = self.get_document(username)
+        if not document:
             return False
-        
-        pattern = f"{username}_*_{self.method}_*.pkl"
-        
-        matching_files = glob.glob(os.path.join(user_vector_dir, pattern))
-        
-        return len(matching_files) > 0
+
+        doc_vector = DocumentVector.objects.filter(
+            document=document,
+            status="ready",
+            method=self.method,
+        ).last()
+
+        return bool(doc_vector) and os.path.exists(doc_vector.vectorstore_location)
     
     def get_retrieved_docs(self, query: str) -> List[str]:
         """

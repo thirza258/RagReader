@@ -1,15 +1,15 @@
 CONFIG_VARIANTS = [
     {
     "method" : "Dense Retrieval",
-    "model" : "gpt-4o-mini",
+    "model" : "openai/gpt-4o-mini",
     },
     {
     "method" : "Hybrid Retrieval",
-    "model" : "gpt-4o-mini",
+    "model" : "openai/gpt-4o-mini",
     },
     {
     "method" : "Sparse Retrieval",
-    "model" : "gpt-4o-mini",
+    "model" : "openai/gpt-4o-mini",
     },
     {
     "method": "Hybrid Retrieval",

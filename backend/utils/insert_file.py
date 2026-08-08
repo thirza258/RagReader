@@ -41,9 +41,8 @@ class DataLoader:
         # ---------- PDF Upload ----------
         if isinstance(source, UploadedFile):
             filename = get_valid_filename(source.name)
-            pdf_path = f"{base_path}/{filename}"
-
-            default_storage.save(pdf_path, source)
+            # Storage may rename on collision — always use the returned path.
+            pdf_path = default_storage.save(f"{base_path}/{filename}", source)
 
             text = DataLoader._parse_pdf(
                 default_storage.path(pdf_path)
@@ -64,8 +63,7 @@ class DataLoader:
         if isinstance(source, str) and source.startswith(("http://", "https://")):
             html = DataLoader._fetch_url(source)
 
-            html_path = f"{base_path}/source.html"
-            default_storage.save(html_path, ContentFile(html))
+            html_path = default_storage.save(f"{base_path}/source.html", ContentFile(html))
 
             text = DataLoader._extract_text_from_html(html)
             text_path = DataLoader._save_text(base_path, text)
@@ -135,9 +133,8 @@ class DataLoader:
 
     @staticmethod
     def _save_text(base_path: str, text: str) -> str:
-        path = f"{base_path}/extracted.txt"
-        default_storage.save(path, ContentFile(text))
-        return path
+        # Storage may rename on collision — return the actual saved path.
+        return default_storage.save(f"{base_path}/extracted.txt", ContentFile(text))
 
     @staticmethod
     def _clean_text(text: str) -> str:

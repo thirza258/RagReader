@@ -27,7 +27,10 @@ class RAGRegistry:
         """
         Instantiates pipelines based on the PIPELINE_VARIANTS list.
         """
-        
+        if os.getenv("RAG_DISABLE_ENGINE_INIT", "").lower() in ("1", "true"):
+            print("RAG_DISABLE_ENGINE_INIT set — skipping engine initialization.")
+            return
+
         class_map = {
             "Dense Retrieval": DenseRAGPipeline,
             "Sparse Retrieval": SparseRAGPipeline,
@@ -46,7 +49,7 @@ class RAGRegistry:
 
             instance_config = {
                 "llm_model": llm_model,
-                "model": "text-embedding-3-small",
+                "model": "openai/text-embedding-3-small",
                 "child_top_k": 10,
                 "top_k": 5, 
                 "chunk_strategy": "fixed",
@@ -81,12 +84,3 @@ class RAGRegistry:
 
 # Create a global instance
 rag_registry = RAGRegistry()
-
-_registry = None
-
-def get_registry():
-    global _registry
-    if _registry is None:
-        from .rag_service import RagRegistry
-        _registry = RagRegistry()
-    return _registry
