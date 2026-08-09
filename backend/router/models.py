@@ -134,6 +134,11 @@ class AnalysisBatch(models.Model):
     job_id = models.UUIDField(default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     total_variants = models.IntegerField(default=0)
+    config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Normalized analysis config: methods, models, top_k, ground_truth_mode.",
+    )
 
     class Meta:
         constraints = [

@@ -7,13 +7,20 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowRight,
+  Hand,
+  Layers,
 } from "lucide-react";
 import service from "../services/service";
 
 import GroundTruthChunk from "../components/GroundTruthChunk";
-
+import CandidatePool from "../components/CandidatePool";
 import GroundTruthResponse from "../components/GroundTruthResponse";
+import { CandidatePoolResponse, GroundTruthMode } from "../interface";
 
+const POOL_TOP_N = 10;
+
+const cn = (...classes: (string | undefined | boolean)[]) =>
+  classes.filter(Boolean).join(" ");
 
 const ExpandablePanel: React.FC<{
   title: string;
@@ -37,6 +44,26 @@ const ExpandablePanel: React.FC<{
   </div>
 );
 
+const MODE_OPTIONS: {
+  id: GroundTruthMode;
+  label: string;
+  blurb: string;
+  icon: React.ReactNode;
+}[] = [
+  {
+    id: "manual",
+    label: "Manual selection",
+    blurb: "You decide which chunks are relevant. Precise, but it is your judgement being measured.",
+    icon: <Hand size={16} />,
+  },
+  {
+    id: "pooled",
+    label: "Candidate pooling (RRF)",
+    blurb: "Every retrieval method votes; Reciprocal Rank Fusion merges the rankings. No hand-labelling.",
+    icon: <Layers size={16} />,
+  },
+];
+
 const GroundTruthSelector: React.FC = () => {
   const navigate = useNavigate();
 
@@ -47,7 +74,9 @@ const GroundTruthSelector: React.FC = () => {
   }>();
 
   // --- Form State ---
+  const [mode, setMode] = useState<GroundTruthMode>("manual");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pool, setPool] = useState<CandidatePoolResponse | null>(null);
   const [groundTruth, setGroundTruth] = useState<string>("");
 
   // --- UI State ---
@@ -69,43 +98,47 @@ const GroundTruthSelector: React.FC = () => {
     setSelectedIds(next);
   };
 
-  // Validation constraint: BOTH are required
-  const isFormValid = selectedIds.size > 0 && groundTruth.trim().length > 0;
+  // Chunks come from whichever mode is active; the written response is always
+  // required — pooling has no equivalent for the answer.
+  const hasChunks = mode === "manual" ? selectedIds.size > 0 : (pool?.chunks.length ?? 0) > 0;
+  const isFormValid = hasChunks && groundTruth.trim().length > 0;
 
   const handleSubmit = async () => {
-  if (!isFormValid || !conversationId) return;
+    if (!isFormValid || !conversationId) return;
 
-  setIsSubmitting(true);
-  setSubmitError("");
+    setIsSubmitting(true);
+    setSubmitError("");
 
-  try {
-    const [textResponse] = await Promise.all([
-      service.CreateGroundTruthChunk(conversationId, Array.from(selectedIds)),
-      service.CreateGroundTruthResponse(conversationId, groundTruth),
-    ]);
+    try {
+      // In pooled mode the chunks were already written server-side by the
+      // pooling run, so only the response needs saving.
+      const requests = [service.CreateGroundTruthResponse(conversationId, groundTruth)];
+      if (mode === "manual") {
+        requests.push(
+          service.CreateGroundTruthChunk(conversationId, Array.from(selectedIds))
+        );
+      }
+      await Promise.all(requests);
 
-    if (textResponse.status !== 200) {
-      throw new Error(textResponse.message || "Failed to submit response.");
-    }
+      const { batch_id, query, document_id, expected_count } =
+        await service.startDeepAnalysis(conversationId, {
+          ground_truth_mode: mode,
+          pool_top_n: POOL_TOP_N,
+        });
 
-    const { batch_id, query, document_id } = await service.startDeepAnalysis(conversationId);
+      localStorage.setItem(`batch_id_${conversationId}`, batch_id);
+      localStorage.setItem("document_id", String(document_id));
+      localStorage.setItem("conversation_id", conversationId);
 
-    localStorage.setItem(`batch_id_${conversationId}`, batch_id);
-    localStorage.setItem("document_id", document_id);
-    localStorage.setItem("conversation_id", conversationId);
-
-    navigate(`/deep-result/${conversationId}`, {
-      state: { batch_id, query, document_id },
-    });
-  } catch (error) {
-    console.error("Submission error:", error);
-    setSubmitError("Failed to save the ground truth. Please try again.");
-  } finally {
-    if (isSubmitting) {
+      navigate(`/deep-result/${conversationId}`, {
+        state: { batch_id, query, document_id, expected_count },
+      });
+    } catch (error) {
+      console.error("Submission error:", error);
+      setSubmitError("Failed to save the ground truth. Please try again.");
       setIsSubmitting(false);
     }
-  }
-};
+  };
 
   if (!conversationId || !documentId) {
     return (
@@ -117,9 +150,6 @@ const GroundTruthSelector: React.FC = () => {
 
   return (
     <div className="min-h-screen pt-16 bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground pb-20">
-      {/* Sticky Header */}
-      
-
       <main className="container mx-auto px-4 py-8 max-w-5xl">
         {submitError && (
           <div className="mb-6 p-4 rounded-md bg-destructive/10 text-destructive border border-destructive/20 flex items-center gap-2">
@@ -139,15 +169,52 @@ const GroundTruthSelector: React.FC = () => {
           </div>
         </section>
 
-        {/* Panel 1: Chunk Selection */}
+        {/* Mode switch: who decides what counts as relevant */}
+        <section className="mb-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            How should relevant chunks be decided?
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {MODE_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                onClick={() => setMode(option.id)}
+                className={cn(
+                  "text-left rounded-lg border p-4 transition-all",
+                  mode === option.id
+                    ? "border-primary bg-primary/5 shadow-[0_0_0_1px_hsl(var(--primary))]"
+                    : "border-border bg-card hover:border-muted-foreground/50"
+                )}
+              >
+                <div className="flex items-center gap-2 mb-1.5 font-medium">
+                  {option.icon}
+                  {option.label}
+                  {mode === option.id && (
+                    <CheckCircle2 size={14} className="ml-auto text-primary" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">{option.blurb}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Panel 1: Chunk selection or candidate pooling */}
         <ExpandablePanel
-          title="Step 1: Select Ground Truth Chunks"
+          title={
+            mode === "manual"
+              ? "Step 1: Select Ground Truth Chunks"
+              : "Step 1: Build the Candidate Pool"
+          }
           isOpen={openPanels.chunks}
           onToggle={() => togglePanel("chunks")}
           statusIndicator={
-            selectedIds.size > 0 ? (
+            hasChunks ? (
               <span className="bg-primary/10 text-primary text-xs px-2 py-1 rounded-full flex items-center gap-1 font-medium">
-                <CheckCircle2 size={12} /> {selectedIds.size} Selected
+                <CheckCircle2 size={12} />{" "}
+                {mode === "manual"
+                  ? `${selectedIds.size} Selected`
+                  : `${pool?.chunks.length} Pooled`}
               </span>
             ) : (
               <span className="bg-muted text-muted-foreground text-xs px-2 py-1 rounded-full font-medium">
@@ -156,11 +223,20 @@ const GroundTruthSelector: React.FC = () => {
             )
           }
         >
-          <GroundTruthChunk
-            documentId={documentId!}
-            selectedIds={selectedIds}
-            toggleSelection={toggleSelection}
-          />
+          {mode === "manual" ? (
+            <GroundTruthChunk
+              documentId={documentId!}
+              selectedIds={selectedIds}
+              toggleSelection={toggleSelection}
+            />
+          ) : (
+            <CandidatePool
+              conversationId={conversationId}
+              poolTopN={POOL_TOP_N}
+              pool={pool}
+              onPooled={setPool}
+            />
+          )}
         </ExpandablePanel>
 
         {/* Panel 2: Response Input */}
@@ -190,8 +266,10 @@ const GroundTruthSelector: React.FC = () => {
         {/* Bottom validation hint */}
         {!isFormValid && (
           <p className="text-center mt-6 text-sm text-muted-foreground flex items-center justify-center gap-2">
-            <AlertCircle size={16} /> Both chunk selection and text response are
-            required to save.
+            <AlertCircle size={16} />
+            {mode === "manual"
+              ? "Both chunk selection and text response are required to save."
+              : "Run candidate pooling and write the expected response to continue."}
           </p>
         )}
 
@@ -209,9 +287,15 @@ const GroundTruthSelector: React.FC = () => {
           <div>
             <button
               onClick={handleSubmit}
-              className="px-4 py-2 rounded-md border border-border text-sm hover:bg-muted transition-colors flex items-center gap-2"
+              disabled={!isFormValid || isSubmitting}
+              className={cn(
+                "px-4 py-2 rounded-md border border-border text-sm transition-colors flex items-center gap-2",
+                !isFormValid || isSubmitting
+                  ? "opacity-50 cursor-not-allowed"
+                  : "hover:bg-muted"
+              )}
             >
-              Start Analysis
+              {isSubmitting ? "Starting…" : "Start Analysis"}
               <ArrowRight size={16} />
             </button>
           </div>

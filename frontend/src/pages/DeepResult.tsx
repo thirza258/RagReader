@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import DeepAnalysisCard from "../components/DeepAnalysisCard";
 import {
   buildWebSocketUrl,
@@ -7,7 +7,12 @@ import {
 import service from "../services/service";
 import { useLocation, useOutletContext, useParams } from "react-router-dom";
 import type { DeepResultContextType } from "../types/types";
-import { AnalysisResult, NormalizedChunk } from "../interface";
+import {
+  AnalysisResult,
+  DeepAnalysisConfig,
+  NormalizedChunk,
+  StartAnalysisResponse,
+} from "../interface";
 
 
 interface NormalizedResult extends Omit<AnalysisResult, "retrievedChunks"> {
@@ -30,7 +35,8 @@ const STORAGE_KEY = (id: string) => `deep_analysis_results_${id}`;
 
 const DeepResult: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
-  const { setIds } = useOutletContext<DeepResultContextType>();
+  const { setIds, analysisRequest, stopSignal, setRunState } =
+    useOutletContext<DeepResultContextType>();
 
   const location = useLocation();
 
@@ -45,7 +51,204 @@ const DeepResult: React.FC = () => {
   });
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [isConnected, setIsConnected] = useState(false);
+  const [runError, setRunError] = useState("");
+  const [activeConfig, setActiveConfig] = useState<DeepAnalysisConfig | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const resultCountRef = useRef(0);
+
+  const closeSocket = useCallback(() => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+  }, []);
+
+  const addOrUpdateResult = useCallback(
+    (result: AnalysisResult) => {
+      if (!conversationId) return;
+      const normalized = normalizeResult(result);
+      setResults((prev) => {
+        const idx = prev.findIndex(
+          (r) => r.method === result.method && r.aiModel === result.aiModel,
+        );
+        const updated =
+          idx !== -1
+            ? prev.map((r, i) => (i === idx ? normalized : r))
+            : [...prev, normalized];
+
+        localStorage.setItem(
+          STORAGE_KEY(conversationId),
+          JSON.stringify(updated),
+        );
+        resultCountRef.current = updated.length;
+        return updated;
+      });
+    },
+    [conversationId],
+  );
+
+  /** Opens the stream for a batch and reports progress back to the sidebar. */
+  const connect = useCallback(
+    (batchId: string, query: string, total: number) => {
+      closeSocket();
+      setRunError("");
+
+      const cleanup = connectDeepAnalysisWebSocket({
+        url: buildWebSocketUrl(batchId),
+        query,
+        onOpen: () => {
+          setIsConnected(true);
+          setRunState({ isRunning: true, completed: resultCountRef.current, total });
+        },
+        onResult: (result) => {
+          addOrUpdateResult(result);
+          setRunState({
+            isRunning: true,
+            completed: resultCountRef.current,
+            total,
+          });
+        },
+        onProgress: (method, value) => {
+          setProgress((prev) => ({ ...prev, [method]: value }));
+        },
+        onError: (err) => {
+          console.error("WebSocket error:", err);
+          setIsConnected(false);
+          setRunError("Lost the connection to the analysis stream.");
+        },
+        onClose: () => {
+          setIsConnected(false);
+          setRunState({ isRunning: false, completed: resultCountRef.current, total });
+        },
+      });
+
+      cleanupRef.current = cleanup;
+    },
+    [addOrUpdateResult, closeSocket, setRunState],
+  );
+
+  /**
+   * Starts a brand-new batch with the given config. In pooled mode the ground
+   * truth is rebuilt first, so the retrieval metrics score against the fused
+   * ranking rather than a stale manual selection.
+   */
+  const runAnalysis = useCallback(
+    async (config: DeepAnalysisConfig) => {
+      if (!conversationId) return;
+
+      closeSocket();
+      setResults([]);
+      setProgress({});
+      resultCountRef.current = 0;
+      localStorage.removeItem(STORAGE_KEY(conversationId));
+      setRunError("");
+      setActiveConfig(config);
+
+      try {
+        if (config.ground_truth_mode === "pooled") {
+          setRunState({ isRunning: true, completed: 0, total: 0 });
+          await service.poolGroundTruthChunks(conversationId, {
+            top_n: config.pool_top_n,
+          });
+        }
+
+        const response: StartAnalysisResponse = await service.startDeepAnalysis(
+          conversationId,
+          config,
+        );
+
+        localStorage.setItem(`batch_id_${conversationId}`, response.batch_id);
+        localStorage.setItem("document_id", String(response.document_id));
+        localStorage.setItem("conversation_id", conversationId);
+        setIds({ conversationId, documentId: String(response.document_id) });
+
+        connect(response.batch_id, response.query, response.expected_count);
+      } catch (error) {
+        console.error("Error starting deep analysis:", error);
+        const message =
+          (error as { response?: { data?: { error?: string } } })?.response?.data
+            ?.error ?? "Failed to start the analysis.";
+        setRunError(message);
+        setRunState({ isRunning: false, completed: 0, total: 0 });
+      }
+    },
+    [conversationId, closeSocket, connect, setIds, setRunState],
+  );
+
+  // First load: resume the batch we were handed (or already started) rather
+  // than kicking off a duplicate run.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resume() {
+      if (!conversationId) return;
+
+      try {
+        const stateData = location.state as {
+          batch_id?: string;
+          query?: string;
+          document_id?: string;
+          expected_count?: number;
+        } | null;
+
+        let batch_id: string;
+        let query: string;
+        let document_id: string;
+        let expected = 0;
+
+        if (stateData?.batch_id && stateData?.query && stateData?.document_id) {
+          ({ batch_id, query, document_id } = stateData);
+          expected = stateData.expected_count ?? 0;
+        } else {
+          const existingBatchId = localStorage.getItem(
+            `batch_id_${conversationId}`,
+          );
+          if (existingBatchId) return;
+
+          const result = await service.startDeepAnalysis(conversationId);
+          if (cancelled) return;
+          ({ batch_id, query } = result);
+          document_id = String(result.document_id);
+          expected = result.expected_count;
+
+          localStorage.setItem(`batch_id_${conversationId}`, batch_id);
+          localStorage.setItem("document_id", document_id);
+          localStorage.setItem("conversation_id", conversationId);
+        }
+
+        if (cancelled) return;
+        setIds({ conversationId, documentId: document_id });
+        connect(batch_id, query, expected);
+      } catch (error) {
+        console.error("Error starting deep analysis:", error);
+        setIsConnected(false);
+      }
+    }
+
+    resume();
+
+    return () => {
+      cancelled = true;
+      closeSocket();
+    };
+    // Deliberately not depending on `connect`: this effect must run once per
+    // conversation, not every time a callback identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // The sidebar's "Run Deep Analysis" button.
+  useEffect(() => {
+    if (!analysisRequest) return;
+    runAnalysis(analysisRequest.config);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisRequest?.nonce]);
+
+  // The sidebar's "Stop Analysis" button.
+  useEffect(() => {
+    if (stopSignal === 0) return;
+    closeSocket();
+    setIsConnected(false);
+    setRunState({ isRunning: false, completed: resultCountRef.current, total: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopSignal]);
 
   if (!conversationId) {
     return (
@@ -55,107 +258,33 @@ const DeepResult: React.FC = () => {
     );
   }
 
-  const addOrUpdateResult = (result: AnalysisResult) => {
-    const normalized = normalizeResult(result);
-    setResults((prev) => {
-      const idx = prev.findIndex(
-        (r) => r.method === result.method && r.aiModel === result.aiModel,
-      );
-      const updated =
-        idx !== -1
-          ? prev.map((r, i) => (i === idx ? normalized : r))
-          : [...prev, normalized];
-
-      localStorage.setItem(
-        STORAGE_KEY(conversationId),
-        JSON.stringify(updated),
-      );
-      return updated;
-    });
-  };
-  
-  useEffect(() => {
-    let cancelled = false;
-    let wsCleanup: (() => void) | null = null;
-
-    async function run() {
-      if (!conversationId) return;
-
-      try {
-        const stateData = location.state as {
-          batch_id?: string;
-          query?: string;
-          document_id?: string;
-        } | null;
-
-        let batch_id: string;
-        let query: string;
-        let document_id: string;
-
-        if (stateData?.batch_id && stateData?.query && stateData?.document_id) {
-          ({ batch_id, query, document_id } = stateData);
-        } else {
-          const existingBatchId = localStorage.getItem(
-            `batch_id_${conversationId}`,
-          );
-          if (existingBatchId) return;
-
-          const result = await service.startDeepAnalysis(conversationId);
-          if (cancelled) return;
-          ({ batch_id, query, document_id } = result);
-
-          localStorage.setItem(`batch_id_${conversationId}`, batch_id);
-          localStorage.setItem("document_id", document_id);
-          localStorage.setItem("conversation_id", conversationId);
-        }
-
-        setIds({ conversationId, documentId: document_id });
-
-        const wsUrl = buildWebSocketUrl(batch_id);
-
-        wsCleanup = connectDeepAnalysisWebSocket({
-          url: wsUrl,
-          query,
-          onOpen: () => setIsConnected(true),
-          onResult: (result) => {
-            addOrUpdateResult(result);
-          },
-          onProgress: (method, value) => {
-            setProgress((prev) => ({ ...prev, [method]: value }));
-          },
-          onError: (err) => {
-            console.error("WebSocket error:", err);
-            setIsConnected(false);
-          },
-          onClose: () => setIsConnected(false),
-        });
-
-        cleanupRef.current = wsCleanup;
-      } catch (error) {
-        console.error("Error starting deep analysis:", error);
-        setIsConnected(false);
-      }
-    }
-
-    run();
-
-    return () => {
-      cancelled = true;
-      wsCleanup?.();
-      cleanupRef.current = null;
-    };
-  }, [conversationId, setIds]);
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 text-sm text-gray-500">
-        <span
-          className={`inline-block w-2 h-2 rounded-full ${
-            isConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"
-          }`}
-        />
-        {isConnected ? "Receiving results…" : "Connection closed"}
+      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
+        <span className="flex items-center gap-2">
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${
+              isConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"
+            }`}
+          />
+          {isConnected ? "Receiving results…" : "Connection closed"}
+        </span>
+
+        {activeConfig && (
+          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs">
+            Top-K {activeConfig.top_k} ·{" "}
+            {activeConfig.ground_truth_mode === "pooled"
+              ? `pooled ground truth (top ${activeConfig.pool_top_n})`
+              : "manual ground truth"}
+          </span>
+        )}
       </div>
+
+      {runError && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {runError}
+        </div>
+      )}
 
       {results.length === 0 && isConnected && (
         <div className="text-center py-12 text-gray-400 animate-pulse">

@@ -27,6 +27,17 @@ from router.models import (
 import router.tasks as tasks
 from common.schema import get_responses
 from common.chunker import DocumentChunker
+from common.constant import (
+    CONFIG_VARIANTS,
+    DEFAULT_TOP_K,
+    METHOD_IDS,
+    MODEL_IDS,
+    TOP_K_MAX,
+    TOP_K_MIN,
+    build_variants,
+    normalize_analysis_config,
+)
+from rag.rag_service import apply_retrieval_depth
 from pipeline.base_pipeline import BasePipeline
 from dense_rag.dense_rag import DenseRAG
 from ai_handler.llm import OpenAILLM
@@ -227,13 +238,13 @@ class OpenChatAndAnalysisEndpointTests(TestCase):
         self.assertEqual(resp.status_code, 202)
         self.assertEqual(AnalysisBatch.objects.filter(user=user).count(), 1)
 
-    def test_start_analysis_unknown_conversation_500(self):
+    def test_start_analysis_unknown_conversation_404(self):
         resp = self.client.post(
             "/api/v1/start-analysis/",
             {"conversation_id": 424242},
             content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.status_code, 404)
 
     def test_analysis_status_not_found(self):
         resp = self.client.get(
@@ -425,8 +436,11 @@ class BasePipelineHelperTests(TestCase):
     def test_initialize_llm_accepts_openrouter_prefixed_ids(self):
         # Regression: "openai/gpt-4o-mini" (the OpenRouter model ID format)
         # was not recognized and raised ValueError.
+        # The OpenAI client refuses to construct without a key, so supply a
+        # dummy one — the suite must not depend on a real credential.
         stub = mock.Mock(config={})
-        llm = BasePipeline._initialize_llm(stub, "openai/gpt-4o-mini")
+        with override_settings(OPENROUTER_API_KEY="test-key"):
+            llm = BasePipeline._initialize_llm(stub, "openai/gpt-4o-mini")
         self.assertIsInstance(llm, OpenAILLM)
         self.assertEqual(llm.model, "openai/gpt-4o-mini")
 
@@ -461,3 +475,169 @@ class ChunkerTests(TestCase):
         chunker = DocumentChunker(strategy="bogus")
         with self.assertRaises(ValueError):
             chunker.chunk("text")
+
+
+# ── Deep-analysis configuration ──────────────────────────────────────────────
+
+class AnalysisConfigTests(TestCase):
+    def test_defaults_run_the_full_matrix(self):
+        config = normalize_analysis_config(None)
+        self.assertEqual(config["methods"], METHOD_IDS)
+        self.assertEqual(config["models"], MODEL_IDS)
+        self.assertEqual(config["top_k"], DEFAULT_TOP_K)
+        self.assertEqual(config["ground_truth_mode"], "manual")
+        self.assertEqual(len(build_variants(config)), len(CONFIG_VARIANTS))
+
+    def test_narrowing_the_selection(self):
+        config = normalize_analysis_config({
+            "methods": ["Dense Retrieval", "Hybrid Retrieval"],
+            "models": ["openai/gpt-4o-mini"],
+            "top_k": 3,
+            "ground_truth_mode": "pooled",
+        })
+        self.assertEqual(len(build_variants(config)), 2)
+        self.assertEqual(config["top_k"], 3)
+        self.assertEqual(config["ground_truth_mode"], "pooled")
+
+    def test_unknown_options_are_dropped_not_fatal(self):
+        config = normalize_analysis_config({
+            "methods": ["Dense Retrieval", "Telepathic Retrieval"],
+            "models": ["openai/gpt-4o-mini", "gpt-5-imaginary"],
+        })
+        self.assertEqual(config["methods"], ["Dense Retrieval"])
+        self.assertEqual(config["models"], ["openai/gpt-4o-mini"])
+
+    def test_empty_selection_falls_back_to_everything(self):
+        config = normalize_analysis_config({"methods": [], "models": []})
+        self.assertEqual(config["methods"], METHOD_IDS)
+        self.assertEqual(config["models"], MODEL_IDS)
+
+    def test_top_k_is_clamped_and_junk_tolerated(self):
+        self.assertEqual(normalize_analysis_config({"top_k": 999})["top_k"], TOP_K_MAX)
+        self.assertEqual(normalize_analysis_config({"top_k": 0})["top_k"], TOP_K_MIN)
+        self.assertEqual(normalize_analysis_config({"top_k": "abc"})["top_k"], DEFAULT_TOP_K)
+
+    def test_unknown_ground_truth_mode_falls_back(self):
+        config = normalize_analysis_config({"ground_truth_mode": "vibes"})
+        self.assertEqual(config["ground_truth_mode"], "manual")
+
+    def test_first_variant_is_still_dense_gpt4o_mini(self):
+        # OpenChatView and QueryView both index CONFIG_VARIANTS[0] for the
+        # standard (non-deep) chat path.
+        self.assertEqual(
+            CONFIG_VARIANTS[0],
+            {"method": "Dense Retrieval", "model": "openai/gpt-4o-mini"},
+        )
+
+
+class RetrievalDepthTests(TestCase):
+    def test_dense_and_sparse_engines_take_top_k_directly(self):
+        engine = mock.Mock()
+        engine.rag = mock.Mock(spec=["top_k"])
+        engine.rag.top_k = 5
+        apply_retrieval_depth(engine, 12)
+        self.assertEqual(engine.rag.top_k, 12)
+
+    def test_hybrid_children_fetch_deeper_than_the_final_cut(self):
+        # A reranker with only top_k candidates has nothing to rerank, and a
+        # final_top_k above child_top_k would silently truncate.
+        engine = mock.Mock()
+        engine.rag = mock.Mock(spec=["final_top_k", "child_top_k", "dense_engine", "sparse_engine"])
+        engine.rag.dense_engine = mock.Mock(spec=["top_k"])
+        engine.rag.sparse_engine = mock.Mock(spec=["top_k"])
+
+        apply_retrieval_depth(engine, 15)
+
+        self.assertEqual(engine.rag.final_top_k, 15)
+        self.assertEqual(engine.rag.child_top_k, 30)
+        self.assertEqual(engine.rag.dense_engine.top_k, 30)
+        self.assertEqual(engine.rag.sparse_engine.top_k, 30)
+
+    def test_depth_does_not_drift_across_runs(self):
+        # Engines are shared singletons; a deep run followed by a shallow one
+        # must land on the shallow config exactly.
+        engine = mock.Mock()
+        engine.rag = mock.Mock(spec=["final_top_k", "child_top_k", "dense_engine", "sparse_engine"])
+        engine.rag.dense_engine = mock.Mock(spec=["top_k"])
+        engine.rag.sparse_engine = mock.Mock(spec=["top_k"])
+
+        apply_retrieval_depth(engine, 20)
+        apply_retrieval_depth(engine, 3)
+
+        self.assertEqual(engine.rag.final_top_k, 3)
+        self.assertEqual(engine.rag.child_top_k, 10)
+        self.assertEqual(engine.rag.dense_engine.top_k, 10)
+
+    def test_engine_without_a_rag_attribute_is_ignored(self):
+        apply_retrieval_depth(mock.Mock(rag=None), 5)  # must not raise
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
+class AnalysisConfigEndpointTests(TestCase):
+    def test_config_endpoint_lists_real_model_ids(self):
+        resp = self.client.get("/api/v1/analysis-config/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual([m["id"] for m in body["models"]], MODEL_IDS)
+        self.assertEqual([m["id"] for m in body["retrieval_methods"]], METHOD_IDS)
+        self.assertEqual(body["top_k"]["default"], DEFAULT_TOP_K)
+        self.assertEqual(body["max_variants"], len(CONFIG_VARIANTS))
+
+    def test_start_analysis_stores_the_chosen_config(self):
+        user = make_user("alice")
+        conversation = Conversation.objects.create(
+            user=user, query="q", response="r", context="c"
+        )
+        resp = self.client.post(
+            "/api/v1/start-analysis/",
+            {
+                "conversation_id": conversation.id,
+                "config": {
+                    "methods": ["Dense Retrieval"],
+                    "models": ["openai/gpt-4o-mini", "anthropic/claude-haiku-4.5"],
+                    "top_k": 8,
+                    "ground_truth_mode": "pooled",
+                },
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 202)
+        self.assertEqual(resp.json()["expected_count"], 2)
+
+        batch = AnalysisBatch.objects.get(user=user)
+        self.assertEqual(batch.total_variants, 2)
+        self.assertEqual(batch.config["top_k"], 8)
+        self.assertEqual(batch.config["methods"], ["Dense Retrieval"])
+
+    def test_start_analysis_without_config_runs_everything(self):
+        user = make_user("alice")
+        conversation = Conversation.objects.create(
+            user=user, query="q", response="r", context="c"
+        )
+        resp = self.client.post(
+            "/api/v1/start-analysis/",
+            {"conversation_id": conversation.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.json()["expected_count"], len(CONFIG_VARIANTS))
+
+    def test_start_analysis_reports_the_ground_truth_actually_stored(self):
+        from evaluation.models import Chunk, GroundTruthChunk
+
+        user = make_user("alice")
+        document = Document.objects.create(user=user, name="d", source_type="text")
+        conversation = Conversation.objects.create(
+            user=user, document=document, query="q", response="r", context="c"
+        )
+        chunk = Chunk.objects.create(document=document, text="t")
+        GroundTruthChunk.objects.create(
+            conversation=conversation,
+            chunk=chunk,
+            source=GroundTruthChunk.Source.POOLED,
+        )
+        resp = self.client.post(
+            "/api/v1/start-analysis/",
+            {"conversation_id": conversation.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.json()["ground_truth"], {"count": 1, "source": "pooled"})

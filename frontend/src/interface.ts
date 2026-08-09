@@ -74,13 +74,12 @@ export interface DeepAnalysisServiceOptions {
 export interface StartAnalysisResponse {
   message: string;
   batch_id: string;
+  document_id: string;
+  query: string;
   expected_count: number;
-}
-
-export interface StartAnalysisResponse {
-  message: string;
-  batch_id: string;
-  expected_count: number;
+  config: DeepAnalysisConfig;
+  /** What the retrieval metrics will actually be scored against. */
+  ground_truth: { count: number; source: GroundTruthMode | null };
 }
 
 export interface HistoryItem {
@@ -100,11 +99,78 @@ export interface Chunk {
   text: string;
 }
 
+/** How the ground-truth chunk set for a conversation was decided. */
+export type GroundTruthMode = "manual" | "pooled";
+
+/**
+ * Deep-analysis configuration. Field names match the backend payload exactly
+ * so the config round-trips without a mapping layer.
+ */
 export interface DeepAnalysisConfig {
-  topK: number;
-  chunkSize: number;
-  retrievalMethods: string[];
-  selectedModels: string[];
+  methods: string[];
+  models: string[];
+  top_k: number;
+  ground_truth_mode: GroundTruthMode;
+  pool_top_n: number;
+}
+
+export interface AnalysisOption {
+  id: string;
+  label: string;
+  description?: string;
+  provider?: string;
+}
+
+/** Served by GET /analysis-config/ — never hardcode these in the UI. */
+export interface AnalysisConfigOptions {
+  retrieval_methods: AnalysisOption[];
+  models: AnalysisOption[];
+  ground_truth_modes: AnalysisOption[];
+  top_k: { min: number; max: number; default: number };
+  pool_top_n: { min: number; max: number; default: number };
+  defaults: DeepAnalysisConfig;
+  max_variants: number;
+}
+
+/** One retriever's contribution to a pooled chunk's RRF score. */
+export interface PooledChunkSource {
+  pipeline: string;
+  rank: number;
+  score?: number | null;
+}
+
+export interface PooledChunk {
+  chunk_id: number | string;
+  text: string;
+  rank: number;
+  rrf_score: number;
+  sources: PooledChunkSource[];
+}
+
+export interface CandidatePoolResponse {
+  conversation_id: number;
+  source: "pooled";
+  query: string;
+  optimized_query: string;
+  rrf_k: number;
+  top_n: number;
+  pipelines: { name: string; retrieved: number; error: string | null }[];
+  chunks: PooledChunk[];
+}
+
+export interface GroundTruthChunkRecord {
+  id: number;
+  chunk_id: number;
+  text: string;
+  source: GroundTruthMode;
+  rank: number | null;
+  rrf_score: number | null;
+  sources: PooledChunkSource[];
+}
+
+export interface GroundTruthChunkResponse {
+  ground_truth_chunks: GroundTruthChunkRecord[];
+  source: GroundTruthMode | null;
 }
 
 export interface FileMetadata {

@@ -24,7 +24,21 @@ from router.serializers import (
     InsertURLSerializer, 
     QuerySerializer 
 )
-from common.constant import CONFIG_VARIANTS
+from common.constant import (
+    CONFIG_VARIANTS,
+    DEFAULT_ANALYSIS_CONFIG,
+    DEFAULT_POOL_TOP_N,
+    DEFAULT_TOP_K,
+    GROUND_TRUTH_MODES,
+    LLM_MODELS,
+    POOL_TOP_N_MAX,
+    POOL_TOP_N_MIN,
+    RETRIEVAL_METHODS,
+    TOP_K_MAX,
+    TOP_K_MIN,
+    build_variants,
+    normalize_analysis_config,
+)
 from common.schema import get_responses
 
 
@@ -290,57 +304,124 @@ class QueryView(GenericAPIView):
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
+class AnalysisConfigView(APIView):
+    """The option set the Deep Analysis sidebar renders.
+
+    Served rather than hardcoded in the frontend so the model list can never
+    drift from the models the backend actually knows how to instantiate.
+    """
+
+    def get(self, request):
+        return Response({
+            "retrieval_methods": RETRIEVAL_METHODS,
+            "models": LLM_MODELS,
+            "ground_truth_modes": GROUND_TRUTH_MODES,
+            "top_k": {"min": TOP_K_MIN, "max": TOP_K_MAX, "default": DEFAULT_TOP_K},
+            "pool_top_n": {
+                "min": POOL_TOP_N_MIN,
+                "max": POOL_TOP_N_MAX,
+                "default": DEFAULT_POOL_TOP_N,
+            },
+            "defaults": DEFAULT_ANALYSIS_CONFIG,
+            "max_variants": len(CONFIG_VARIANTS),
+        }, status=status.HTTP_200_OK)
+
+
 class StartAnalysisView(GenericAPIView):
-    def create_analysis_batch(self, user: GuestUser, conversation: Conversation, query: str, job_id: str) -> AnalysisBatch:
+    def create_analysis_batch(
+        self,
+        user: GuestUser,
+        conversation: Conversation,
+        query: str,
+        job_id: str,
+        config: dict,
+        total_variants: int,
+    ) -> AnalysisBatch:
         batch = AnalysisBatch.objects.create(
             user=user,
             conversation=conversation,
             query=query,
             job_id=job_id,
-            total_variants=len(CONFIG_VARIANTS)
+            total_variants=total_variants,
+            config=config,
         )
         return batch
-    
+
+    def describe_ground_truth(self, conversation: Conversation) -> dict:
+        """Summarise the ground-truth chunk set backing this conversation."""
+        from evaluation.models import GroundTruthChunk
+
+        chunks = list(
+            GroundTruthChunk.objects
+            .filter(conversation=conversation)
+            .values_list("source", flat=True)
+        )
+        return {
+            "count": len(chunks),
+            "source": chunks[0] if chunks else None,
+        }
+
     def post(self, request):
         try:
             conversation_id = request.data.get("conversation_id")
-            
+
             current_conversation = Conversation.objects.get(id=conversation_id)
             username = current_conversation.user.username
             query = current_conversation.query
-            
+
             document_id = current_conversation.document.pk if current_conversation.document else None
-            print(document_id)
+
+            # Which method × model variants to run, and how deep to retrieve.
+            # Absent or partial input falls back to the full matrix.
+            config = normalize_analysis_config(request.data.get("config"))
+            variants = build_variants(config)
+
             batch_id = str(uuid.uuid4())
-            
+
             cache.set(f"job_input_{batch_id}", {
                 "username": username,
                 "query": query,
                 "document_id": document_id,
-                "conversation_id": conversation_id
+                "conversation_id": conversation_id,
+                "config": config,
             }, timeout=300)
-            
-            candidate_pooling = None
-            analysis_batch = self.create_analysis_batch(current_conversation.user, current_conversation, query, job_id=batch_id)
+
+            analysis_batch = self.create_analysis_batch(
+                current_conversation.user,
+                current_conversation,
+                query,
+                job_id=batch_id,
+                config=config,
+                total_variants=len(variants),
+            )
             current_batch = analysis_batch.job_id
-            
+
             response = {
                 "message": "Analysis initiated",
                 "batch_id": current_batch,
                 "document_id" : document_id,
                 "query": query,
-                "expected_count": len(CONFIG_VARIANTS)
+                "config": config,
+                "expected_count": len(variants),
+                # What the retrieval metrics will actually be scored against.
+                # Surfaced so the UI can flag "you asked for pooling but the
+                # stored ground truth is still your manual selection".
+                "ground_truth": self.describe_ground_truth(current_conversation),
             }
-            
+
             return Response(response, status=status.HTTP_202_ACCEPTED)
-            
+
+        except Conversation.DoesNotExist:
+            return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class AnalysisStatusView(GenericAPIView):
-    def get(self, request, batch_id):
+    # The URL captures this as <job_id>; the name must match or every request
+    # raises TypeError before the view body runs.
+    def get(self, request, job_id):
         try:
-            batch_id = uuid.UUID(batch_id)
+            batch_id = uuid.UUID(job_id)
             analysis_batch = AnalysisBatch.objects.get(job_id=batch_id)
 
             results = AnalysisResult.objects.filter(batch=analysis_batch)

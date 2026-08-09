@@ -6,8 +6,8 @@ from asgiref.sync import sync_to_async
 from django.core.exceptions import ObjectDoesNotExist
 
 from router.models import AnalysisBatch, AnalysisResult, GuestUser
-from rag.rag_service import rag_registry
-from common.constant import CONFIG_VARIANTS
+from rag.rag_service import apply_retrieval_depth, rag_registry
+from common.constant import build_variants, normalize_analysis_config
 
 import logging
 
@@ -60,6 +60,12 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                 await self.close()
                 return
 
+            # The batch records the config chosen in the sidebar; batches
+            # created before that field existed fall back to the full matrix.
+            config = normalize_analysis_config(analysis_batch.config or input_data.get("config"))
+            variants = build_variants(config)
+            top_k = config["top_k"]
+
             existing_results = await sync_to_async(
                 lambda: list(AnalysisResult.objects.filter(batch=analysis_batch))
             )()
@@ -68,7 +74,7 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                 (r.method, r.ai_model) for r in existing_results
             }
 
-            if len(completed_variants) >= len(CONFIG_VARIANTS):
+            if len(completed_variants) >= len(variants):
                 await self.send(text_data=json.dumps({"status": "REPLAYING"}))
                 for result in existing_results:
                     await self.send(text_data=json.dumps({
@@ -85,11 +91,17 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                 await self.close()
                 return
 
-            total_variants = len(CONFIG_VARIANTS)
+            total_variants = len(variants)
 
-            for index, config in enumerate(CONFIG_VARIANTS):
-                method = config["method"]
-                model = config["model"]
+            await self.send(text_data=json.dumps({
+                "status": "CONFIG",
+                "config": config,
+                "expected_count": total_variants,
+            }))
+
+            for index, variant in enumerate(variants):
+                method = variant["method"]
+                model = variant["model"]
                 try:
                     if (method, model) in completed_variants:
                         existing = next(
@@ -110,7 +122,11 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                         continue
 
                     engine = rag_registry.get_engine(method, model)
-                    
+
+                    # Engines are shared singletons — reapply the depth every
+                    # variant so a previous run's Top-K never carries over.
+                    apply_retrieval_depth(engine, top_k)
+
                     is_initialized = await sync_to_async(engine.is_initialized)(username)
                     
                     if not is_initialized:

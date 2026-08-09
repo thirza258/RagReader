@@ -1,4 +1,11 @@
 import { apiClient } from "./apiClient";
+import type {
+  AnalysisConfigOptions,
+  CandidatePoolResponse,
+  DeepAnalysisConfig,
+  GroundTruthChunkResponse,
+  StartAnalysisResponse,
+} from "../interface";
 
 
 const signUp = async (email: string, username: string) => {
@@ -98,11 +105,20 @@ const getJobStatus = async (
 };
 
 const startDeepAnalysis = async (
-    conversation_id: string
-) => {
+    conversation_id: string,
+    config?: Partial<DeepAnalysisConfig>
+): Promise<StartAnalysisResponse> => {
     const response = await apiClient.post("/start-analysis/", {
-        conversation_id: conversation_id
+        conversation_id,
+        // Omitted entirely when unset so the backend applies its own defaults
+        // (the full method × model matrix) rather than an empty selection.
+        ...(config ? { config } : {}),
     });
+    return response.data;
+}
+
+const getAnalysisConfig = async (): Promise<AnalysisConfigOptions> => {
+    const response = await apiClient.get("/analysis-config/");
     return response.data;
 }
 
@@ -166,6 +182,33 @@ const CreateGroundTruthResponse = async (
     jsonConfig
   );
   return responseData.data;
+};
+
+/**
+ * Derives the ground-truth chunks by running the query through every
+ * retrieval method and fusing the rankings with RRF. Replaces whatever
+ * ground truth the conversation had.
+ */
+const poolGroundTruthChunks = async (
+  conversation_id: string,
+  options?: { top_n?: number; rrf_k?: number }
+): Promise<CandidatePoolResponse> => {
+  const response = await apiClient.post(
+    "/ground-truth-chunk/pool/",
+    { conversation_id, ...options },
+    jsonConfig
+  );
+  return response.data;
+};
+
+const getGroundTruthChunk = async (
+  conversation_id: string
+): Promise<GroundTruthChunkResponse> => {
+  const response = await apiClient.get(
+    `/ground-truth-chunk/${conversation_id}/`,
+    jsonConfig
+  );
+  return response.data;
 };
 
 const PostChunkEvaluationResult = async (
@@ -233,9 +276,12 @@ export default {
     openChat,
     getJobStatus,
     startDeepAnalysis,
+    getAnalysisConfig,
     createChunk,
     CreateGroundTruthChunk,
     CreateGroundTruthResponse,
+    poolGroundTruthChunks,
+    getGroundTruthChunk,
     PostChunkEvaluationResult,
     PostResponseEvaluationResult,
     getChunk,

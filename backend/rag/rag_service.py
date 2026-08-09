@@ -2,9 +2,44 @@ from pipeline.dense_rag_pipeline import DenseRAGPipeline
 from pipeline.hybrid_rag_pipeline import HybridRAGPipeline
 from pipeline.sparse_rag_pipeline import SparseRAGPipeline
 from router.models import Document
-from common.constant import CONFIG_VARIANTS
+from common.constant import CONFIG_VARIANTS, DEFAULT_TOP_K
 import os
 import glob
+
+# How many candidates Hybrid's sub-engines feed the cross-encoder. Kept above
+# the final depth so the reranker has something to actually rerank.
+DEFAULT_CHILD_TOP_K = 10
+
+
+def apply_retrieval_depth(engine, top_k: int = DEFAULT_TOP_K) -> None:
+    """Set how many chunks `engine` returns, for this run.
+
+    Engines are process-wide singletons, so call this before *every* variant
+    rather than only when the depth changes — otherwise one run's Top-K leaks
+    into the next. Derived values are computed from `top_k` alone, never from
+    the engine's current state, so repeated calls can't drift.
+    """
+    rag = getattr(engine, "rag", None)
+    if rag is None:
+        return
+
+    dense = getattr(rag, "dense_engine", None)
+    sparse = getattr(rag, "sparse_engine", None)
+
+    if dense is not None or sparse is not None:
+        # Hybrid: the sub-engines build the candidate pool, the reranker trims
+        # it to top_k. The pool has to be at least as deep as the final cut.
+        child_depth = max(top_k * 2, DEFAULT_CHILD_TOP_K)
+        rag.final_top_k = top_k
+        rag.child_top_k = child_depth
+        for child in (dense, sparse):
+            if child is not None:
+                child.top_k = child_depth
+        return
+
+    if hasattr(rag, "top_k"):
+        rag.top_k = top_k
+
 
 class RAGRegistry:
     _instance = None

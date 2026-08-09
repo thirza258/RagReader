@@ -170,8 +170,3 @@ export function connectDeepAnalysisWebSocket(
     }
   };
 }
-
-export function stopAllWebSockets(cleanups: (() => void)[]) {
-  cleanups.forEach((cleanup) => cleanup());
-  cleanups.length = 0;
-}
