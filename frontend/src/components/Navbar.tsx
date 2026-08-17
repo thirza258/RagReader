@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, X, User, LogOut, Settings, CreditCard } from "lucide-react";
+import { Menu, X, LogOut, MessageSquare } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -56,8 +56,15 @@ const Navbar: React.FC = () => {
         {/* Desktop Menu */}
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
           <a href="/" className="hover:text-cyan-400 transition-colors">Home</a>
-          <a href="/docs" className="hover:text-cyan-400 transition-colors">Docs</a>
-          <a href="/about" className="hover:text-cyan-400 transition-colors">About</a>
+          <a href="/docs" className="hover:text-cyan-400 transition-colors">Walkthrough</a>
+          <a
+            href="https://github.com/thirza258/RagReader"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:text-cyan-400 transition-colors"
+          >
+            GitHub
+          </a>
         </div>
 
 
@@ -83,17 +90,15 @@ const Navbar: React.FC = () => {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-slate-800" />
-                <DropdownMenuItem className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer">
-                  <User className="mr-2 h-4 w-4" />
-                  <span>Profile</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer">
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  <span>Billing</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer">
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Settings</span>
+                {/* Only actions that exist live here — Profile / Billing /
+                    Settings were no-op menu items for pages the app has no
+                    routes for. */}
+                <DropdownMenuItem
+                  className="focus:bg-slate-800 focus:text-cyan-400 cursor-pointer"
+                  onClick={() => navigate("/chat")}
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  <span>Go to chat</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-slate-800" />
                 <DropdownMenuItem 
@@ -111,7 +116,7 @@ const Navbar: React.FC = () => {
               <Button variant="ghost" onClick={() => navigate("/login")} className="text-slate-300 hover:text-white hover:bg-slate-800">
                 Sign In
               </Button>
-              <Button onClick={() => navigate("/register")} className="bg-cyan-600 hover:bg-cyan-700 text-white">
+              <Button onClick={() => navigate("/login")} className="bg-cyan-600 hover:bg-cyan-700 text-white">
                 Get Started
               </Button>
             </>
@@ -130,8 +135,16 @@ const Navbar: React.FC = () => {
       {isMenuOpen && (
         <div className="md:hidden bg-slate-900 border-b border-slate-800 p-4 flex flex-col gap-4 animate-in slide-in-from-top-5">
           <a href="/" className="text-slate-300 hover:text-cyan-400">Home</a>
-          <a href="/about" className="text-slate-300 hover:text-cyan-400">About</a>
-          
+          <a href="/docs" className="text-slate-300 hover:text-cyan-400">Walkthrough</a>
+          <a
+            href="https://github.com/thirza258/RagReader"
+            target="_blank"
+            rel="noreferrer"
+            className="text-slate-300 hover:text-cyan-400"
+          >
+            GitHub
+          </a>
+
           <div className="h-px bg-slate-800 my-2" />
           
           {username ? (

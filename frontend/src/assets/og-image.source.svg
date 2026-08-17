@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="55%" stop-color="#0b1226"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#bg)"/>
+  <g transform="translate(0,285)">
+    <circle cx="1050" cy="90" r="260" fill="#0ea5e9" opacity="0.14"/>
+    <circle cx="120" cy="600" r="220" fill="#2563eb" opacity="0.12"/>
+    <rect x="0" y="0" width="1200" height="6" fill="url(#brand)"/>
+
+    <rect x="80" y="76" width="62" height="62" rx="16" fill="url(#brand)"/>
+    <text x="100" y="120" font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="36" font-weight="700" fill="#04121f">R</text>
+    <text x="160" y="120" font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="32" font-weight="600" fill="#e2e8f0">RAGReader</text>
+    <text x="1120" y="118" text-anchor="end" font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="23" fill="#64748b">rag.nevatal.tech</text>
+
+    <text x="80" y="252" font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="60" font-weight="700" fill="#ffffff">Compare RAG pipelines on</text>
+    <text x="80" y="326" font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="60" font-weight="700" fill="#22d3ee">your own documents</text>
+    <text x="80" y="388" font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="27" fill="#94a3b8">Dense &#183; Sparse &#183; Hybrid retrieval, scored side by side.</text>
+
+    <g font-family="Avenir Next, Helvetica Neue, Helvetica" font-size="24" fill="#cbd5e1">
+      <rect x="80" y="452" width="278" height="66" rx="18" fill="#0f172a" stroke="#1e293b" stroke-width="2"/>
+      <text x="110" y="493">3 retrieval methods</text>
+      <rect x="382" y="452" width="176" height="66" rx="18" fill="#0f172a" stroke="#1e293b" stroke-width="2"/>
+      <text x="412" y="493">3 LLMs</text>
+      <rect x="582" y="452" width="306" height="66" rx="18" fill="#0f172a" stroke="#1e293b" stroke-width="2"/>
+      <text x="612" y="493">9 pipelines per run</text>
+    </g>
+  </g>
+</svg>

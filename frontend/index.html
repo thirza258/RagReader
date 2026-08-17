@@ -2,12 +2,144 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RagReader</title>
+
+    <!-- This is a client-rendered SPA: social scrapers never run the JS bundle,
+         so every tag below has to live here statically, with absolute URLs. -->
+    <title>RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines</title>
+    <meta
+      name="description"
+      content="Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs."
+    />
+    <link rel="canonical" href="https://rag.nevatal.tech/" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="color-scheme" content="dark" />
+
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="RAGReader" />
+    <meta property="og:title" content="RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines" />
+    <meta
+      property="og:description"
+      content="Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs."
+    />
+    <meta property="og:url" content="https://rag.nevatal.tech/" />
+    <meta property="og:image" content="https://rag.nevatal.tech/og-image.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="RAGReader — compare RAG pipelines on your own documents: 3 retrieval methods, 3 LLMs, 9 pipelines per run."
+    />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines" />
+    <meta
+      name="twitter:description"
+      content="Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs."
+    />
+    <meta name="twitter:image" content="https://rag.nevatal.tech/og-image.jpg" />
+
+    <!-- Structured data. Every claim here is grounded in the codebase
+         (backend/common/constant.py, evaluation/eval.py, LICENSE). Nothing is
+         asserted that the app does not do — no ratings, prices, or reviews. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "RAGReader",
+        "url": "https://rag.nevatal.tech/",
+        "description": "Document question answering that runs the same question through Dense, Sparse and Hybrid retrieval across three LLMs, then scores every pipeline with Precision@K, Recall@K, F1@K, ROUGE-L and LLM-judged faithfulness, answer relevance and answer coverage.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript and WebSocket support",
+        "license": "https://opensource.org/licenses/MIT",
+        "inLanguage": "en"
+      }
+    </script>
+    <!-- Keep these answers in sync with the FAQ section in src/pages/LandingPage.tsx. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What does RAGReader actually do?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "You add a document, ask a question, and get an answer from Dense (vector) retrieval. Clicking that answer opens a deep analysis that re-runs the same question through every combination of retrieval method and LLM you select — up to nine pipelines — and scores each one against ground truth."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What can I upload?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "A PDF file, a web page URL (the HTML is fetched and stripped to text), or text pasted directly into the form. One source is used at a time."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Which retrieval methods and models does it run?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Dense retrieval (cosine similarity over OpenAI text-embedding-3-small vectors), Sparse retrieval (BM25), and Hybrid retrieval (dense plus sparse candidates reranked by the cross-encoder/ms-marco-MiniLM-L6-v2 cross-encoder). Each runs against GPT-4o mini, Gemini 3 Flash and Claude Haiku 4.5, all routed through OpenRouter."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Which metrics are reported?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Retrieval quality: Precision@K, Recall@K and F1@K, computed as set overlap between the retrieved chunk IDs and the ground-truth chunk IDs. Answer quality: ROUGE-L precision, recall and F1 against your expected answer, plus Faithfulness, Answer Relevance and Answer Coverage judged by Mistral Nemo on a 1–5 scale and reported normalized to 0–1."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Where does the ground truth come from?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Two options. Manual selection: you tick the chunks you consider relevant. Candidate pooling: the query runs through every retrieval method and the rankings are fused with Reciprocal Rank Fusion (score = sum of 1 / (60 + rank)); the top of that fused ranking — 10 chunks by default — becomes the ground truth, with each chunk's rank, RRF score and contributing pipelines stored."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is RAGReader open source?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The source is on GitHub at github.com/thirza258/RagReader under the MIT License, and it can be self-hosted with Docker Compose. All model traffic runs through a single OpenRouter API key."
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>RAGReader — compare RAG pipelines on your own documents</h1>
+      <p>
+        RAGReader needs JavaScript to run. It answers questions about a PDF, a URL, or
+        pasted text using Dense (vector) retrieval, then re-runs the same question
+        through Dense, Sparse and Hybrid retrieval against GPT-4o mini, Gemini 3 Flash
+        and Claude Haiku 4.5 — up to nine pipelines — and scores every one with
+        Precision@K, Recall@K, F1@K, ROUGE-L and LLM-judged faithfulness, answer
+        relevance and answer coverage. Ground truth is either chosen by hand or derived
+        by fusing every retriever's ranking with Reciprocal Rank Fusion.
+      </p>
+      <p>
+        The project is open source (MIT):
+        <a href="https://github.com/thirza258/RagReader">github.com/thirza258/RagReader</a>
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -196,7 +196,12 @@ class BasePipeline(ABC):
             for c in stale_chunks:
                 existing_map.pop(c.text, None)
 
-        new_texts = [text for text in chunks if text not in existing_map]
+        # De-duplicated: a document can legitimately produce the same chunk
+        # text twice (repeated boilerplate, a duplicated heading), and Chunk has
+        # a unique constraint on (document, text, config_hash) — inserting both
+        # copies aborts the whole indexing run. One row is created and every
+        # position that shares the text maps to it.
+        new_texts = list(dict.fromkeys(text for text in chunks if text not in existing_map))
         if new_texts:
             created_chunks = Chunk.objects.bulk_create([
                 Chunk(

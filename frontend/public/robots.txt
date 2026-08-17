@@ -1,0 +1,14 @@
+# https://rag.nevatal.tech/robots.txt
+# Only the marketing page and the walkthrough are public; every other route is
+# per-user application state behind a username and has nothing to index.
+
+User-agent: *
+Disallow: /chat
+Disallow: /deep-result/
+Disallow: /ground-truth/
+Disallow: /loading
+Disallow: /error
+Disallow: /login
+Disallow: /api/
+
+Sitemap: https://rag.nevatal.tech/sitemap.xml
