@@ -78,7 +78,6 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
     } finally {
       setIsLoading(false);
       navigate("/loading");
-      return;
     }
   };
 

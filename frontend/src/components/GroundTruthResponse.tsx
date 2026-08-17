@@ -32,7 +32,7 @@ const GroundTruthResponse: React.FC<GroundTruthResponseProps> = ({
             prompt: response.data.query,
           });
         }
-      } catch (err) {
+      } catch {
         setFetchError("Failed to load task details.");
       } finally {
         setIsLoading(false);

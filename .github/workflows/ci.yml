@@ -1,0 +1,122 @@
+name: CI
+
+# The same two gates ./deploy.sh runs before it will deploy:
+#
+#   1. the Django test suite, inside the backend image
+#   2. the frontend type-check + production build
+#
+# Running the backend suite in the image (rather than pip-installing on the
+# runner) keeps CI and the deploy gate on identical dependencies — torch,
+# sentence-transformers and the baked-in NLTK corpora included.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # First run pays for the torch wheel and the pip install (~5-10 min);
+      # after that the layer cache makes it quick. Same context and Dockerfile
+      # docker-compose builds, so a cache hit here warms the deploy build too.
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          load: true
+          tags: ragreader-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --network none is deliberate: the suite is hermetic (no Redis, no
+      # database server, no API keys, no model downloads), and cutting the
+      # network off is what keeps it that way. A test that starts reaching out
+      # fails here instead of becoming a flake.
+      #
+      # DEVELOPMENT_MODE=True    -> sqlite instead of Postgres
+      # RAG_DISABLE_ENGINE_INIT  -> skip engine construction at import
+      - name: Run Django test suite
+        run: >
+          docker run --rm --network none --entrypoint ""
+          -e DEVELOPMENT_MODE=True
+          -e DEBUG=False
+          -e RAG_DISABLE_ENGINE_INIT=1
+          -e DATABASE_URL=
+          ragreader-backend:ci
+          python manage.py test --noinput -v 2
+
+  frontend-build:
+    name: Frontend lint, type-check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Matches the node version in frontend/Dockerfile.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `npm run build` is `tsc -b && vite build`, so this is the type-check
+      # gate as well as the build.
+      - name: Type-check and build
+        run: npm run build
+
+      # These are served from frontend/public and are the whole SEO surface for
+      # rag.nevatal.tech; a build that quietly stops publishing them is a
+      # regression worth failing on.
+      - name: Verify the static SEO files are published
+        run: |
+          for file in robots.txt sitemap.xml; do
+            if [ ! -f "dist/$file" ]; then
+              echo "::error::dist/$file is missing from the build output"
+              exit 1
+            fi
+          done
+
+          grep -q 'rel="canonical"' dist/index.html \
+            || { echo "::error::dist/index.html has no canonical link"; exit 1; }
+
+          # Resolve og:image rather than hardcoding a filename, so renaming or
+          # re-encoding the card is fine but pointing it at nothing is not.
+          og_image=$(grep -o 'property="og:image" content="[^"]*"' dist/index.html \
+            | head -1 | sed 's/.*content="//; s/"$//')
+          if [ -z "$og_image" ]; then
+            echo "::error::dist/index.html has no og:image"
+            exit 1
+          fi
+          if [ ! -f "dist/${og_image##*/}" ]; then
+            echo "::error::og:image points at $og_image but dist/${og_image##*/} does not exist"
+            exit 1
+          fi
