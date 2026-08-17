@@ -1,23 +1,20 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { steps } from "../components/data/DocsData";
+import SEO from "../components/SEO";
 
 const Docs: React.FC = () => {
-  // The SPA serves one static <head> for every route (see index.html), so the
-  // per-page title is set here rather than in a meta framework.
-  useEffect(() => {
-    const previousTitle = document.title;
-    document.title = "Walkthrough — RAGReader, step by step";
-    return () => {
-      document.title = previousTitle;
-    };
-  }, []);
-
   return (
     <div className="my-12 min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
+      <SEO
+        title="Walkthrough Guide — RAGReader Step-by-Step"
+        description="Learn how to upload documents, ask questions, select ground truth, and run 9-pipeline RAG benchmarks step-by-step with screenshots."
+        canonicalUrl="https://rag.nevatal.tech/docs"
+      />
+
       <main className="container mx-auto px-4 py-12 max-w-5xl">
         <header className="mb-12 pt-12 max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary mb-3">
-            Walkthrough
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-400 mb-3">
+            Walkthrough Guide
           </p>
           <h1 className="text-4xl font-bold text-foreground mb-4">
             RAGReader, step by step

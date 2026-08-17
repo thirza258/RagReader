@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ChatMessage } from "../components/ui/chatmessage";
 import { Message } from "../types/types";
+import SEO from "../components/SEO";
 
 function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -59,8 +60,11 @@ function Chatbot() {
   };
 
   return (
-   
     <div className="flex flex-col h-[calc(100vh-64px)] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
+      <SEO
+        title="Document Chat Workspace — RAGReader"
+        description="Query your uploaded document with dense vector retrieval."
+      />
       
       <div className="flex-grow overflow-y-auto p-4">
       {messages.map((msg, index) => (

@@ -1,15 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark scroll-smooth">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- This is a client-rendered SPA: social scrapers never run the JS bundle,
-         so every tag below has to live here statically, with absolute URLs. -->
+    <!-- Performance preconnects -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://openrouter.ai" />
+
     <title>RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines</title>
     <meta
       name="description"
       content="Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs."
+    />
+    <meta
+      name="keywords"
+      content="RAG pipeline comparison, Dense retrieval, Sparse retrieval, Hybrid retrieval, RAG evaluation, Precision@K, Recall@K, ROUGE-L, Reciprocal Rank Fusion, LLM benchmark"
     />
     <link rel="canonical" href="https://rag.nevatal.tech/" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
@@ -47,24 +54,34 @@
     />
     <meta name="twitter:image" content="https://rag.nevatal.tech/og-image.jpg" />
 
-    <!-- Structured data. Every claim here is grounded in the codebase
-         (backend/common/constant.py, evaluation/eval.py, LICENSE). Nothing is
-         asserted that the app does not do — no ratings, prices, or reviews. -->
+    <!-- WebApplication Structured Data -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebApplication",
+        "@type": "SoftwareApplication",
         "name": "RAGReader",
         "url": "https://rag.nevatal.tech/",
-        "description": "Document question answering that runs the same question through Dense, Sparse and Hybrid retrieval across three LLMs, then scores every pipeline with Precision@K, Recall@K, F1@K, ROUGE-L and LLM-judged faithfulness, answer relevance and answer coverage.",
+        "image": "https://rag.nevatal.tech/og-image.jpg",
+        "description": "Document question answering platform that benchmarks Dense, Sparse, and Hybrid retrieval across three LLMs, evaluating retrieval and response accuracy with Precision@K, Recall@K, F1@K, ROUGE-L, Faithfulness, Relevance, and Coverage.",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Any",
         "browserRequirements": "Requires JavaScript and WebSocket support",
         "license": "https://opensource.org/licenses/MIT",
-        "inLanguage": "en"
+        "softwareVersion": "1.0.0",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "RAGReader Team",
+          "url": "https://github.com/thirza258/RagReader"
+        }
       }
     </script>
-    <!-- Keep these answers in sync with the FAQ section in src/pages/LandingPage.tsx. -->
+
+    <!-- FAQPage Structured Data -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -75,39 +92,39 @@
             "name": "What does RAGReader actually do?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "You add a document, ask a question, and get an answer from Dense (vector) retrieval. Clicking that answer opens a deep analysis that re-runs the same question through every combination of retrieval method and LLM you select — up to nine pipelines — and scores each one against ground truth."
+              "text": "You add a document (PDF, URL, or raw text), ask a question, and get an answer from Dense (vector) retrieval. Clicking that answer opens a deep analysis that re-runs the same question through every combination of retrieval method and LLM you select — up to nine pipelines — and scores each one against ground truth."
             }
           },
           {
             "@type": "Question",
-            "name": "What can I upload?",
+            "name": "What document formats can I upload?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "A PDF file, a web page URL (the HTML is fetched and stripped to text), or text pasted directly into the form. One source is used at a time."
+              "text": "A PDF file, a web page URL (the HTML is fetched and stripped to text), or text pasted directly into the form."
             }
           },
           {
             "@type": "Question",
-            "name": "Which retrieval methods and models does it run?",
+            "name": "Which retrieval methods and LLM models are benchmarked?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Dense retrieval (cosine similarity over OpenAI text-embedding-3-small vectors), Sparse retrieval (BM25), and Hybrid retrieval (dense plus sparse candidates reranked by the cross-encoder/ms-marco-MiniLM-L6-v2 cross-encoder). Each runs against GPT-4o mini, Gemini 3 Flash and Claude Haiku 4.5, all routed through OpenRouter."
+              "text": "Dense retrieval (openai/text-embedding-3-small), Sparse retrieval (BM25), and Hybrid retrieval (dense + sparse candidates reranked by cross-encoder/ms-marco-MiniLM-L6-v2). Each runs against GPT-4o mini, Gemini 3 Flash, and Claude Haiku 4.5 via OpenRouter."
             }
           },
           {
             "@type": "Question",
-            "name": "Which metrics are reported?",
+            "name": "Which evaluation metrics are reported?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Retrieval quality: Precision@K, Recall@K and F1@K, computed as set overlap between the retrieved chunk IDs and the ground-truth chunk IDs. Answer quality: ROUGE-L precision, recall and F1 against your expected answer, plus Faithfulness, Answer Relevance and Answer Coverage judged by Mistral Nemo on a 1–5 scale and reported normalized to 0–1."
+              "text": "Retrieval quality: Precision@K, Recall@K, F1@K. Answer quality: ROUGE-L (precision, recall, F1), plus Faithfulness, Answer Relevance, and Answer Coverage judged by Mistral Nemo."
             }
           },
           {
             "@type": "Question",
-            "name": "Where does the ground truth come from?",
+            "name": "How is Ground Truth established for evaluation?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Two options. Manual selection: you tick the chunks you consider relevant. Candidate pooling: the query runs through every retrieval method and the rankings are fused with Reciprocal Rank Fusion (score = sum of 1 / (60 + rank)); the top of that fused ranking — 10 chunks by default — becomes the ground truth, with each chunk's rank, RRF score and contributing pipelines stored."
+              "text": "Via Manual Selection (ticking relevant chunks by hand) or Candidate Pooling (fusing retriever rankings with Reciprocal Rank Fusion: score = sum of 1 / (60 + rank))."
             }
           },
           {
@@ -115,14 +132,62 @@
             "name": "Is RAGReader open source?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. The source is on GitHub at github.com/thirza258/RagReader under the MIT License, and it can be self-hosted with Docker Compose. All model traffic runs through a single OpenRouter API key."
+              "text": "Yes, RAGReader is open source under the MIT License and can be self-hosted using Docker Compose."
             }
           }
         ]
       }
     </script>
+
+    <!-- HowTo Structured Data for Google Rich Results -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        "name": "How to Benchmark & Compare RAG Pipelines with RAGReader",
+        "description": "Step-by-step guide to uploading documents, asking questions, establishing ground truth, and scoring 9 RAG pipelines in parallel.",
+        "step": [
+          {
+            "@type": "HowToStep",
+            "position": 1,
+            "name": "Sign in to RAGReader",
+            "text": "Enter a username and email to create or load your document workspace."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 2,
+            "name": "Add Document Source",
+            "text": "Upload a PDF, submit a website URL, or paste document text directly."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 3,
+            "name": "Automatic Indexing",
+            "text": "Text is split into 512-char chunks with 50-char overlap, generating Dense vectors and BM25 sparse indices."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 4,
+            "name": "Ask Initial Question",
+            "text": "Query your document to receive a baseline answer using Dense retrieval."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 5,
+            "name": "Establish Ground Truth",
+            "text": "Select relevant chunks manually or automatically generate candidate pools using Reciprocal Rank Fusion."
+          },
+          {
+            "@type": "HowToStep",
+            "position": 6,
+            "name": "Execute Deep Analysis Matrix",
+            "text": "Benchmark 3 retrieval methods x 3 LLMs in parallel and review live streamed metric scores."
+          }
+        ]
+      }
+    </script>
   </head>
-  <body>
+  <body class="bg-slate-950 text-slate-200 antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
     <div id="root"></div>
     <noscript>
       <h1>RAGReader — compare RAG pipelines on your own documents</h1>
@@ -132,8 +197,7 @@
         through Dense, Sparse and Hybrid retrieval against GPT-4o mini, Gemini 3 Flash
         and Claude Haiku 4.5 — up to nine pipelines — and scores every one with
         Precision@K, Recall@K, F1@K, ROUGE-L and LLM-judged faithfulness, answer
-        relevance and answer coverage. Ground truth is either chosen by hand or derived
-        by fusing every retriever's ranking with Reciprocal Rank Fusion.
+        relevance and answer coverage.
       </p>
       <p>
         The project is open source (MIT):
