@@ -29,9 +29,12 @@ from common.schema import get_responses
 from common.chunker import DocumentChunker
 from common.constant import (
     CONFIG_VARIANTS,
+    DEFAULT_POOL_TOP_N,
     DEFAULT_TOP_K,
     METHOD_IDS,
     MODEL_IDS,
+    POOL_TOP_N_MAX,
+    POOL_TOP_N_MIN,
     TOP_K_MAX,
     TOP_K_MIN,
     build_variants,
@@ -570,6 +573,122 @@ class RetrievalDepthTests(TestCase):
 
     def test_engine_without_a_rag_attribute_is_ignored(self):
         apply_retrieval_depth(mock.Mock(rag=None), 5)  # must not raise
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
+class ChatRetrievalDepthTests(TestCase):
+    """Chat shares its engine with deep analysis and candidate pooling."""
+
+    def test_query_resets_depth_left_behind_by_pooling(self):
+        # Regression: QueryView called .run() straight off the registry. The
+        # engine is a process-wide singleton that candidate pooling re-depths
+        # to as much as POOL_TOP_N_MAX, so the next chat message silently
+        # retrieved that many chunks instead of DEFAULT_TOP_K.
+        user = make_user("alice")
+        doc = Document.objects.create(user=user, name="d", source_type="text")
+        Job.objects.create(user=user, status=Job.Status.READY, document=doc)
+
+        engine = mock.Mock()
+        engine.rag = mock.Mock(spec=["top_k"])
+        engine.rag.top_k = POOL_TOP_N_MAX  # what pooling left behind
+        engine.run.return_value = {
+            "answer": "42",
+            "context": [{"text": "chunk text", "chunk_id": 1, "score": 0.9}],
+            "chunk_ids": [1],
+        }
+
+        import router.views as views
+        with mock.patch.object(views.rag_registry, "get_engine", return_value=engine):
+            resp = self.client.post(
+                "/api/v1/query/",
+                {"USER": "alice", "QUERY": "meaning of life?"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(engine.rag.top_k, DEFAULT_TOP_K)
+
+    def test_query_pins_depth_before_running_not_after(self):
+        # Pinning after .run() would be a no-op for the request that needs it.
+        user = make_user("alice")
+        doc = Document.objects.create(user=user, name="d", source_type="text")
+        Job.objects.create(user=user, status=Job.Status.READY, document=doc)
+
+        engine = mock.Mock()
+        engine.rag = mock.Mock(spec=["top_k"])
+        engine.rag.top_k = TOP_K_MAX
+
+        depth_at_run_time = {}
+
+        def record_depth(username, query):
+            depth_at_run_time["top_k"] = engine.rag.top_k
+            return {"answer": "a", "context": [], "chunk_ids": []}
+
+        engine.run.side_effect = record_depth
+
+        import router.views as views
+        with mock.patch.object(views.rag_registry, "get_engine", return_value=engine):
+            self.client.post(
+                "/api/v1/query/",
+                {"USER": "alice", "QUERY": "q"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(depth_at_run_time["top_k"], DEFAULT_TOP_K)
+
+
+class HybridChildDepthTests(TestCase):
+    def test_children_are_built_at_child_top_k_not_final_top_k(self):
+        # Regression: HybridRAG passed `config` straight to its sub-engines, so
+        # they fetched `top_k` candidates — leaving the cross-encoder with
+        # exactly as many candidates as it was asked to return, i.e. nothing to
+        # rerank until apply_retrieval_depth happened to be called.
+        import hybrid_rag.hybrid_rag as hybrid_module
+
+        with mock.patch.object(hybrid_module, "SparseRAG") as sparse_cls, \
+             mock.patch.object(hybrid_module, "DenseRAG") as dense_cls, \
+             mock.patch.object(hybrid_module, "CrossEncoder"):
+            engine = hybrid_module.HybridRAG({"top_k": 5, "child_top_k": 10})
+
+        self.assertEqual(engine.final_top_k, 5)
+        for cls in (sparse_cls, dense_cls):
+            child_config = cls.call_args.args[0]
+            self.assertEqual(child_config["top_k"], 10)
+            self.assertEqual(child_config["child_top_k"], 10)
+
+    def test_caller_config_is_not_mutated(self):
+        import hybrid_rag.hybrid_rag as hybrid_module
+
+        config = {"top_k": 5, "child_top_k": 10}
+        with mock.patch.object(hybrid_module, "SparseRAG"), \
+             mock.patch.object(hybrid_module, "DenseRAG"), \
+             mock.patch.object(hybrid_module, "CrossEncoder"):
+            hybrid_module.HybridRAG(config)
+
+        # RAGRegistry hands the same dict shape to every variant.
+        self.assertEqual(config["top_k"], 5)
+
+
+class PoolTopNConfigTests(TestCase):
+    def test_pool_top_n_is_clamped_and_junk_tolerated(self):
+        self.assertEqual(
+            normalize_analysis_config({"pool_top_n": 9999})["pool_top_n"],
+            POOL_TOP_N_MAX,
+        )
+        self.assertEqual(
+            normalize_analysis_config({"pool_top_n": 0})["pool_top_n"],
+            POOL_TOP_N_MIN,
+        )
+        self.assertEqual(
+            normalize_analysis_config({"pool_top_n": "abc"})["pool_top_n"],
+            DEFAULT_POOL_TOP_N,
+        )
+
+    def test_pool_is_deeper_than_a_single_run(self):
+        # If the pool were as shallow as one run's output, the pooled ground
+        # truth would be close to a copy of that run and the retrieval metrics
+        # would flatter it.
+        self.assertGreater(DEFAULT_POOL_TOP_N, DEFAULT_TOP_K)
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)

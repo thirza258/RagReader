@@ -17,7 +17,7 @@ from router.models import (
 )
 from router.tasks import initialize_rag_task
 
-from rag.rag_service import rag_registry
+from rag.rag_service import apply_retrieval_depth, rag_registry
 from router.serializers import (
     InsertDataSerializer, 
     InsertTextSerializer, 
@@ -289,7 +289,15 @@ class QueryView(GenericAPIView):
             document = last_job.document
             document_id = document.pk if document else None
             
-            answer = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"]).run(username, query)
+            engine = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"])
+
+            # Engines are process-wide singletons, and both deep analysis and
+            # candidate pooling re-depth them (up to TOP_K_MAX / POOL_TOP_N_MAX).
+            # Without this, plain chat keeps whichever depth the last of those
+            # left behind instead of DEFAULT_TOP_K.
+            apply_retrieval_depth(engine, DEFAULT_TOP_K)
+
+            answer = engine.run(username, query)
             
             retrieved_chunks = answer.get("context", [])
             llm_answer = answer.get("answer", "")

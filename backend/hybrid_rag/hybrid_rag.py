@@ -30,8 +30,13 @@ class HybridRAG(BaseRAG):
         self.reranker_model = config.get("reranker_model", "cross-encoder/ms-marco-MiniLM-L6-v2")
 
         print(f"Initializing Hybrid Engine (fetching top {self.child_top_k} from children)...")
-        self.sparse_engine = SparseRAG(config)
-        self.dense_engine = DenseRAG(config)
+        # The sub-engines build the candidate pool the cross-encoder reranks, so
+        # they must fetch `child_top_k` — not the config's `top_k`, which is the
+        # *final* cut. Passing `config` straight through would leave a reranker
+        # with exactly as many candidates as it is asked to return.
+        child_config = {**config, "top_k": self.child_top_k}
+        self.sparse_engine = SparseRAG(child_config)
+        self.dense_engine = DenseRAG(child_config)
 
         self._cross_encoder = CrossEncoder(self.reranker_model)
 
