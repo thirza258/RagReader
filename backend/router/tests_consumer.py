@@ -157,13 +157,18 @@ class AnalysisConsumerTests(TransactionTestCase):
 
     # ── failure to even start ────────────────────────────────────────────────
 
-    def test_an_expired_job_cache_is_reported_not_hung(self):
+    def test_an_expired_job_cache_falls_back_to_db_and_runs(self):
         batch = self.make_batch()
         cache.delete(f"job_input_{batch.job_id}")
+        engine = make_engine()
 
-        frames = self.collect(batch.job_id)
+        with mock.patch.object(
+            consumers.rag_registry, "get_engine", return_value=engine
+        ), mock.patch.object(consumers, "apply_retrieval_depth"):
+            frames = self.collect(batch.job_id)
 
-        self.assertEqual(frames[0]["error"], "Job cache expired or invalid")
+        self.assertEqual(frames[0]["status"], "CONFIG")
+        self.assertEqual(frames[-1]["status"], "COMPLETE")
 
     def test_a_missing_batch_row_is_reported(self):
         cache.set(
@@ -174,6 +179,10 @@ class AnalysisConsumerTests(TransactionTestCase):
 
         frames = self.collect("11111111-1111-1111-1111-111111111111")
 
+        self.assertEqual(frames[0]["error"], "Batch record not found in DB")
+
+    def test_unknown_batch_and_no_cache_reports_error(self):
+        frames = self.collect("22222222-2222-2222-2222-222222222222")
         self.assertEqual(frames[0]["error"], "Batch record not found in DB")
 
     # ── the normal run ───────────────────────────────────────────────────────

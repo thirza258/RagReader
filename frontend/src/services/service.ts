@@ -122,6 +122,11 @@ const getAnalysisConfig = async (): Promise<AnalysisConfigOptions> => {
     return response.data;
 }
 
+const getAnalysisStatus = async (jobId: string) => {
+    const response = await apiClient.get(`/analysis-status/${jobId}/`, jsonConfig);
+    return response.data;
+};
+
 
 
 
@@ -287,5 +292,6 @@ export default {
     getChunk,
     getConversation,
     getDocumentInfo,
-    getConversationHistory
+    getConversationHistory,
+    getAnalysisStatus
 };

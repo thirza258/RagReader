@@ -96,6 +96,7 @@ const DeepResult: React.FC = () => {
         query,
         onOpen: () => {
           setIsConnected(true);
+          setRunError("");
           setRunState({ isRunning: true, completed: resultCountRef.current, total });
         },
         onResult: (result) => {
@@ -109,9 +110,27 @@ const DeepResult: React.FC = () => {
         onProgress: (method, value) => {
           setProgress((prev) => ({ ...prev, [method]: value }));
         },
-        onError: (err) => {
+        onError: async (err) => {
           console.error("WebSocket error:", err);
           setIsConnected(false);
+          try {
+            const statusData = await service.getAnalysisStatus(batchId);
+            if (statusData?.results && Array.isArray(statusData.results)) {
+              for (const r of statusData.results) {
+                addOrUpdateResult(r);
+              }
+              if (statusData.is_complete) {
+                setRunState({
+                  isRunning: false,
+                  completed: statusData.completed ?? statusData.results.length,
+                  total: statusData.total ?? total,
+                });
+                return;
+              }
+            }
+          } catch {
+            // Ignore fallback failure
+          }
           setRunError("Lost the connection to the analysis stream.");
         },
         onClose: () => {
@@ -201,17 +220,46 @@ const DeepResult: React.FC = () => {
           const existingBatchId = localStorage.getItem(
             `batch_id_${conversationId}`,
           );
-          if (existingBatchId) return;
+          const existingDocId = localStorage.getItem("document_id") || "";
 
-          const result = await service.startDeepAnalysis(conversationId);
-          if (cancelled) return;
-          ({ batch_id, query } = result);
-          document_id = String(result.document_id);
-          expected = result.expected_count;
+          if (existingBatchId) {
+            batch_id = existingBatchId;
+            document_id = existingDocId;
+            query = "";
 
-          localStorage.setItem(`batch_id_${conversationId}`, batch_id);
-          localStorage.setItem("document_id", document_id);
-          localStorage.setItem("conversation_id", conversationId);
+            try {
+              const statusData = await service.getAnalysisStatus(existingBatchId);
+              if (cancelled) return;
+
+              if (statusData?.results && Array.isArray(statusData.results)) {
+                for (const r of statusData.results) {
+                  addOrUpdateResult(r);
+                }
+              }
+              expected = statusData?.total ?? 0;
+              if (statusData?.is_complete) {
+                setIds({ conversationId, documentId: document_id });
+                setRunState({
+                  isRunning: false,
+                  completed: statusData.completed ?? statusData.results?.length ?? 0,
+                  total: expected,
+                });
+                return;
+              }
+            } catch (err) {
+              console.warn("Could not check existing batch status via REST:", err);
+            }
+          } else {
+            const result = await service.startDeepAnalysis(conversationId);
+            if (cancelled) return;
+            ({ batch_id, query } = result);
+            document_id = String(result.document_id);
+            expected = result.expected_count;
+
+            localStorage.setItem(`batch_id_${conversationId}`, batch_id);
+            localStorage.setItem("document_id", document_id);
+            localStorage.setItem("conversation_id", conversationId);
+          }
         }
 
         if (cancelled) return;

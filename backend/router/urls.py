@@ -33,5 +33,5 @@ urlpatterns = [
 ]
 
 websocket_urlpatterns = [
-    re_path(r"ws/analysis/(?P<job_id>[\w-]+)/$", AnalysisConsumer.as_asgi()),
+    re_path(r"^/?ws/analysis/(?P<job_id>[\w-]+)/?$", AnalysisConsumer.as_asgi()),
 ]

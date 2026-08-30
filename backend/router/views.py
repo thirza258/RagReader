@@ -50,7 +50,7 @@ class InsertDataView(GenericAPIView):
         return Document.objects.create(
             user=user,
             name=data["filename"],
-            source_type="pdf",
+            source_type=data.get("source_type", "pdf"),
             source_path=data["source_path"],
             extracted_text_path=data["text_path"],
         )
@@ -71,6 +71,10 @@ class InsertDataView(GenericAPIView):
 
             return get_responses().response_200("Data inserted successfully!")
 
+        except GuestUser.DoesNotExist:
+            return get_responses().response_404(error="User not found")
+        except ValueError as e:
+            return get_responses().response_400(error=str(e))
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
@@ -433,18 +437,51 @@ class AnalysisStatusView(GenericAPIView):
             analysis_batch = AnalysisBatch.objects.get(job_id=batch_id)
 
             results = AnalysisResult.objects.filter(batch=analysis_batch)
-            data = [{
-                "method": result.method,
-                "result": result.answer
-            } for result in results]
+            data = []
+            for result in results:
+                eval_dict = {}
+                if isinstance(result.evaluation_metrics, dict):
+                    eval_dict = result.evaluation_metrics
+                elif isinstance(result.evaluation_metrics, list):
+                    for m in result.evaluation_metrics:
+                        if isinstance(m, dict) and "name" in m and "value" in m:
+                            eval_dict[m["name"]] = m["value"]
+                        elif isinstance(m, dict):
+                            eval_dict.update(m)
 
-            progress = 100.0 
-            is_complete = True
+                chunks = [
+                    {
+                        "chunk_id": chunk.get("id") or chunk.get("chunk_id"),
+                        "text": chunk.get("text", ""),
+                        "score": chunk.get("score")
+                    }
+                    for chunk in (result.retrieved_chunks or [])
+                ]
+
+                data.append({
+                    "batch_id": str(batch_id),
+                    "method": result.method,
+                    "aiModel": result.ai_model,
+                    "query": result.query,
+                    "answer": result.answer,
+                    "context": chunks,
+                    "retrievedChunks": chunks,
+                    "evaluation": eval_dict,
+                    "progress": 100,
+                    "result": result.answer,
+                })
+
+            total_expected = analysis_batch.total_variants or len(data)
+            is_complete = len(data) >= total_expected if total_expected > 0 else len(data) > 0
+            progress = int((len(data) / total_expected) * 100) if total_expected > 0 else 100
 
             response_payload = {
-                "batch_id": batch_id,
+                "batch_id": str(batch_id),
                 "progress": progress,
                 "is_complete": is_complete,
+                "total": total_expected,
+                "completed": len(data),
+                "results": data,
                 "data": data 
             }
 

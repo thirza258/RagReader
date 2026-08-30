@@ -175,6 +175,12 @@ class PipelineTestCase(TestCase):
         cross_encoder_patch.start()
         self.addCleanup(cross_encoder_patch.stop)
 
+        ollama_cross_encoder_patch = mock.patch(
+            "hybrid_rag.hybrid_rag.OllamaCrossEncoder", FakeCrossEncoder
+        )
+        ollama_cross_encoder_patch.start()
+        self.addCleanup(ollama_cross_encoder_patch.stop)
+
     def _config(self, **overrides):
         return {
             **BASE_CONFIG,
@@ -866,6 +872,33 @@ class HybridPipelineTests(PipelineTestCase):
         self.assertTrue(self.pipeline.init_job("alice", job=job))
         job.refresh_from_db()
         self.assertEqual(job.progress, 90)
+
+    def test_hybrid_rag_uses_ollama_by_default(self):
+        from hybrid_rag.hybrid_rag import HybridRAG, OllamaCrossEncoder
+        with override_settings(OPENROUTER_API_KEY="test-key"):
+            rag = HybridRAG({
+                "llm_model": "openai/gpt-4o-mini",
+                "model": "openai/text-embedding-3-small",
+                "ollama_embed_model": "nomic-embed-text",
+            })
+        self.assertIsInstance(rag._cross_encoder, (OllamaCrossEncoder, FakeCrossEncoder))
+
+
+class OllamaCrossEncoderTests(TestCase):
+    def test_ollama_cross_encoder_predict(self):
+        from hybrid_rag.hybrid_rag import OllamaCrossEncoder
+        encoder = OllamaCrossEncoder(model_name="nomic-embed-text")
+        mock_client = mock.Mock()
+        mock_client.embed.side_effect = [
+            {"embeddings": [[1.0, 0.0, 0.0]]},  # query embedding
+            {"embeddings": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]},  # docs embedding
+        ]
+        with mock.patch.object(encoder, "_client", mock_client):
+            pairs = [("alpha", "alpha doc"), ("alpha", "beta doc")]
+            scores = encoder.predict(pairs)
+            self.assertEqual(len(scores), 2)
+            self.assertAlmostEqual(scores[0], 1.0, places=4)
+            self.assertAlmostEqual(scores[1], 0.0, places=4)
 
 
 class RagRegistryTests(TestCase):

@@ -15,6 +15,11 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
+    environment:
+      # Ollama runs on the host; the reranker (HybridRAG) reads this env var.
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - media:/app/media
       - vectorstores:/app/vector_stores
@@ -33,6 +38,11 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
+    environment:
+      # The worker also runs the RAG engines (init job), so it needs Ollama too.
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - media:/app/media
       - vectorstores:/app/vector_stores
