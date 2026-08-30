@@ -6,8 +6,8 @@ name: CI
 #   2. the frontend type-check + production build
 #
 # Running the backend suite in the image (rather than pip-installing on the
-# runner) keeps CI and the deploy gate on identical dependencies — torch,
-# sentence-transformers and the baked-in NLTK corpora included.
+# runner) keeps CI and the deploy gate on identical dependencies — ollama
+# and the baked-in NLTK corpora included.
 
 on:
   push:
@@ -34,9 +34,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # First run pays for the torch wheel and the pip install (~5-10 min);
-      # after that the layer cache makes it quick. Same context and Dockerfile
-      # docker-compose builds, so a cache hit here warms the deploy build too.
+      # Pip install dependencies and cache them across runs.
+      # Same context and Dockerfile docker-compose builds, so a cache hit here warms the deploy build too.
       - name: Build backend image
         uses: docker/build-push-action@v6
         with:

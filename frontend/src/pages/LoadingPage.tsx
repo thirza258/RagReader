@@ -57,28 +57,28 @@ const LoadingPage: React.FC = () => {
       const startChat = async () => {
         try {
           const response = await service.openChat(username);
-          // const chunkCreateResponse = await service.createChunk(username);
-          const job = response?.data;
+          if (response?.status !== 202 && response?.status !== 200) {
+            throw new Error(response?.message || "Failed to start chat initialization");
+          }
 
-          // if (chunkCreateResponse?.status !== 200) {
-          //   console.error("Chunk creation failed:", chunkCreateResponse?.data);
-          //   setError("Failed to create chunks for the document");
-          //   setStatus("FAILED");
-          //   return;
-          // }
-        
+          const job = response?.data;
           if (!job?.job_id) {
-            throw new Error("Invalid open-chat response");
+            throw new Error(response?.message || "Invalid open-chat response: Job ID missing");
           }
     
           setJobId(job.job_id);
-          setStatus(job.status);
-          setProgress(job.progress);
+          setStatus(job.status || "PENDING");
+          setProgress(job.progress || 0);
 
-
-        } catch (err) {
+        } catch (err: any) {
           console.error("Open chat failed:", err);
-          setError("Failed to start chat initialization");
+          const errorMsg =
+            err?.response?.data?.message ||
+            err?.message ||
+            "Failed to start chat initialization";
+          setError(errorMsg);
+          setStatus("FAILED");
+          setMessage("Initialization Failed");
         }
       };
     
@@ -109,10 +109,11 @@ const LoadingPage: React.FC = () => {
   
         } else if (job.status === "FAILED") {
           clearInterval(pollInterval);
+          setStatus("FAILED");
           setError(job.error || "Initialization failed");
         }
   
-      } catch (err) {
+      } catch (err: any) {
         console.error("Polling error:", err);
       }
     }, 2000);
@@ -157,10 +158,10 @@ const LoadingPage: React.FC = () => {
             </h2>
             <p className="text-sm text-muted-foreground">
               {status === "FAILED" 
-                ? "Please check the logs or try again later."
+                ? (error || "Please check the logs or try again later.")
                 : jobId
                   ? `Job ID: ${jobId.slice(0, 8)}...`
-                  : "Job ID: ???"}
+                  : "Initializing Job..."}
             </p>
           </div>
 

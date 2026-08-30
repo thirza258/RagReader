@@ -128,6 +128,109 @@ class InsertTextEndpointTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
+class InsertDataEndpointTests(TestCase):
+    def test_insert_data_txt_file(self):
+        user = make_user("alice")
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        txt_content = b"This is a plain text document.\nIt contains multiple lines of information."
+        uploaded_file = SimpleUploadedFile("sample.txt", txt_content, content_type="text/plain")
+
+        resp = self.client.post(
+            "/api/v1/insert-data/",
+            {"USER": "alice", "FILE": uploaded_file},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 200)
+        doc = Document.objects.filter(user=user).latest("created_at")
+        self.assertEqual(doc.source_type, "txt")
+        self.assertEqual(doc.name, "sample.txt")
+        self.assertTrue(doc.extracted_text_path)
+        from django.core.files.storage import default_storage
+        with default_storage.open(doc.extracted_text_path, "r") as f:
+            extracted = f.read()
+        self.assertIn("This is a plain text document.", extracted)
+
+    def test_insert_data_markdown_file(self):
+        user = make_user("alice")
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        md_content = b"# Header\n\nThis is a **markdown** document with lists:\n- item 1\n- item 2"
+        uploaded_file = SimpleUploadedFile("notes.md", md_content, content_type="text/markdown")
+
+        resp = self.client.post(
+            "/api/v1/insert-data/",
+            {"USER": "alice", "FILE": uploaded_file},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 200)
+        doc = Document.objects.filter(user=user).latest("created_at")
+        self.assertEqual(doc.source_type, "md")
+        self.assertEqual(doc.name, "notes.md")
+        self.assertTrue(doc.extracted_text_path)
+        from django.core.files.storage import default_storage
+        with default_storage.open(doc.extracted_text_path, "r") as f:
+            extracted = f.read()
+        self.assertIn("**markdown** document", extracted)
+
+    def test_insert_data_pdf_file(self):
+        user = make_user("alice")
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        with mock.patch("utils.insert_file.DataLoader._parse_pdf", return_value="Extracted PDF text content"):
+            uploaded_file = SimpleUploadedFile("document.pdf", b"%PDF-1.4 dummy content", content_type="application/pdf")
+            resp = self.client.post(
+                "/api/v1/insert-data/",
+                {"USER": "alice", "FILE": uploaded_file},
+                format="multipart",
+            )
+            self.assertEqual(resp.status_code, 200)
+            doc = Document.objects.filter(user=user).latest("created_at")
+            self.assertEqual(doc.source_type, "pdf")
+            self.assertEqual(doc.name, "document.pdf")
+            self.assertTrue(doc.extracted_text_path)
+
+    def test_insert_data_unsupported_file_extension(self):
+        make_user("alice")
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        uploaded_file = SimpleUploadedFile("archive.zip", b"fake zip content", content_type="application/zip")
+        resp = self.client.post(
+            "/api/v1/insert-data/",
+            {"USER": "alice", "FILE": uploaded_file},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_insert_data_unknown_user(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        uploaded_file = SimpleUploadedFile("sample.txt", b"hello", content_type="text/plain")
+        resp = self.client.post(
+            "/api/v1/insert-data/",
+            {"USER": "ghost", "FILE": uploaded_file},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_data_loader_load_supports_all_types(self):
+        from utils.insert_file import get_loader
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        loader = get_loader()
+
+        # Test txt loading
+        txt_path = default_storage.save("test_dir/test.txt", ContentFile("Hello from txt file"))
+        loaded_txt = loader.load(txt_path)
+        self.assertEqual(loaded_txt, "Hello from txt file")
+
+        # Test md loading
+        md_path = default_storage.save("test_dir/test.md", ContentFile("# Markdown text"))
+        loaded_md = loader.load(md_path)
+        self.assertEqual(loaded_md, "# Markdown text")
+
+        # Test unsupported loading raises
+        unsupported_path = default_storage.save("test_dir/test.bin", ContentFile(b"\x00\x01"))
+        with self.assertRaises(ValueError):
+            loader.load(unsupported_path)
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
 class QueryEndpointTests(TestCase):
     def test_query_without_job_returns_404(self):
         make_user("alice")

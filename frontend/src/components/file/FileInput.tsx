@@ -21,7 +21,7 @@ export const FileUploadSection: React.FC<FileUploadProps> = ({
       htmlFor="file-upload"
       className="block text-sm font-medium mb-2"
     >
-      Upload File
+      Upload File (PDF, TXT, MD)
     </label>
 
     <div className="flex items-center gap-2">
@@ -31,6 +31,7 @@ export const FileUploadSection: React.FC<FileUploadProps> = ({
         ref={inputRef}
         onChange={onChange}
         disabled={disabled}
+        accept=".pdf,.txt,.md,.markdown,text/plain,text/markdown,application/pdf"
         className={`flex-1 border rounded p-2 ${
           disabled ? "bg-gray-100 cursor-not-allowed opacity-50" : ""
         }`}

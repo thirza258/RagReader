@@ -16,7 +16,14 @@ class Document(models.Model):
     name = models.CharField(max_length=255)
     source_type = models.CharField(
         max_length=20,
-        choices=[("pdf", "PDF"), ("url", "URL"), ("text", "Text")]
+        choices=[
+            ("pdf", "PDF"),
+            ("url", "URL"),
+            ("text", "Text"),
+            ("txt", "TXT"),
+            ("md", "Markdown"),
+            ("markdown", "Markdown"),
+        ]
     )
     file = models.TextField(null=True, blank=True)
     extracted_text_path = models.TextField(null=True, blank=True)

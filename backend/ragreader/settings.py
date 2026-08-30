@@ -41,7 +41,14 @@ SECRET_KEY = os.getenv("SECRET_KEY", "secret-key-for-development")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,backend,rag.nevatal.tech").split(",")
+    if host.strip()
+]
+
+# Tell Django to trust the X-Forwarded-Proto header set by upstream reverse proxies
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Application definition
 
@@ -71,8 +78,22 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
 }
 
-CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://localhost:5150,http://localhost:3000,https://rag.nevatal.tech"
+    ).split(",")
+    if origin.strip()
+]
 CORS_ALLOW_CREDENTIALS = True
+
+_csrf_trusted = os.getenv("CSRF_TRUSTED_ORIGINS", os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5150,http://localhost:5173,https://rag.nevatal.tech"))
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in _csrf_trusted.split(",")
+    if origin.strip()
+]
 
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -107,7 +128,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [(REDIS_HOST, REDIS_PORT)],
+            "hosts": [os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/0")],
         },
     },
 }
@@ -250,3 +271,8 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+# Upload limits to handle large entities (PDF, TXT, Markdown) without 413 errors
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", 100 * 1024 * 1024))  # 100 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", 50 * 1024 * 1024))   # 50 MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = int(os.getenv("DATA_UPLOAD_MAX_NUMBER_FIELDS", 10000))

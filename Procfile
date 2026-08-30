@@ -1,2 +1,2 @@
 migrate: python manage.py migrate
-web: gunicorn 'ragreader.wsgi'
+web: daphne -b 0.0.0.0 -p ${PORT:-8000} ragreader.asgi:application

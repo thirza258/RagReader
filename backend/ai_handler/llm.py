@@ -55,12 +55,21 @@ class OpenRouterBase(BaseLLM):
 
     def _call_api(self, prompt: str) -> str:
         try:
+            if not self.api_key:
+                raise ValueError("OpenRouter API key is missing or not configured.")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
             )
-            return (response.choices[0].message.content or "").strip()
+            if not response or getattr(response, "choices", None) is None:
+                raise ValueError(f"OpenRouter response missing choices: {response}")
+            if len(response.choices) == 0:
+                raise ValueError("OpenRouter returned empty choices list.")
+            choice = response.choices[0]
+            if getattr(choice, "message", None) is None or choice.message.content is None:
+                return ""
+            return (choice.message.content or "").strip()
         except Exception as e:
             raise RuntimeError(f"OpenRouter call failed ({self.model}): {e}") from e
 

@@ -70,14 +70,13 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
       } else if (textInput) {
         await onSubmit({ type: "text", text: textInput });
       }
-    } 
-
-    catch (error) {
+      navigate("/loading");
+    } catch (error: any) {
       console.error("Error submitting:", error);
-      alert("Failed to submit.");
+      const msg = error?.response?.data?.message || "Failed to submit.";
+      alert(msg);
     } finally {
       setIsLoading(false);
-      navigate("/loading");
     }
   };
 
