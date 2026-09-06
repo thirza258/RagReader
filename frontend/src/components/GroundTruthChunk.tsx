@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Search, Database, CheckCircle2, Filter, FileText } from "lucide-react";
+import { Search } from "lucide-react";
 import service from "../services/service";
 import { Chunk } from "../interface";
 
@@ -50,57 +50,47 @@ const GroundTruthChunk: React.FC<GroundTruthChunkProps> = ({
   }, [allChunks, searchQuery, filterMode, selectedIds]);
 
   if (isLoading)
-    return <div className="p-4 text-muted-foreground">Loading chunks...</div>;
+    return <p className="p-4 text-sm text-muted-foreground">Loading chunks…</p>;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col md:flex-row gap-3 border-b border-border/40 pb-4">
+      <div className="flex flex-col gap-3 border-b border-border pb-4 md:flex-row">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search content or source..."
+            placeholder="Search the chunks…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-muted/50 border border-input rounded-md pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full border border-input bg-background py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
           />
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setFilterMode("all")}
-            className={cn(
-              "px-3 py-2 text-xs font-medium rounded-md border transition-colors flex items-center gap-2",
-              filterMode === "all"
-                ? "bg-secondary text-secondary-foreground border-transparent"
-                : "bg-transparent border-border hover:bg-muted text-muted-foreground"
-            )}
-          >
-            <Database size={14} />
-            All Chunks
-          </button>
-          <button
-            onClick={() => setFilterMode("selected")}
-            className={cn(
-              "px-3 py-2 text-xs font-medium rounded-md border transition-colors flex items-center gap-2",
-              filterMode === "selected"
-                ? "bg-secondary text-secondary-foreground border-transparent"
-                : "bg-transparent border-border hover:bg-muted text-muted-foreground"
-            )}
-          >
-            <CheckCircle2 size={14} />
-            Selected Only
-          </button>
+          {(["all", "selected"] as const).map((value) => (
+            <button
+              key={value}
+              onClick={() => setFilterMode(value)}
+              aria-pressed={filterMode === value}
+              className={cn(
+                "border px-3 py-2 text-xs transition-colors",
+                filterMode === value
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+            >
+              {value === "all" ? "All chunks" : "Selected only"}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Chunk Grid */}
       {filteredChunks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-          <Filter size={32} className="mb-4 opacity-20" />
-          <p>No chunks found matching your criteria.</p>
-        </div>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          No chunks match your search.
+        </p>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+        <div className="custom-scrollbar grid max-h-[500px] grid-cols-1 gap-4 overflow-y-auto pr-2 lg:grid-cols-2">
           {filteredChunks.map((chunk) => {
             const isSelected = selectedIds.has(chunk.id);
             return (
@@ -108,33 +98,27 @@ const GroundTruthChunk: React.FC<GroundTruthChunkProps> = ({
                 key={chunk.id}
                 onClick={() => toggleSelection(chunk.id)}
                 className={cn(
-                  "group relative flex flex-col justify-between rounded-lg border p-4 cursor-pointer transition-all duration-200",
+                  "cursor-pointer border p-4 transition-colors",
                   isSelected
-                    ? "bg-primary/5 border-primary shadow-[0_0_0_1px_hsl(var(--primary))]"
-                    : "bg-card border-border hover:border-muted-foreground/50 hover:bg-accent/50"
+                    ? "border-foreground/40 bg-accent"
+                    : "border-border hover:bg-accent"
                 )}
               >
-                <div>
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <FileText size={12} />
-                      <span className="truncate max-w-[150px]">{chunk.id}</span>
-                    </div>
-                    <div
-                      className={cn(
-                        "h-5 w-5 rounded-full border flex items-center justify-center transition-colors",
-                        isSelected
-                          ? "bg-primary border-primary text-primary-foreground"
-                          : "border-muted-foreground/40 group-hover:border-muted-foreground"
-                      )}
-                    >
-                      {isSelected && <CheckCircle2 size={12} />}
-                    </div>
-                  </div>
-                  <p className="text-sm text-foreground/90 line-clamp-4 leading-relaxed">
-                    {chunk.text}
-                  </p>
+                <div className="mb-2 flex items-baseline justify-between gap-3">
+                  <span className="truncate font-mono text-xs text-muted-foreground">
+                    {chunk.id}
+                  </span>
+                  <input
+                    type="checkbox"
+                    readOnly
+                    checked={isSelected}
+                    tabIndex={-1}
+                    className="h-4 w-4 shrink-0 accent-primary"
+                  />
                 </div>
+                <p className="line-clamp-4 text-sm leading-relaxed text-muted-foreground">
+                  {chunk.text}
+                </p>
               </div>
             );
           })}

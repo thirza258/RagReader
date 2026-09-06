@@ -1,15 +1,6 @@
 import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  ArrowRight,
-  Hand,
-  Layers,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
 import service from "../services/service";
 
 import GroundTruthChunk from "../components/GroundTruthChunk";
@@ -29,18 +20,24 @@ const ExpandablePanel: React.FC<{
   statusIndicator?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, isOpen, onToggle, statusIndicator, children }) => (
-  <div className="border border-border rounded-lg bg-card overflow-hidden shadow-sm mb-4 transition-all">
-    <div
+  <div className="mb-4 border border-border">
+    <button
+      type="button"
       onClick={onToggle}
-      className="flex items-center justify-between p-4 cursor-pointer bg-muted/20 hover:bg-muted/40 transition-colors"
+      aria-expanded={isOpen}
+      className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-accent"
     >
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      <span className="flex items-baseline gap-3">
+        <span className="font-serif text-lg font-semibold">{title}</span>
         {statusIndicator}
-      </div>
-      {isOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-    </div>
-    {isOpen && <div className="p-4 border-t border-border">{children}</div>}
+      </span>
+      {isOpen ? (
+        <ChevronUp size={18} className="shrink-0 text-muted-foreground" />
+      ) : (
+        <ChevronDown size={18} className="shrink-0 text-muted-foreground" />
+      )}
+    </button>
+    {isOpen && <div className="border-t border-border p-5">{children}</div>}
   </div>
 );
 
@@ -48,19 +45,16 @@ const MODE_OPTIONS: {
   id: GroundTruthMode;
   label: string;
   blurb: string;
-  icon: React.ReactNode;
 }[] = [
   {
     id: "manual",
     label: "Manual selection",
     blurb: "You decide which chunks are relevant. Precise, but it is your judgement being measured.",
-    icon: <Hand size={16} />,
   },
   {
     id: "pooled",
     label: "Candidate pooling (RRF)",
     blurb: "Every retrieval method votes; Reciprocal Rank Fusion merges the rankings. No hand-labelling.",
-    icon: <Layers size={16} />,
   },
 ];
 
@@ -142,58 +136,59 @@ const GroundTruthSelector: React.FC = () => {
 
   if (!conversationId || !documentId) {
     return (
-      <div className="p-10 text-center text-red-500 font-medium">
-        Missing Document ID or Conversation ID.
+      <div className="p-10 text-center text-sm text-destructive">
+        Missing document ID or conversation ID.
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen pt-16 bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground pb-20">
+    <div className="min-h-screen bg-background pb-20 pt-16 text-foreground">
       <main className="container mx-auto px-4 py-8 max-w-5xl">
         {submitError && (
-          <div className="mb-6 p-4 rounded-md bg-destructive/10 text-destructive border border-destructive/20 flex items-center gap-2">
-            <AlertCircle size={18} />
+          <div className="mb-6 border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
             {submitError}
           </div>
         )}
 
-        <section className="mb-10">
-          <h1 className="text-2xl font-bold tracking-tight">Ground Truth Setup</h1>
-          <p className="mt-2 text-muted-foreground">
-            Provide expected answers and relevant document chunks to evaluate the RAG method.
+        <section className="mb-10 border-b border-border pb-8">
+          <h1 className="text-3xl font-semibold">Ground truth</h1>
+          <p className="prose-note measure mt-3">
+            Set the expected answer and the chunks that count as relevant. Without
+            them the analysis has nothing to score against.
           </p>
-          <div className="mt-5">
-            <p>Current Conversation ID : {conversationId}</p>
-            <p>Current Document ID : {documentId}</p>
-          </div>
+          <dl className="mt-6 flex flex-wrap gap-x-8 gap-y-1 font-mono text-xs text-muted-foreground">
+            <div className="flex gap-2">
+              <dt>Conversation</dt>
+              <dd className="text-foreground">{conversationId}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt>Document</dt>
+              <dd className="text-foreground">{documentId}</dd>
+            </div>
+          </dl>
         </section>
 
         {/* Mode switch: who decides what counts as relevant */}
         <section className="mb-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             How should relevant chunks be decided?
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {MODE_OPTIONS.map((option) => (
               <button
                 key={option.id}
                 onClick={() => setMode(option.id)}
+                aria-pressed={mode === option.id}
                 className={cn(
-                  "text-left rounded-lg border p-4 transition-all",
+                  "border p-4 text-left transition-colors",
                   mode === option.id
-                    ? "border-primary bg-primary/5 shadow-[0_0_0_1px_hsl(var(--primary))]"
-                    : "border-border bg-card hover:border-muted-foreground/50"
+                    ? "border-foreground/40 bg-accent"
+                    : "border-border hover:bg-accent"
                 )}
               >
-                <div className="flex items-center gap-2 mb-1.5 font-medium">
-                  {option.icon}
-                  {option.label}
-                  {mode === option.id && (
-                    <CheckCircle2 size={14} className="ml-auto text-primary" />
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">{option.blurb}</p>
+                <p className="font-medium">{option.label}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{option.blurb}</p>
               </button>
             ))}
           </div>
@@ -203,23 +198,20 @@ const GroundTruthSelector: React.FC = () => {
         <ExpandablePanel
           title={
             mode === "manual"
-              ? "Step 1: Select Ground Truth Chunks"
-              : "Step 1: Build the Candidate Pool"
+              ? "1. Select ground-truth chunks"
+              : "1. Build the candidate pool"
           }
           isOpen={openPanels.chunks}
           onToggle={() => togglePanel("chunks")}
           statusIndicator={
             hasChunks ? (
-              <span className="bg-primary/10 text-primary text-xs px-2 py-1 rounded-full flex items-center gap-1 font-medium">
-                <CheckCircle2 size={12} />{" "}
+              <span className="text-xs text-muted-foreground">
                 {mode === "manual"
-                  ? `${selectedIds.size} Selected`
-                  : `${pool?.chunks.length} Pooled`}
+                  ? `${selectedIds.size} selected`
+                  : `${pool?.chunks.length} pooled`}
               </span>
             ) : (
-              <span className="bg-muted text-muted-foreground text-xs px-2 py-1 rounded-full font-medium">
-                Required
-              </span>
+              <span className="text-xs text-muted-foreground">Required</span>
             )
           }
         >
@@ -241,18 +233,14 @@ const GroundTruthSelector: React.FC = () => {
 
         {/* Panel 2: Response Input */}
         <ExpandablePanel
-          title="Step 2: Provide Ground Truth Response"
+          title="2. Write the expected answer"
           isOpen={openPanels.response}
           onToggle={() => togglePanel("response")}
           statusIndicator={
             groundTruth.trim().length > 0 ? (
-              <span className="bg-primary/10 text-primary text-xs px-2 py-1 rounded-full flex items-center gap-1 font-medium">
-                <CheckCircle2 size={12} /> Written
-              </span>
+              <span className="text-xs text-muted-foreground">Written</span>
             ) : (
-              <span className="bg-muted text-muted-foreground text-xs px-2 py-1 rounded-full font-medium">
-                Required
-              </span>
+              <span className="text-xs text-muted-foreground">Required</span>
             )
           }
         >
@@ -265,40 +253,35 @@ const GroundTruthSelector: React.FC = () => {
 
         {/* Bottom validation hint */}
         {!isFormValid && (
-          <p className="text-center mt-6 text-sm text-muted-foreground flex items-center justify-center gap-2">
-            <AlertCircle size={16} />
+          <p className="mt-6 text-center text-sm text-muted-foreground">
             {mode === "manual"
               ? "Both chunk selection and text response are required to save."
               : "Run candidate pooling and write the expected response to continue."}
           </p>
         )}
 
-        <section className="mt-10 flex justify-between items-center">
-          <div>
-            <button
-              onClick={() => navigate(-1)}
-              className="mt-10 px-4 py-2 rounded-md border border-border text-sm hover:bg-muted transition-colors flex items-center gap-2"
-            >
-              <ArrowLeft size={16} />
-              Back to Chat
-            </button>
-          </div>
+        <section className="mt-10 flex items-center justify-between gap-4 border-t border-border pt-8">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-2 border border-input px-4 py-2.5 text-sm transition-colors hover:bg-accent"
+          >
+            <ArrowLeft size={15} />
+            Back to chat
+          </button>
 
-          <div>
-            <button
-              onClick={handleSubmit}
-              disabled={!isFormValid || isSubmitting}
-              className={cn(
-                "px-4 py-2 rounded-md border border-border text-sm transition-colors flex items-center gap-2",
-                !isFormValid || isSubmitting
-                  ? "opacity-50 cursor-not-allowed"
-                  : "hover:bg-muted"
-              )}
-            >
-              {isSubmitting ? "Starting…" : "Start Analysis"}
-              <ArrowRight size={16} />
-            </button>
-          </div>
+          <button
+            onClick={handleSubmit}
+            disabled={!isFormValid || isSubmitting}
+            className={cn(
+              "flex items-center gap-2 border px-4 py-2.5 text-sm font-medium transition-colors",
+              !isFormValid || isSubmitting
+                ? "cursor-not-allowed border-border text-muted-foreground"
+                : "border-primary bg-primary text-primary-foreground hover:bg-primary-hover"
+            )}
+          >
+            {isSubmitting ? "Starting…" : "Start analysis"}
+            <ArrowRight size={15} />
+          </button>
         </section>
       </main>
     </div>

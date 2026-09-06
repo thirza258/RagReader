@@ -196,7 +196,10 @@ const CreateGroundTruthResponse = async (
  */
 const poolGroundTruthChunks = async (
   conversation_id: string,
-  options?: { top_n?: number; rrf_k?: number }
+  // `config` shapes the engines that vote in the pool. Without it the server
+  // pools with default-shaped pipelines, so a run using a non-default reranker
+  // would be scored against a consensus its own retriever never joined.
+  options?: { top_n?: number; rrf_k?: number; config?: Partial<DeepAnalysisConfig> }
 ): Promise<CandidatePoolResponse> => {
   const response = await apiClient.post(
     "/ground-truth-chunk/pool/",

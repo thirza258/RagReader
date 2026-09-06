@@ -1,9 +1,21 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom"; 
-import { Loader2, CheckCircle2, XCircle, Terminal } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import service from "../services/service";
 import  type { JobStatus } from "../types/types";
+import { errorMessage } from "../lib/utils";
 
+
+/** What to show above the progress bar, derived from the job's own state. */
+function describeProgress(status: JobStatus, progress: number): string {
+  if (status === "FAILED") return "Initialization failed";
+  if (status === "READY") return "Ready";
+  if (progress < 10) return "Queueing the job";
+  if (progress < 30) return "Reading the document";
+  if (progress < 60) return "Chunking and embedding";
+  if (progress < 90) return "Building the indexes";
+  return "Finishing up";
+}
 
 const LoadingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -12,26 +24,9 @@ const LoadingPage: React.FC = () => {
 
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<JobStatus>("PENDING");
-  const [message, setMessage] = useState("Initializing connection...");
   const [error, setError] = useState<string | null>(null);
 
-
-  useEffect(() => {
-    if (status === "FAILED") {
-      setMessage("Initialization Failed");
-      return;
-    }
-    if (status === "READY") {
-      setMessage("System Ready");
-      return;
-    }
-
-    if (progress < 10) setMessage("Queuing job...");
-    else if (progress < 30) setMessage("Reading documents...");
-    else if (progress < 60) setMessage("Chunking and Embedding text...");
-    else if (progress < 90) setMessage("Saving to Vector Store...");
-    else setMessage("Finalizing setup...");
-  }, [progress, status]);
+  const message = describeProgress(status, progress);
 
   
   const username = localStorage.getItem("username");
@@ -70,15 +65,11 @@ const LoadingPage: React.FC = () => {
           setStatus(job.status || "PENDING");
           setProgress(job.progress || 0);
 
-        } catch (err: any) {
+        } catch (err) {
           console.error("Open chat failed:", err);
-          const errorMsg =
-            err?.response?.data?.message ||
-            err?.message ||
-            "Failed to start chat initialization";
-          setError(errorMsg);
+          setError(errorMessage(err, "Failed to start chat initialization"));
+          // `message` is derived from status, so setting FAILED is enough.
           setStatus("FAILED");
-          setMessage("Initialization Failed");
         }
       };
     
@@ -113,7 +104,7 @@ const LoadingPage: React.FC = () => {
           setError(job.error || "Initialization failed");
         }
   
-      } catch (err: any) {
+      } catch (err) {
         console.error("Polling error:", err);
       }
     }, 2000);
@@ -122,92 +113,57 @@ const LoadingPage: React.FC = () => {
   }, [jobId, navigate]);
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background text-foreground p-4">
-      
-      {/* Main Card */}
-      <div className="w-full max-w-md bg-card border border-border rounded-xl shadow-2xl overflow-hidden relative">
-        
-        {/* Glow Effect behind the card */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-2 bg-primary blur-[20px] opacity-50"></div>
+    <div className="flex min-h-screen w-full flex-col items-center justify-center bg-background px-6 text-foreground">
+      <div className="w-full max-w-md border border-border p-8">
+        <div className="flex items-baseline gap-3">
+          {status === "PENDING" || status === "PROCESSING" ? (
+            <Loader2
+              aria-hidden="true"
+              className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+            />
+          ) : null}
+          <h1 className="text-xl font-semibold">{message}</h1>
+        </div>
 
-        <div className="p-8 flex flex-col items-center text-center space-y-6">
-          
-          {/* Icon State */}
-          <div className="relative">
-            {status === "FAILED" ? (
-              <div className="h-20 w-20 rounded-full bg-destructive/10 flex items-center justify-center border-2 border-destructive animate-in zoom-in duration-300">
-                <XCircle className="h-10 w-10 text-destructive" />
-              </div>
-            ) : status === "READY" ? (
-              <div className="h-20 w-20 rounded-full bg-green-500/10 flex items-center justify-center border-2 border-green-500 animate-in zoom-in duration-300">
-                <CheckCircle2 className="h-10 w-10 text-green-500" />
-              </div>
-            ) : (
-              <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center border border-primary/30 relative">
-                <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                {/* Pulse ring */}
-                <div className="absolute inset-0 rounded-full border border-primary opacity-0 animate-ping"></div>
+        <p className="mt-2 font-mono text-xs text-muted-foreground">
+          {jobId ? `Job ${jobId.slice(0, 8)}` : "Job pending"}
+        </p>
+
+        {status !== "FAILED" && (
+          <div className="mt-6">
+            <div className="h-[3px] w-full overflow-hidden bg-muted">
+              <div
+                className="h-full bg-foreground/60 transition-all duration-700 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+              <span>Indexing the document</span>
+              <span className="font-mono tabular">{progress}%</span>
+            </div>
+          </div>
+        )}
+
+        {status === "FAILED" && (
+          <>
+            {error && (
+              <div className="mt-6 border border-destructive/30 bg-destructive/5 p-3">
+                <p className="break-all font-mono text-xs text-destructive">
+                  {error}
+                </p>
               </div>
             )}
-          </div>
-
-          {/* Text Content */}
-          <div className="space-y-2 z-10">
-            <h2 className="text-2xl font-bold tracking-tight text-foreground">
-              {message}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {status === "FAILED" 
-                ? (error || "Please check the logs or try again later.")
-                : jobId
-                  ? `Job ID: ${jobId.slice(0, 8)}...`
-                  : "Initializing Job..."}
+            <p className="mt-4 text-sm text-muted-foreground">
+              Check the logs, or try again.
             </p>
-          </div>
-
-          {/* Progress Bar Container */}
-          {status !== "FAILED" && (
-            <div className="w-full space-y-2">
-              <div className="h-3 w-full bg-muted/50 rounded-full overflow-hidden border border-border">
-                <div
-                  className="h-full bg-primary shadow-[0_0_10px_theme(colors.cyan.500)] transition-all duration-700 ease-out"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-xs text-muted-foreground font-mono">
-                <span>RAG Initialization</span>
-                <span>{progress}%</span>
-              </div>
-            </div>
-          )}
-
-          {/* Error Display */}
-          {status === "FAILED" && error && (
-            <div className="w-full bg-destructive/10 border border-destructive/20 rounded p-3 text-left">
-                <p className="text-xs text-destructive font-mono break-all">
-                  Error: {error}
-                </p>
-            </div>
-          )}
-
-          {/* Action Buttons (Only if failed or stuck) */}
-          {status === "FAILED" && (
-             <button 
-               onClick={() => navigate(-1)}
-               className="mt-4 px-4 py-2 bg-secondary hover:bg-blue-600 text-white text-sm font-medium rounded transition-colors w-full"
-             >
-               Go Back
-             </button>
-          )}
-        </div>
-
-        {/* Footer decoration */}
-        <div className="bg-muted/30 p-3 border-t border-border flex items-center justify-center gap-2">
-            <Terminal className="h-3 w-3 text-primary" />
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                System Processing
-            </span>
-        </div>
+            <button
+              onClick={() => navigate(-1)}
+              className="mt-4 w-full border border-input px-4 py-2.5 text-sm transition-colors hover:bg-accent"
+            >
+              Go back
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

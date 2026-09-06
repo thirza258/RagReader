@@ -7,7 +7,11 @@ from rest_framework import status
 from evaluation.models import Chunk, GroundTruthChunk, GroundTruthResponse
 from router.models import Conversation, GuestUser, Document, AnalysisBatch, AnalysisResult
 from common.chunker import DocumentChunker
-from common.constant import DEFAULT_POOL_TOP_N, POOL_TOP_N_MAX
+from common.constant import (
+    DEFAULT_POOL_TOP_N,
+    POOL_TOP_N_MAX,
+    normalize_analysis_config,
+)
 from common.schema import get_responses
 from .candidate_pooler import DEFAULT_RRF_K, build_default_pooler
 from .eval import evaluate_chunks, evaluate_response
@@ -231,9 +235,14 @@ class CandidatePoolView(APIView):
         # Same ceiling normalize_analysis_config applies, so a direct API call
         # and the sidebar agree on this field's bounds.
         top_n = _positive_int(request.data.get("top_n"), DEFAULT_POOL_TOP_N, POOL_TOP_N_MAX)
-        rrf_k = _positive_int(request.data.get("rrf_k"), DEFAULT_RRF_K)
 
-        pooler = build_default_pooler(k=rrf_k, top_n=top_n)
+        # The run's own configuration shapes the engines that vote here. Pooling
+        # with default-shaped engines would score a run against a consensus its
+        # own hybrid retriever never contributed to.
+        config = normalize_analysis_config(request.data.get("config"))
+        rrf_k = _positive_int(request.data.get("rrf_k"), config["rrf_k"])
+
+        pooler = build_default_pooler(k=rrf_k, top_n=top_n, config=config)
         if not pooler.pipeline_names:
             return Response(
                 {"error": "No retrieval engines are available for pooling."},

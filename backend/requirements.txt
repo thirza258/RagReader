@@ -1,34 +1,47 @@
-beautifulsoup4
-rouge-score
-celery
-daphne
-channels
-channels_redis
-dj-database-url
-Django
-django-cors-headers
-django-redis
-django-celery-results
-djangorestframework
-drf-spectacular
-faiss-cpu
-langchain
-langchain-community
-langchain-text-splitters
-langchain-openai
-nltk
-ollama
-numpy
-openai
-pandas
-psycopg2-binary
-PyPDF2
-python-dotenv
-rank-bm25
-redis
-requests
-scikit-learn
-tiktoken
-tzlocal
-ujson
-whitenoise
+# Pinned to the versions the test suite is green against.
+#
+# These were unpinned, which meant every image build silently picked up
+# whatever was newest — the reason a rebuilt image could stop matching the
+# code. Bump deliberately: change a pin, rebuild, run the suite.
+#
+# Nothing here pulls torch any more. Reranking moved to Ollama, which serves
+# the model out of process, so sentence-transformers and bert-score are gone
+# and the Dockerfile no longer needs its separate CPU-torch layer.
+#
+# Also removed as unused (nothing outside tests imported them): langchain and
+# its three companion packages, faiss-cpu, pandas, tiktoken, ujson and tzlocal.
+
+# ── Django and the API ──────────────────────────────────────────────────────
+Django==6.1.1
+djangorestframework==3.18.0
+django-cors-headers==4.9.0
+drf-spectacular==0.30.0
+dj-database-url==3.1.2
+psycopg2-binary==2.9.12
+python-dotenv==1.2.3
+whitenoise==6.12.0
+
+# ── Async and background work ───────────────────────────────────────────────
+daphne==4.2.3
+channels==4.3.2
+channels_redis==4.3.0
+celery==5.6.3
+django-celery-results==2.6.0
+django-redis==7.0.0
+redis==8.1.0
+
+# ── Retrieval ───────────────────────────────────────────────────────────────
+openai==3.8.0                 # OpenRouter speaks the OpenAI API
+numpy==2.5.2
+scikit-learn==1.9.0           # cosine similarity for dense retrieval
+rank-bm25==0.2.2              # sparse retrieval
+nltk==3.10.3                  # tokenization and stopwords for BM25
+ollama==0.6.2                 # embeds and reranks hybrid's fused candidates
+
+# ── Evaluation ──────────────────────────────────────────────────────────────
+rouge-score==0.1.2
+
+# ── Ingest ──────────────────────────────────────────────────────────────────
+PyPDF2==3.0.1
+beautifulsoup4==4.15.0
+requests==2.34.2

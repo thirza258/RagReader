@@ -1,123 +1,134 @@
 import React from "react";
-import { Check, X, Minus } from "lucide-react";
 
-export const ComparisonMatrix: React.FC = () => {
-  const features = [
-    {
-      name: "9-Pipeline Evaluation Matrix",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "Simultaneous 3x3 retrieval and model execution",
-    },
-    {
-      name: "Sparse BM25 Keyword Search",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "Exact term, name, and ID matching support",
-    },
-    {
-      name: "Cross-Encoder Reranking",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "MS-MARCO MiniLM cross-encoder candidate scoring",
-    },
-    {
-      name: "Reciprocal Rank Fusion Ground Truth",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "Consensus-derived benchmark candidate pooling",
-    },
-    {
-      name: "Dual Retrieval & Answer Metrics",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "Precision@K, Recall@K, F1@K + ROUGE-L & LLM Judge",
-    },
-    {
-      name: "Live WebSocket Streaming",
-      ragReader: true,
-      standardVector: "partial",
-      basicChatbot: "partial",
-      desc: "Real-time results streaming over Channels/Daphne",
-    },
-    {
-      name: "Single API Key (OpenRouter)",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "Unified billing for all LLMs and embeddings",
-    },
-    {
-      name: "Self-Hostable Docker Compose",
-      ragReader: true,
-      standardVector: false,
-      basicChatbot: false,
-      desc: "100% open source under MIT License",
-    },
-  ];
+type Support = true | false | "partial";
 
-  return (
-    <div className="w-full bg-slate-900/80 border border-slate-800 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl overflow-x-auto">
-      <table className="w-full text-left border-collapse min-w-[640px]">
-        <thead>
-          <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            <th className="pb-4 w-1/3">Feature Capabilities</th>
-            <th className="pb-4 text-center text-cyan-400 font-bold text-sm bg-cyan-950/30 py-3 px-4 rounded-t-xl border-x border-t border-cyan-500/30">
-              RAGReader
-            </th>
-            <th className="pb-4 text-center">Standard Vector RAG</th>
-            <th className="pb-4 text-center">Basic Document Chat</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-800/60 text-sm">
-          {features.map((item) => (
-            <tr key={item.name} className="hover:bg-slate-800/30 transition-colors">
-              <td className="py-4 pr-4">
-                <span className="font-semibold text-white block">{item.name}</span>
-                <span className="text-xs text-slate-400 mt-0.5 block">{item.desc}</span>
-              </td>
-              <td className="py-4 text-center bg-cyan-950/20 border-x border-cyan-500/20 px-4">
-                {item.ragReader ? (
-                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 mx-auto">
-                    <Check className="w-4 h-4" />
-                  </span>
-                ) : (
-                  <X className="w-4 h-4 text-slate-600 mx-auto" />
-                )}
-              </td>
-              <td className="py-4 text-center">
-                {item.standardVector === true ? (
-                  <Check className="w-4 h-4 text-emerald-400 mx-auto" />
-                ) : item.standardVector === "partial" ? (
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-500/10 text-amber-400 mx-auto">
-                    <Minus className="w-3.5 h-3.5" />
-                  </span>
-                ) : (
-                  <X className="w-4 h-4 text-slate-600 mx-auto" />
-                )}
-              </td>
-              <td className="py-4 text-center">
-                {item.basicChatbot === true ? (
-                  <Check className="w-4 h-4 text-emerald-400 mx-auto" />
-                ) : item.basicChatbot === "partial" ? (
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-500/10 text-amber-400 mx-auto">
-                    <Minus className="w-3.5 h-3.5" />
-                  </span>
-                ) : (
-                  <X className="w-4 h-4 text-slate-600 mx-auto" />
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+const FEATURES: {
+  name: string;
+  desc: string;
+  ragReader: Support;
+  standardVector: Support;
+  basicChatbot: Support;
+}[] = [
+  {
+    name: "Nine-pipeline evaluation matrix",
+    desc: "Three retrieval methods × three models in one run",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+  {
+    name: "Sparse BM25 keyword search",
+    desc: "Exact terms, names and identifiers survive retrieval",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+  {
+    name: "Cross-encoder reranking",
+    desc: "ms-marco-MiniLM scores every candidate against the query",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+  {
+    name: "Pooled ground truth (RRF)",
+    desc: "Consensus reference set derived from every retriever",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+  {
+    name: "Retrieval and answer metrics",
+    desc: "Precision@K, Recall@K, F1@K, ROUGE-L and a judge model",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+  {
+    name: "Streamed results",
+    desc: "Each pipeline reported as it finishes, over a WebSocket",
+    ragReader: true,
+    standardVector: "partial",
+    basicChatbot: "partial",
+  },
+  {
+    name: "Single API key",
+    desc: "OpenRouter covers every LLM and the embeddings",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+  {
+    name: "Self-hostable",
+    desc: "MIT licensed, one Docker Compose file",
+    ragReader: true,
+    standardVector: false,
+    basicChatbot: false,
+  },
+];
+
+const MARK: Record<string, string> = {
+  true: "✓",
+  false: "—",
+  partial: "○",
 };
+
+const Mark: React.FC<{ value: Support }> = ({ value }) => (
+  <span
+    className={value === true ? "text-foreground" : "text-muted-foreground"}
+    title={value === true ? "Yes" : value === "partial" ? "Partial" : "No"}
+  >
+    {MARK[String(value)]}
+    <span className="sr-only">
+      {value === true ? "Yes" : value === "partial" ? "Partial" : "No"}
+    </span>
+  </span>
+);
+
+export const ComparisonMatrix: React.FC = () => (
+  <div className="overflow-x-auto">
+    <table className="w-full min-w-[36rem] border-t border-border text-sm">
+      <caption className="caption-bottom pt-3 text-left text-sm text-muted-foreground">
+        Table 1. {MARK.true} supported · {MARK.partial} partial · {MARK.false} not
+        supported.
+      </caption>
+      <thead>
+        <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+          <th scope="col" className="py-3 pr-6 font-medium">
+            Capability
+          </th>
+          <th scope="col" className="w-28 py-3 text-center font-medium">
+            RAGReader
+          </th>
+          <th scope="col" className="w-28 py-3 text-center font-medium">
+            Vector RAG
+          </th>
+          <th scope="col" className="w-28 py-3 text-center font-medium">
+            Document chat
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {FEATURES.map((item) => (
+          <tr key={item.name} className="border-b border-border align-top">
+            <th scope="row" className="py-3 pr-6 text-left font-normal">
+              <span className="block font-medium">{item.name}</span>
+              <span className="block text-xs text-muted-foreground">{item.desc}</span>
+            </th>
+            <td className="py-3 text-center">
+              <Mark value={item.ragReader} />
+            </td>
+            <td className="py-3 text-center">
+              <Mark value={item.standardVector} />
+            </td>
+            <td className="py-3 text-center">
+              <Mark value={item.basicChatbot} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
 
 export default ComparisonMatrix;

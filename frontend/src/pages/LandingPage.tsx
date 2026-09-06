@@ -1,24 +1,9 @@
 import React, { useState } from "react";
-import {
-  AlertTriangle,
-  BarChart3,
-  Braces,
-  Database,
-  Gauge,
-  Github,
-  Layers,
-  Library,
-  Scale,
-  Settings2,
-  Sparkles,
-  ChevronDown,
-  ChevronUp,
-  Zap,
-} from "lucide-react";
-import service from "../services/service";
 import { Link, useNavigate } from "react-router-dom";
-import { SubmitPayload } from "../types/types";
 import { AxiosError } from "axios";
+
+import service from "../services/service";
+import { SubmitPayload } from "../types/types";
 
 import FileSubmit from "../components/FileSubmit";
 import SEO from "../components/SEO";
@@ -31,28 +16,77 @@ import BackToTop from "../components/landing/BackToTop";
 
 const REPO_URL = "https://github.com/thirza258/RagReader";
 
+const SUMMARY = [
+  { term: "Retrieval methods", def: "Dense, sparse (BM25), hybrid with cross-encoder reranking" },
+  { term: "Language models", def: "Any model OpenRouter serves; GPT-4o mini, Gemini 3 Flash and Claude Haiku 4.5 are the defaults" },
+  { term: "Pipelines per run", def: "Every selected method × every selected model, up to a fixed cap" },
+  { term: "Metrics per pipeline", def: "Three retrieval, six answer" },
+  { term: "Results transport", def: "Streamed over a WebSocket as each pipeline finishes" },
+  { term: "Licence", def: "MIT, self-hostable with Docker Compose" },
+];
+
+const SAMPLE_CHUNKS = [
+  {
+    n: 1,
+    score: "91.4%",
+    text: "The Battle of Surabaya occurred in November 1945 and involved Indonesian militias resisting British-led Allied troops.",
+  },
+  {
+    n: 2,
+    score: "77.0%",
+    text: "The conflict resulted in heavy casualties and is commemorated annually as Heroes' Day in Indonesia.",
+  },
+];
+
+const SAMPLE_METRICS: { group: string; rows: [string, string][] }[] = [
+  {
+    group: "Retrieval",
+    rows: [
+      ["Precision@K", "60.0%"],
+      ["Recall@K", "75.0%"],
+      ["F1@K", "66.7%"],
+    ],
+  },
+  {
+    group: "Answer",
+    rows: [
+      ["ROUGE-L F1", "41.2%"],
+      ["Faithfulness", "80.0%"],
+      ["Answer relevance", "80.0%"],
+    ],
+  },
+];
+
+const CONTENTS = [
+  { id: "how-it-works", label: "How it works" },
+  { id: "retrieval", label: "Retrieval methods" },
+  { id: "models", label: "Models" },
+  { id: "metrics", label: "Evaluation metrics" },
+  { id: "ground-truth", label: "Ground truth" },
+  { id: "configure", label: "What you can change per run" },
+  { id: "benchmark", label: "Worked example" },
+  { id: "comparison", label: "Comparison with adjacent tools" },
+  { id: "stack", label: "Implementation" },
+  { id: "quickstart", label: "Running it yourself" },
+  { id: "faq", label: "Questions" },
+];
+
 const RETRIEVAL_METHODS = [
   {
     name: "Dense retrieval",
-    icon: Database,
-    accent: "bg-blue-500/10 text-blue-400 ring-blue-500/20",
     summary: "Semantic vector search over embeddings.",
     detail:
       "Every chunk is embedded with openai/text-embedding-3-small and ranked by cosine similarity against the embedded query. This is also the method that answers in the normal chat.",
   },
   {
     name: "Sparse retrieval",
-    icon: Library,
-    accent: "bg-purple-500/10 text-purple-400 ring-purple-500/20",
     summary: "BM25 keyword search.",
     detail:
       "BM25Okapi over a corpus that is lowercased, stripped of punctuation and filtered through NLTK's English stopword list. Exact terms, names and numbers survive here even when embeddings blur them.",
   },
   {
     name: "Hybrid retrieval",
-    icon: Layers,
-    accent: "bg-pink-500/10 text-pink-400 ring-pink-500/20",
-    summary: "Dense + sparse candidates, reranked by a cross-encoder.",
+    summary: "Dense and sparse candidates, reranked by a cross-encoder.",
     detail:
       "Both engines contribute candidates (at least 10 each), duplicates are dropped, and the cross-encoder/ms-marco-MiniLM-L6-v2 reranker scores every survivor against the query before the top-K is cut.",
   },
@@ -118,7 +152,7 @@ const ANSWER_METRICS = [
 
 const CONFIGURABLE = [
   { label: "Retrieval methods", value: "Any subset of dense, sparse, hybrid" },
-  { label: "Models", value: "Any subset of the three LLMs" },
+  { label: "Models", value: "Any models OpenRouter serves; the three defaults come pre-selected" },
   { label: "Retrieval depth (Top-K)", value: "1–20, default 5 — the same K as in Precision@K" },
   { label: "Ground truth", value: "Manual selection or candidate pooling" },
   { label: "Pool depth", value: "1–50, default 10 — deeper than Top-K on purpose" },
@@ -147,11 +181,11 @@ const FAQ = [
   },
   {
     q: "Do I need my own API keys?",
-    a: "Not on the hosted app. If you self-host, one OPENROUTER_API_KEY covers every model — the LLMs, the embeddings and the evaluation judge all go through OpenRouter.",
+    a: "Not on the hosted app. If you self-host, one OPENROUTER_API_KEY covers every model — the LLMs, the embeddings and the evaluation judge all go through OpenRouter. That single key is also why the model selector can offer OpenRouter's whole catalogue rather than a fixed list.",
   },
   {
-    q: "Why nine pipelines?",
-    a: "Three retrieval methods times three LLMs. Narrow either axis in the deep-analysis sidebar and the run gets smaller; the configuration you used is stored with the batch, so a result always records how it was produced.",
+    q: "How many pipelines run at once?",
+    a: "Three retrieval methods times however many models you select — nine by default. Narrow either axis in the deep-analysis sidebar and the run gets smaller; widen the model list and it grows, up to a cap, because every extra variant is another full retrieve-generate-judge cycle. The configuration you used is stored with the batch, so a result always records how it was produced.",
   },
   {
     q: "Is this a benchmark I can cite?",
@@ -163,49 +197,51 @@ const FAQ = [
   },
 ];
 
-const Card = ({
+/** A numbered section with an academic run-in heading and an optional lede. */
+const Section = ({
+  id,
+  number,
+  title,
+  lede,
+  children,
+}: {
+  id: string;
+  number: number;
+  title: string;
+  lede?: React.ReactNode;
+  children: React.ReactNode;
+}) => (
+  <section id={id} aria-labelledby={`${id}-title`} className="border-t border-border py-14">
+    <h2 id={`${id}-title`} className="text-2xl font-semibold">
+      <span className="mr-3 font-mono text-base font-normal text-muted-foreground tabular">
+        {String(number).padStart(2, "0")}
+      </span>
+      {title}
+    </h2>
+    {lede ? <p className="prose-note measure mt-4">{lede}</p> : null}
+    <div className="mt-8">{children}</div>
+  </section>
+);
+
+/** A bordered panel. One hairline, no fill, no shadow. */
+const Panel = ({
   children,
   className = "",
 }: {
   children: React.ReactNode;
   className?: string;
 }) => (
-  <div
-    className={`bg-slate-900/50 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-6 hover:border-cyan-500/30 transition-all duration-300 group ${className}`}
-  >
-    {children}
-  </div>
+  <div className={`border border-border p-6 ${className}`}>{children}</div>
 );
 
-const SectionHeading = ({
-  id,
-  eyebrow,
-  title,
-  children,
-}: {
-  id: string;
-  eyebrow: string;
-  title: string;
-  children?: React.ReactNode;
-}) => (
-  <div className="max-w-3xl mb-12">
-    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-400 mb-3">
-      {eyebrow}
+/** A run-in note, set off by a rule rather than a coloured box. */
+const Note = ({ children }: { children: React.ReactNode }) => (
+  <aside className="measure border-l-2 border-primary/50 py-1 pl-5">
+    <p className="prose-note text-base">
+      <span className="font-semibold text-foreground">Note. </span>
+      {children}
     </p>
-    <h2 id={id} className="text-3xl lg:text-4xl font-bold text-white mb-4 tracking-tight">
-      {title}
-    </h2>
-    {children ? (
-      <p className="text-lg text-slate-400 leading-relaxed">{children}</p>
-    ) : null}
-  </div>
-);
-
-const Caveat = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex gap-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-6">
-    <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 mt-0.5" />
-    <p className="text-sm text-amber-100/80 leading-relaxed">{children}</p>
-  </div>
+  </aside>
 );
 
 const LandingPage: React.FC = () => {
@@ -257,790 +293,574 @@ const LandingPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30 overflow-x-hidden">
-      {/* SEO Metadata */}
+    <div className="min-h-screen bg-background text-foreground">
       <SEO
         title="RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines"
         description="Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs."
         canonicalUrl="https://rag.nevatal.tech/"
       />
 
-      <main>
-        {/* --- Hero Section --- */}
-        <section id="top" className="relative pt-24 pb-20 lg:pt-32 overflow-hidden">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-blue-600/20 rounded-full blur-[140px] -z-10" />
-          <div className="absolute bottom-0 right-0 w-[800px] h-[600px] bg-cyan-600/10 rounded-full blur-[120px] -z-10" />
+      <main className="container mx-auto max-w-4xl px-6 pt-28">
+        {/* --- Masthead --- */}
+        <header id="top" className="pb-14">
+          <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">
+            Which RAG pipeline answers your document best?
+          </h1>
+          <p className="measure mt-5 font-serif text-xl leading-snug text-muted-foreground">
+            A document QA tool that reports its own retrieval and answer quality,
+            pipeline by pipeline.
+          </p>
 
-          <div className="container mx-auto px-6 grid lg:grid-cols-2 gap-12 items-start">
-            <div className="space-y-8">
-              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold text-cyan-300 shadow-sm shadow-cyan-500/10">
-                <Sparkles className="w-3.5 h-3.5" />
-                Dense · Sparse · Hybrid, measured on your own document
-              </span>
+          <p className="prose-note measure mt-8">
+            RAGReader answers your question straight away with dense retrieval.
+            Then, on one click, it re-runs the <em>same</em> question through every
+            retrieval method and model you picked — nine pipelines by default,
+            three retrieval methods across three LLMs — and reports nine scores for
+            each, so the comparison rests on measurement rather than intuition.
+          </p>
 
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight text-white tracking-tight">
-                Stop guessing which RAG pipeline answers your document best
-              </h1>
-
-              <p className="text-lg text-slate-400 leading-relaxed">
-                RAGReader answers your question straight away with dense
-                retrieval. Then, on one click, it re-runs the <em>same</em>{" "}
-                question through up to nine pipelines — three retrieval methods
-                across three LLMs — and reports nine scores for each, so the
-                comparison is evidence rather than intuition.
-              </p>
-
-              <dl className="grid grid-cols-3 gap-4 max-w-lg">
-                {[
-                  { k: "3 × 3", v: "retrievers × LLMs" },
-                  { k: "9", v: "scores per pipeline" },
-                  { k: "Live", v: "WebSocket stream" },
-                ].map((stat) => (
-                  <div
-                    key={stat.v}
-                    className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 backdrop-blur-sm"
-                  >
-                    <dt className="sr-only">{stat.v}</dt>
-                    <dd>
-                      <span className="block text-2xl font-bold text-cyan-400">
-                        {stat.k}
-                      </span>
-                      <span className="block text-xs text-slate-500 mt-1 font-medium">
-                        {stat.v}
-                      </span>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-
-              {/* Submit Document Card */}
-              <div className="p-1 bg-gradient-to-r from-slate-800 via-cyan-900/40 to-slate-900 rounded-2xl border border-slate-700/80 shadow-2xl">
-                <div className="bg-slate-950 rounded-xl p-5">
-                  <p className="mb-1 text-xs text-cyan-400 font-semibold uppercase tracking-wider">
-                    Start your analysis
-                  </p>
-                  <p className="mb-3 text-xs text-slate-400">
-                    One source at a time: a PDF, a web page URL, or pasted text.
-                  </p>
-                  <FileSubmit onSubmit={handleSubmit} />
-                </div>
-              </div>
-
-              <p className="text-sm text-slate-500 flex items-center gap-1.5">
-                New here?{" "}
-                <Link to="/docs" className="text-cyan-400 hover:text-cyan-300 font-medium underline underline-offset-4">
-                  Walk through the whole flow in screenshots
-                </Link>{" "}
-                first.
-              </p>
-            </div>
-
-            {/* Illustrative Result Card */}
-            <div className="relative lg:mt-4">
-              <figure className="relative z-10 bg-slate-900/90 border border-slate-700/80 rounded-2xl p-5 shadow-2xl backdrop-blur-xl">
-                <div className="flex items-center justify-between border-b border-slate-700/80 pb-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex gap-1.5">
-                      <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                      <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                      <div className="w-3 h-3 rounded-full bg-green-500/80" />
-                    </div>
-                    <div className="text-white font-semibold text-sm">
-                      Hybrid Retrieval —{" "}
-                      <span className="text-cyan-400">Claude Haiku 4.5</span>
-                    </div>
-                  </div>
-                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/40">
-                    Live Result
-                  </span>
-                </div>
-
-                <div className="space-y-3 text-xs">
-                  <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                    <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-wider font-mono">
-                      Query
-                    </div>
-                    <div className="text-white text-xs font-semibold">
-                      What happened in the Battle of Surabaya?
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                    <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-wider font-mono">
-                      Generated Answer
-                    </div>
-                    <div className="text-slate-200 leading-relaxed">
-                      In November 1945 Indonesian militias in Surabaya fought
-                      British-led Allied troops. The battle caused heavy
-                      casualties and is commemorated annually as Heroes' Day.
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="text-[10px] text-slate-400 uppercase tracking-wider font-mono">
-                      Retrieved Context Chunks
-                    </div>
-                    {[
-                      {
-                        n: 1,
-                        score: "91.4%",
-                        text: "The Battle of Surabaya occurred in November 1945 and involved Indonesian militias resisting British-led Allied troops.",
-                      },
-                      {
-                        n: 2,
-                        score: "77.0%",
-                        text: "The conflict resulted in heavy casualties and is commemorated annually as Heroes' Day in Indonesia.",
-                      },
-                    ].map((chunk) => (
-                      <div
-                        key={chunk.n}
-                        className="bg-slate-950/60 rounded-lg border border-slate-800 overflow-hidden"
-                      >
-                        <div className="flex items-center justify-between px-3 py-1 border-b border-slate-800 bg-slate-900/50">
-                          <span className="text-cyan-400 font-mono text-[10px]">
-                            chunk #{chunk.n}
-                          </span>
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/40">
-                            Retrieval Score: {chunk.score}
-                          </span>
-                        </div>
-                        <div className="px-3 py-2 text-[11px] text-slate-300 leading-relaxed">
-                          {chunk.text}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="bg-slate-950/80 rounded-xl border border-slate-800 overflow-hidden">
-                    <div className="px-3 py-1.5 border-b border-slate-800 bg-slate-900/50 text-[10px] text-slate-400 uppercase tracking-wider font-mono font-semibold">
-                      Chunk Evaluation
-                    </div>
-                    <div className="grid grid-cols-3 gap-px bg-slate-800">
-                      {[
-                        ["Precision@K", "60.0%"],
-                        ["Recall@K", "75.0%"],
-                        ["F1@K", "66.7%"],
-                      ].map(([label, value]) => (
-                        <div key={label} className="bg-slate-950 p-2 text-center">
-                          <div className="text-[10px] text-slate-500 mb-0.5">
-                            {label}
-                          </div>
-                          <div className="text-sm font-bold font-mono text-cyan-400">
-                            {value}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950/80 rounded-xl border border-slate-800 overflow-hidden">
-                    <div className="px-3 py-1.5 border-b border-slate-800 bg-slate-900/50 text-[10px] text-slate-400 uppercase tracking-wider font-mono font-semibold">
-                      Response Evaluation
-                    </div>
-                    <div className="grid grid-cols-3 gap-px bg-slate-800">
-                      {[
-                        ["ROUGE-L F1", "41.2%"],
-                        ["Faithfulness", "80.0%"],
-                        ["Answer Relevance", "80.0%"],
-                      ].map(([label, value]) => (
-                        <div key={label} className="bg-slate-950 p-2 text-center">
-                          <div className="text-[10px] text-slate-500 mb-0.5">
-                            {label}
-                          </div>
-                          <div className="text-sm font-bold font-mono text-cyan-400">
-                            {value}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <figcaption className="mt-3 text-[11px] text-slate-500">
-                  Illustrative sample card. Nine metrics per pipeline are reported live during deep analysis runs.
-                </figcaption>
-              </figure>
-
-              <div className="absolute -inset-4 bg-gradient-to-r from-cyan-600 to-blue-600 opacity-25 blur-3xl -z-10 rounded-full" />
-            </div>
-          </div>
-        </section>
-
-        {/* --- Interactive Benchmark Matrix Playground Section --- */}
-        <section id="benchmark" aria-labelledby="benchmark-title" className="py-20 border-t border-white/5 bg-slate-900/30">
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="benchmark-title"
-              eyebrow="Live Playground"
-              title="Test the 9-Pipeline Matrix interactively"
-            >
-              Explore how Dense, Sparse, and Hybrid retrieval methods combined with GPT-4o mini, Gemini 3 Flash, or Claude Haiku 4.5 perform on sample documents before running your own.
-            </SectionHeading>
-
-            <InteractiveBenchmarkSimulator />
-          </div>
-        </section>
-
-        {/* --- How it works (Architecture Flow) --- */}
-        <section
-          id="how-it-works"
-          aria-labelledby="how-it-works-title"
-          className="py-20 border-t border-white/5"
-        >
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="how-it-works-title"
-              eyebrow="Architecture & Pipeline"
-              title="From raw document to 9 scored pipelines"
-            >
-              Six transparent phases — nothing happens in an uninspectable black box.
-            </SectionHeading>
-
-            <ArchitectureFlow />
-          </div>
-        </section>
-
-        {/* --- Retrieval methods --- */}
-        <section
-          id="retrieval"
-          aria-labelledby="retrieval-title"
-          className="py-20 border-t border-white/5 bg-slate-900/20"
-        >
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="retrieval-title"
-              eyebrow="Retrieval Strategy"
-              title="Three ways to find the right chunk"
-            >
-              The three methods disagree in interesting ways — semantics catches
-              paraphrase, keywords catch exact names, and the reranker arbitrates.
-              Running all three on your document is how you find out which one
-              your content rewards.
-            </SectionHeading>
-
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {RETRIEVAL_METHODS.map((method) => (
-                <Card key={method.name} className="h-full">
-                  <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ring-1 ${method.accent}`}
-                  >
-                    <method.icon className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-lg font-bold text-white mb-1">
-                    {method.name}
-                  </h3>
-                  <p className="text-sm text-cyan-400/80 mb-3 font-medium">
-                    {method.summary}
-                  </p>
-                  <p className="text-sm text-slate-400 leading-relaxed">
-                    {method.detail}
-                  </p>
-                </Card>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* --- Models --- */}
-        <section
-          id="models"
-          aria-labelledby="models-title"
-          className="py-20 border-y border-white/5 bg-slate-900/30"
-        >
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="models-title"
-              eyebrow="Multi-LLM Execution"
-              title="The same question, answered by three different LLMs"
-            >
-              Each pipeline is end-to-end: the model rewrites your question into
-              a search query, retrieves with its assigned method, and generates
-              at temperature 0 — so its scores reflect the whole chain, query
-              rewriting included. All traffic is routed through OpenRouter with a
-              single API key.
-            </SectionHeading>
-
-            <div className="grid md:grid-cols-3 gap-6 mb-10">
-              {MODELS.map((model) => (
-                <Card key={model.id}>
-                  <p className="text-xs uppercase tracking-wider text-slate-500 mb-2 font-mono">
-                    {model.provider}
-                  </p>
-                  <h3 className="text-xl font-bold text-white mb-3">
-                    {model.label}
-                  </h3>
-                  <code className="text-xs font-mono text-cyan-400/90 break-all bg-slate-950 p-2 rounded-lg border border-slate-800 block">
-                    {model.id}
-                  </code>
-                </Card>
-              ))}
-            </div>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 divide-y divide-slate-800">
-              {SUPPORTING_MODELS.map((item) => (
-                <div
-                  key={item.id}
-                  className="grid sm:grid-cols-[12rem_1fr] gap-2 sm:gap-6 p-5"
-                >
-                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                    <Braces className="w-4 h-4 text-cyan-400" />
-                    {item.role}
-                  </div>
-                  <div>
-                    <code className="text-xs font-mono text-cyan-400/90 break-all">
-                      {item.id}
-                    </code>
-                    <p className="text-sm text-slate-400 mt-1">{item.note}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* --- Metrics --- */}
-        <section id="metrics" aria-labelledby="metrics-title" className="py-20">
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="metrics-title"
-              eyebrow="Dual Evaluation Engine"
-              title="Nine numbers for every pipeline"
-            >
-              Retrieval and generation fail differently, so they're scored
-              separately: a pipeline can retrieve perfectly and still answer
-              badly, and the metrics will say so.
-            </SectionHeading>
-
-            <div className="grid lg:grid-cols-2 gap-6">
-              <Card>
-                <div className="flex items-center gap-3 mb-5">
-                  <span className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center ring-1 ring-blue-500/20">
-                    <Gauge className="w-5 h-5" />
-                  </span>
-                  <h3 className="text-lg font-bold text-white">
-                    Retrieval quality (Chunks)
-                  </h3>
-                </div>
-                <dl className="space-y-4">
-                  {RETRIEVAL_METRICS.map((metric) => (
-                    <div key={metric.name}>
-                      <dt className="text-sm font-semibold text-cyan-400">
-                        {metric.name}
-                      </dt>
-                      <dd className="text-sm text-slate-400 leading-relaxed">
-                        {metric.body}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                <p className="mt-5 pt-5 border-t border-slate-800 text-xs text-slate-500 leading-relaxed">
-                  Computed as set overlap between retrieved chunk IDs and
-                  ground-truth chunk IDs. Position inside the result list is not
-                  rewarded — there is no MRR or nDCG here.
-                </p>
-              </Card>
-
-              <Card>
-                <div className="flex items-center gap-3 mb-5">
-                  <span className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-400 flex items-center justify-center ring-1 ring-pink-500/20">
-                    <BarChart3 className="w-5 h-5" />
-                  </span>
-                  <h3 className="text-lg font-bold text-white">
-                    Answer quality (Response & LLM Judge)
-                  </h3>
-                </div>
-                <dl className="space-y-4">
-                  {ANSWER_METRICS.map((metric) => (
-                    <div key={metric.name}>
-                      <dt className="text-sm font-semibold text-cyan-400">
-                        {metric.name}
-                      </dt>
-                      <dd className="text-sm text-slate-400 leading-relaxed">
-                        {metric.body}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                <p className="mt-5 pt-5 border-t border-slate-800 text-xs text-slate-500 leading-relaxed">
-                  Faithfulness, relevance and coverage are judged by Mistral
-                  Nemo on a 1–5 scale and reported normalized to 0–1, so every
-                  metric on a card shares one axis.
-                </p>
-              </Card>
-            </div>
-
-            <div className="mt-6">
-              <Caveat>
-                Metrics only exist where ground truth does. Without
-                ground-truth chunks the retrieval scores have nothing to compare
-                against, and without an expected answer the answer metrics are
-                skipped entirely — which is why setting ground truth is a step
-                in the flow rather than an optional extra.
-              </Caveat>
-            </div>
-          </div>
-        </section>
-
-        {/* --- Ground truth --- */}
-        <section
-          id="ground-truth"
-          aria-labelledby="ground-truth-title"
-          className="py-20 border-y border-white/5 bg-slate-900/30"
-        >
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="ground-truth-title"
-              eyebrow="Ground Truth Standard"
-              title="Decide what 'relevant' means — by hand or by consensus"
-            >
-              Retrieval metrics are only as good as the set they're scored
-              against, so RAGReader makes that choice explicit and stores it with
-              the run.
-            </SectionHeading>
-
-            <GroundTruthVisualizer />
-
-            <div className="mt-6">
-              <Caveat>
-                Pooling scores retrievers against a consensus they helped produce,
-                and hybrid retrieval is structurally closer to that consensus than
-                dense or sparse. Read pooled Precision@K and Recall@K as{" "}
-                <em>agreement with the consensus</em>, not as ground truth in the
-                hand-labelled sense.
-              </Caveat>
-            </div>
-          </div>
-        </section>
-
-        {/* --- Configuration --- */}
-        <section
-          id="configure"
-          aria-labelledby="configure-title"
-          className="py-20"
-        >
-          <div className="container mx-auto px-6 grid lg:grid-cols-2 gap-12">
-            <div>
-              <SectionHeading
-                id="configure-title"
-                eyebrow="Control"
-                title="What you can change per run"
+          <dl className="mt-10 border-t border-border text-sm">
+            {SUMMARY.map((row) => (
+              <div
+                key={row.term}
+                className="grid gap-1 border-b border-border py-3 sm:grid-cols-[13rem_1fr] sm:gap-6"
               >
-                The deep-analysis sidebar narrows the matrix before it runs, and
-                whatever you pick is saved on the batch — so every stored result
-                records the configuration that produced it.
-              </SectionHeading>
+                <dt className="font-medium text-foreground">{row.term}</dt>
+                <dd className="text-muted-foreground">{row.def}</dd>
+              </div>
+            ))}
+          </dl>
 
-              <dl className="rounded-2xl border border-slate-800 divide-y divide-slate-800 overflow-hidden">
-                {CONFIGURABLE.map((row) => (
-                  <div
-                    key={row.label}
-                    className="grid sm:grid-cols-2 gap-1 sm:gap-4 p-5 bg-slate-900/40"
-                  >
-                    <dt className="text-sm font-semibold text-white flex items-center gap-2">
-                      <Settings2 className="w-4 h-4 text-cyan-400" />
-                      {row.label}
-                    </dt>
-                    <dd className="text-sm text-slate-400">{row.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-
-            <div className="lg:pt-24">
-              <Card className="h-full">
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="w-10 h-10 rounded-xl bg-slate-800 text-slate-300 flex items-center justify-center">
-                    <Scale className="w-5 h-5 text-cyan-400" />
+          <nav aria-label="Contents" className="mt-10">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Contents
+            </h2>
+            <ol className="mt-3 grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-2">
+              {CONTENTS.map((item, idx) => (
+                <li key={item.id} className="flex gap-3">
+                  <span className="font-mono text-muted-foreground tabular">
+                    {String(idx + 1).padStart(2, "0")}
                   </span>
-                  <h3 className="text-lg font-bold text-white">
-                    Deliberately not adjustable per run
-                  </h3>
-                </div>
-                <ul className="space-y-4 text-sm text-slate-400 leading-relaxed">
-                  <li>
-                    <span className="font-semibold text-slate-200">
-                      Chunking.
-                    </span>{" "}
-                    Applied once at ingest (fixed 512-character chunks, 50
-                    characters of overlap). Changing it re-chunks the document,
-                    which replaces every stored chunk — and takes the ground
-                    truth attached to them with it. Re-upload to chunk
-                    differently.
-                  </li>
-                  <li>
-                    <span className="font-semibold text-slate-200">
-                      The hybrid reranker.
-                    </span>{" "}
-                    The cross-encoder is the only thing separating hybrid from
-                    dense + sparse. Turn it off and hybrid becomes the same RRF
-                    fusion the candidate pool uses, so the run would be scored
-                    against its own algorithm.
-                  </li>
-                </ul>
-              </Card>
-            </div>
-          </div>
-        </section>
-
-        {/* --- Comparison Matrix Section --- */}
-        <section id="comparison" aria-labelledby="comparison-title" className="py-20 border-t border-white/5 bg-slate-900/20">
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="comparison-title"
-              eyebrow="Why RAGReader?"
-              title="Built for objective evaluation, not basic chat"
-            >
-              See how RAGReader compares against standard vector databases and standard document chat tools.
-            </SectionHeading>
-
-            <ComparisonMatrix />
-          </div>
-        </section>
-
-        {/* --- Stack --- */}
-        <section
-          id="stack"
-          aria-labelledby="stack-title"
-          className="py-20 border-y border-white/5 bg-slate-900/30"
-        >
-          <div className="container mx-auto px-6">
-            <SectionHeading
-              id="stack-title"
-              eyebrow="Under the hood"
-              title="What it's actually built on"
-            >
-              No hidden services: the whole thing runs from one Docker Compose
-              file and one OpenRouter key.
-            </SectionHeading>
-
-            <ul className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {STACK.map((item) => (
-                <li
-                  key={item.name}
-                  className="rounded-xl border border-slate-800 bg-slate-950/60 p-5"
-                >
-                  <p className="text-sm font-semibold text-white">{item.name}</p>
-                  <p className="text-xs text-slate-500 mt-1">{item.note}</p>
+                  <a href={`#${item.id}`} className="link">
+                    {item.label}
+                  </a>
                 </li>
               ))}
-            </ul>
+            </ol>
+          </nav>
+        </header>
+
+        {/* --- Submit --- */}
+        <section
+          id="start"
+          aria-labelledby="start-title"
+          className="border-t border-border py-14"
+        >
+          <h2 id="start-title" className="text-2xl font-semibold">
+            Add a document
+          </h2>
+          <p className="prose-note measure mt-4">
+            One source at a time: a PDF, a web page URL, or pasted text. New here?{" "}
+            <Link to="/docs" className="link">
+              Walk through the whole flow in screenshots
+            </Link>{" "}
+            first.
+          </p>
+
+          <div className="mt-8 border border-border">
+            <FileSubmit onSubmit={handleSubmit} />
           </div>
+
+          {/* Figure 1 — an illustrative result, set as a plain figure. */}
+          <figure className="mt-12">
+            <div className="border border-border">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-5 py-3">
+                <span className="text-sm font-medium">
+                  Hybrid retrieval · Claude Haiku 4.5
+                </span>
+                <span className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
+                  Illustrative
+                </span>
+              </div>
+
+              <dl className="divide-y divide-border text-sm">
+                <div className="px-5 py-4">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Query
+                  </dt>
+                  <dd className="mt-1">What happened in the Battle of Surabaya?</dd>
+                </div>
+                <div className="px-5 py-4">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Generated answer
+                  </dt>
+                  <dd className="prose-note mt-1 text-base">
+                    In November 1945 Indonesian militias in Surabaya fought
+                    British-led Allied troops. The battle caused heavy casualties and
+                    is commemorated annually as Heroes' Day.
+                  </dd>
+                </div>
+                <div className="px-5 py-4">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Retrieved context
+                  </dt>
+                  <dd className="mt-2 space-y-2">
+                    {SAMPLE_CHUNKS.map((chunk) => (
+                      <div key={chunk.n} className="flex gap-4">
+                        <span className="w-24 shrink-0 font-mono text-xs text-muted-foreground tabular">
+                          #{chunk.n} · {chunk.score}
+                        </span>
+                        <span className="text-muted-foreground">{chunk.text}</span>
+                      </div>
+                    ))}
+                  </dd>
+                </div>
+              </dl>
+
+              <table className="w-full border-t border-border text-sm">
+                <caption className="sr-only">
+                  Metrics reported for this pipeline
+                </caption>
+                <tbody>
+                  {SAMPLE_METRICS.map(({ group, rows }) => (
+                    <tr key={group} className="border-b border-border last:border-b-0">
+                      <th
+                        scope="row"
+                        className="w-28 border-r border-border px-5 py-3 text-left align-top text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                      >
+                        {group}
+                      </th>
+                      <td className="px-5 py-3">
+                        <div className="flex flex-wrap gap-x-8 gap-y-1">
+                          {rows.map(([label, value]) => (
+                            <span key={label} className="text-muted-foreground">
+                              {label}{" "}
+                              <span className="font-mono text-foreground tabular">
+                                {value}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <figcaption className="mt-3 text-sm text-muted-foreground">
+              Figure 1. One pipeline's result. Nine metrics per pipeline are reported
+              live during a deep-analysis run; six are shown here.
+            </figcaption>
+          </figure>
         </section>
 
-        {/* --- Quick Start Developer Section --- */}
-        <section id="quickstart" aria-labelledby="quickstart-title" className="py-20">
-          <div className="container mx-auto px-6 max-w-4xl">
-            <SectionHeading
-              id="quickstart-title"
-              eyebrow="Self-Hosting"
-              title="Deploy locally in under 2 minutes"
-            >
-              Clone the repository, configure your OpenRouter key, and run Docker Compose.
-            </SectionHeading>
+        {/* --- 1. How it works --- */}
+        <Section
+          id="how-it-works"
+          number={1}
+          title="How it works"
+          lede="Six phases from raw document to nine scored pipelines. Nothing happens in an uninspectable black box."
+        >
+          <ArchitectureFlow />
+        </Section>
 
-            <QuickStartCode />
+        {/* --- 2. Retrieval methods --- */}
+        <Section
+          id="retrieval"
+          number={2}
+          title="Retrieval methods"
+          lede="The three methods disagree in interesting ways — semantics catches paraphrase, keywords catch exact names, and the reranker arbitrates. Running all three on your document is how you find out which one your content rewards."
+        >
+          <dl className="border-t border-border">
+            {RETRIEVAL_METHODS.map((method) => (
+              <div
+                key={method.name}
+                className="grid gap-2 border-b border-border py-6 md:grid-cols-[14rem_1fr] md:gap-8"
+              >
+                <dt>
+                  <span className="block font-serif text-lg font-semibold">
+                    {method.name}
+                  </span>
+                  <span className="mt-1 block text-sm text-muted-foreground">
+                    {method.summary}
+                  </span>
+                </dt>
+                <dd className="prose-note text-base">{method.detail}</dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+
+        {/* --- 3. Models --- */}
+        <Section
+          id="models"
+          number={3}
+          title="Models"
+          lede="Each pipeline is end-to-end: the model rewrites your question into a search query, retrieves with its assigned method, and generates at temperature 0 — so its scores reflect the whole chain, query rewriting included. All traffic is routed through OpenRouter with a single API key, which is what lets the selector offer any model OpenRouter serves rather than a fixed three."
+        >
+          <h3 className="text-lg font-semibold">Defaults</h3>
+          <p className="prose-note measure mt-2 text-base">
+            These three are pre-selected. Swap in any other OpenRouter model from
+            the deep-analysis sidebar — the list there is fetched live, with price
+            and context length, and searchable.
+          </p>
+          <table className="mt-4 w-full border-t border-border text-sm">
+            <caption className="sr-only">Default generation models</caption>
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th scope="col" className="py-3 pr-6 font-medium">Model</th>
+                <th scope="col" className="py-3 pr-6 font-medium">Provider</th>
+                <th scope="col" className="py-3 font-medium">Identifier</th>
+              </tr>
+            </thead>
+            <tbody>
+              {MODELS.map((model) => (
+                <tr key={model.id} className="border-b border-border">
+                  <td className="py-3 pr-6 font-medium">{model.label}</td>
+                  <td className="py-3 pr-6 text-muted-foreground">{model.provider}</td>
+                  <td className="py-3 font-mono text-xs">{model.id}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 className="mt-12 text-lg font-semibold">Supporting models</h3>
+          <dl className="mt-4 border-t border-border">
+            {SUPPORTING_MODELS.map((item) => (
+              <div
+                key={item.id}
+                className="grid gap-1 border-b border-border py-4 sm:grid-cols-[11rem_1fr] sm:gap-6"
+              >
+                <dt className="text-sm font-medium">{item.role}</dt>
+                <dd>
+                  <code className="break-all font-mono text-xs">{item.id}</code>
+                  <p className="mt-1 text-sm text-muted-foreground">{item.note}</p>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+
+        {/* --- 4. Metrics --- */}
+        <Section
+          id="metrics"
+          number={4}
+          title="Evaluation metrics"
+          lede="Retrieval and generation fail differently, so they are scored separately: a pipeline can retrieve perfectly and still answer badly, and the metrics will say so."
+        >
+          <div className="grid gap-10 lg:grid-cols-2">
+            <div>
+              <h3 className="text-lg font-semibold">Retrieval quality</h3>
+              <dl className="mt-4 border-t border-border">
+                {RETRIEVAL_METRICS.map((metric) => (
+                  <div key={metric.name} className="border-b border-border py-4">
+                    <dt className="text-sm font-medium">{metric.name}</dt>
+                    <dd className="mt-1 text-sm text-muted-foreground">{metric.body}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Computed as set overlap between retrieved chunk IDs and ground-truth
+                chunk IDs. Position inside the result list is not rewarded — there is
+                no MRR or nDCG here.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-semibold">Answer quality</h3>
+              <dl className="mt-4 border-t border-border">
+                {ANSWER_METRICS.map((metric) => (
+                  <div key={metric.name} className="border-b border-border py-4">
+                    <dt className="text-sm font-medium">{metric.name}</dt>
+                    <dd className="mt-1 text-sm text-muted-foreground">{metric.body}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Faithfulness, relevance and coverage are judged by Mistral Nemo on a
+                1–5 scale and reported normalized to 0–1, so every metric shares one
+                axis.
+              </p>
+            </div>
           </div>
-        </section>
 
-        {/* --- FAQ Accordion --- */}
-        <section id="faq" aria-labelledby="faq-title" className="py-20 border-t border-white/5 bg-slate-900/20">
-          <div className="container mx-auto px-6 max-w-4xl">
-            <SectionHeading
-              id="faq-title"
-              eyebrow="FAQ"
-              title="Questions worth answering before you upload"
-            />
+          <div className="mt-10">
+            <Note>
+              Metrics only exist where ground truth does. Without ground-truth chunks
+              the retrieval scores have nothing to compare against, and without an
+              expected answer the answer metrics are skipped entirely — which is why
+              setting ground truth is a step in the flow rather than an optional
+              extra.
+            </Note>
+          </div>
+        </Section>
 
-            <div className="space-y-4">
-              {FAQ.map((item, idx) => {
-                const isOpen = openFaqIndex === idx;
-                return (
-                  <div
-                    key={item.q}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/50 overflow-hidden transition-all"
-                  >
+        {/* --- 5. Ground truth --- */}
+        <Section
+          id="ground-truth"
+          number={5}
+          title="Ground truth"
+          lede="Retrieval metrics are only as good as the set they are scored against, so RAGReader makes that choice explicit and stores it with the run — by hand, or by consensus."
+        >
+          <GroundTruthVisualizer />
+
+          <div className="mt-10">
+            <Note>
+              Pooling scores retrievers against a consensus they helped produce, and
+              hybrid retrieval is structurally closer to that consensus than dense or
+              sparse. Read pooled Precision@K and Recall@K as{" "}
+              <em>agreement with the consensus</em>, not as ground truth in the
+              hand-labelled sense.
+            </Note>
+          </div>
+        </Section>
+
+        {/* --- 6. Configuration --- */}
+        <Section
+          id="configure"
+          number={6}
+          title="What you can change per run"
+          lede="The deep-analysis sidebar narrows the matrix before it runs, and whatever you pick is saved on the batch — so every stored result records the configuration that produced it."
+        >
+          <dl className="border-t border-border text-sm">
+            {CONFIGURABLE.map((row) => (
+              <div
+                key={row.label}
+                className="grid gap-1 border-b border-border py-3 sm:grid-cols-[14rem_1fr] sm:gap-6"
+              >
+                <dt className="font-medium">{row.label}</dt>
+                <dd className="text-muted-foreground">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <Panel className="mt-10">
+            <h3 className="text-lg font-semibold">Deliberately not adjustable per run</h3>
+            <dl className="mt-4 space-y-5 text-sm">
+              <div>
+                <dt className="font-medium">Chunking</dt>
+                <dd className="mt-1 text-muted-foreground">
+                  Applied once at ingest (fixed 512-character chunks, 50 characters of
+                  overlap). Changing it re-chunks the document, which replaces every
+                  stored chunk — and takes the ground truth attached to them with it.
+                  Re-upload to chunk differently.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">The hybrid reranker</dt>
+                <dd className="mt-1 text-muted-foreground">
+                  The cross-encoder is the only thing separating hybrid from dense +
+                  sparse. Turn it off and hybrid becomes the same RRF fusion the
+                  candidate pool uses, so the run would be scored against its own
+                  algorithm.
+                </dd>
+              </div>
+            </dl>
+          </Panel>
+        </Section>
+
+        {/* --- 7. Worked example --- */}
+        <Section
+          id="benchmark"
+          number={7}
+          title="Worked example"
+          lede="Recorded results for one sample document. Switch the retrieval method or the model to see how the same question scores differently before you run your own."
+        >
+          <InteractiveBenchmarkSimulator />
+        </Section>
+
+        {/* --- 8. Comparison --- */}
+        <Section
+          id="comparison"
+          number={8}
+          title="Comparison with adjacent tools"
+          lede="Where RAGReader differs from a plain vector store and from a general document-chat tool."
+        >
+          <ComparisonMatrix />
+        </Section>
+
+        {/* --- 9. Implementation --- */}
+        <Section
+          id="stack"
+          number={9}
+          title="Implementation"
+          lede="No hidden services: the whole thing runs from one Docker Compose file and one OpenRouter key."
+        >
+          <dl className="grid gap-x-10 border-t border-border sm:grid-cols-2">
+            {STACK.map((item) => (
+              <div key={item.name} className="border-b border-border py-3 text-sm">
+                <dt className="font-medium">{item.name}</dt>
+                <dd className="text-muted-foreground">{item.note}</dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+
+        {/* --- 10. Quick start --- */}
+        <Section
+          id="quickstart"
+          number={10}
+          title="Running it yourself"
+          lede="Clone the repository, add an OpenRouter key, and bring up Docker Compose."
+        >
+          <QuickStartCode />
+        </Section>
+
+        {/* --- 11. FAQ --- */}
+        <Section
+          id="faq"
+          number={11}
+          title="Questions"
+        >
+          <dl className="border-t border-border">
+            {FAQ.map((item, idx) => {
+              const isOpen = openFaqIndex === idx;
+              return (
+                <div key={item.q} className="border-b border-border">
+                  <dt>
                     <button
                       onClick={() => toggleFaq(idx)}
-                      className="w-full p-6 text-left flex items-center justify-between gap-4 font-bold text-white hover:text-cyan-400 transition-colors focus:outline-none"
+                      aria-expanded={isOpen}
+                      className="flex w-full items-baseline justify-between gap-6 py-4 text-left font-serif text-lg font-semibold hover:text-primary"
                     >
-                      <span className="text-base sm:text-lg">{item.q}</span>
-                      {isOpen ? (
-                        <ChevronUp className="w-5 h-5 text-cyan-400 shrink-0" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-slate-500 shrink-0" />
-                      )}
+                      <span>{item.q}</span>
+                      <span
+                        aria-hidden="true"
+                        className="shrink-0 font-mono text-sm font-normal text-muted-foreground"
+                      >
+                        {isOpen ? "−" : "+"}
+                      </span>
                     </button>
-                    {isOpen && (
-                      <div className="px-6 pb-6 text-sm text-slate-400 leading-relaxed border-t border-slate-800/60 pt-4 animate-in fade-in-50 duration-200">
-                        {item.a}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
+                  </dt>
+                  {isOpen && (
+                    <dd className="prose-note measure pb-5 text-base">{item.a}</dd>
+                  )}
+                </div>
+              );
+            })}
+          </dl>
+        </Section>
 
-        {/* --- Closing CTA --- */}
-        <section className="py-24 border-t border-white/5 bg-gradient-to-b from-slate-900/40 to-slate-950">
-          <div className="container mx-auto px-6 text-center max-w-3xl">
-            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3.5 py-1 text-xs font-semibold text-cyan-300 mb-4">
-              <Zap className="w-3.5 h-3.5" /> Start Benchmarking Free
-            </span>
-            <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4 tracking-tight">
-              Run it on a document you actually care about
-            </h2>
-            <p className="text-slate-400 mb-8 leading-relaxed">
-              The comparison is only useful on your own content — that's the
-              point. Add a source and the first answer is a few seconds away.
-            </p>
-            <div className="flex flex-wrap justify-center gap-4">
-              <a
-                href="#top"
-                onClick={(event) => {
-                  event.preventDefault();
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                className="rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 px-6 py-3.5 text-sm font-semibold text-white transition-all shadow-lg shadow-cyan-600/20 active:scale-95"
-              >
-                Add a document
-              </a>
-              <Link
-                to="/docs"
-                className="rounded-xl border border-slate-700 hover:border-cyan-500/40 px-6 py-3.5 text-sm font-semibold text-slate-200 transition-colors bg-slate-900/60"
-              >
-                Read the walkthrough
-              </Link>
-            </div>
+        {/* --- Closing --- */}
+        <section className="border-t border-border py-14">
+          <h2 className="text-2xl font-semibold">
+            Run it on a document you care about
+          </h2>
+          <p className="prose-note measure mt-4">
+            The comparison is only useful on your own content — that is the point.
+            Add a source and the first answer is a few seconds away.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <a
+              href="#start"
+              onClick={(event) => {
+                event.preventDefault();
+                document
+                  .getElementById("start")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+              className="border border-primary bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              Add a document
+            </a>
+            <Link
+              to="/docs"
+              className="border border-input px-5 py-2.5 text-sm font-medium transition-colors hover:bg-accent"
+            >
+              Read the walkthrough
+            </Link>
           </div>
         </section>
       </main>
 
       {/* --- Footer --- */}
-      <footer className="bg-slate-950 border-t border-slate-800/80 pt-16 pb-8">
-        <div className="container mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
-            <div className="col-span-2 md:col-span-1">
-              <div className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <div className="w-7 h-7 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-md flex items-center justify-center text-white font-bold text-sm">
-                  R
-                </div>
-                RAGReader
-              </div>
-              <p className="text-slate-500 text-sm leading-relaxed">
-                Document QA that shows its work: every retrieval method, every
-                model, every score, side by side.
+      <footer className="border-t border-border">
+        <div className="container mx-auto max-w-4xl px-6 py-12">
+          <div className="grid gap-8 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div className="sm:col-span-2 lg:col-span-1">
+              <p className="font-serif text-lg font-semibold">RAGReader</p>
+              <p className="mt-2 measure text-muted-foreground">
+                Document QA that shows its work: every retrieval method, every model,
+                every score, side by side.
               </p>
             </div>
-            <div>
-              <h3 className="text-white font-semibold mb-4 text-sm">
+
+            <nav aria-label="On this page">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 On this page
-              </h3>
-              <ul className="space-y-2 text-sm text-slate-400">
-                <li>
-                  <a href="#how-it-works" className="hover:text-cyan-400 transition-colors">
-                    How it works
-                  </a>
-                </li>
-                <li>
-                  <a href="#retrieval" className="hover:text-cyan-400 transition-colors">
-                    Retrieval methods
-                  </a>
-                </li>
-                <li>
-                  <a href="#metrics" className="hover:text-cyan-400 transition-colors">
-                    Metrics
-                  </a>
-                </li>
-                <li>
-                  <a href="#ground-truth" className="hover:text-cyan-400 transition-colors">
-                    Ground truth
-                  </a>
-                </li>
+              </h2>
+              <ul className="mt-3 space-y-1.5">
+                {CONTENTS.slice(0, 5).map((item) => (
+                  <li key={item.id}>
+                    <a href={`#${item.id}`} className="link">
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
               </ul>
-            </div>
-            <div>
-              <h3 className="text-white font-semibold mb-4 text-sm">
+            </nav>
+
+            <nav aria-label="Resources">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Resources
-              </h3>
-              <ul className="space-y-2 text-sm text-slate-400">
+              </h2>
+              <ul className="mt-3 space-y-1.5">
                 <li>
-                  <Link to="/docs" className="hover:text-cyan-400 transition-colors">
-                    Walkthrough Guide
+                  <Link to="/docs" className="link">
+                    Walkthrough guide
                   </Link>
                 </li>
                 <li>
-                  <a
-                    href={`${REPO_URL}#readme`}
-                    className="hover:text-cyan-400 transition-colors"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a href={`${REPO_URL}#readme`} className="link" target="_blank" rel="noreferrer">
                     README
                   </a>
                 </li>
                 <li>
                   <a
                     href={`${REPO_URL}/blob/main/LICENSE`}
-                    className="hover:text-cyan-400 transition-colors"
+                    className="link"
                     target="_blank"
                     rel="noreferrer"
                   >
-                    MIT License
+                    MIT licence
                   </a>
                 </li>
               </ul>
-            </div>
-            <div>
-              <h3 className="text-white font-semibold mb-4 text-sm">Project</h3>
-              <ul className="space-y-2 text-sm text-slate-400">
+            </nav>
+
+            <nav aria-label="Project">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Project
+              </h2>
+              <ul className="mt-3 space-y-1.5">
                 <li>
-                  <a
-                    href={REPO_URL}
-                    className="inline-flex items-center gap-2 hover:text-cyan-400 transition-colors"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Github className="w-4 h-4" />
+                  <a href={REPO_URL} className="link" target="_blank" rel="noreferrer">
                     Source on GitHub
                   </a>
                 </li>
                 <li>
-                  <a
-                    href={`${REPO_URL}/issues`}
-                    className="hover:text-cyan-400 transition-colors"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Issue Tracker
+                  <a href={`${REPO_URL}/issues`} className="link" target="_blank" rel="noreferrer">
+                    Issue tracker
                   </a>
                 </li>
                 <li>
-                  <a
-                    href="https://openrouter.ai/"
-                    className="hover:text-cyan-400 transition-colors"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Powered by OpenRouter
+                  <a href="https://openrouter.ai/" className="link" target="_blank" rel="noreferrer">
+                    OpenRouter
                   </a>
                 </li>
               </ul>
-            </div>
+            </nav>
           </div>
-          <div className="border-t border-slate-800/80 pt-8 text-center text-slate-600 text-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div>
-              © {new Date().getFullYear()} RAGReader · Open source under the MIT License
-            </div>
-            <div className="text-xs text-slate-500 font-mono">
-              rag.nevatal.tech
-            </div>
+
+          <div className="mt-10 flex flex-col gap-2 border-t border-border pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              © {new Date().getFullYear()} RAGReader · Open source under the MIT licence
+            </span>
+            <span className="font-mono">rag.nevatal.tech</span>
           </div>
         </div>
       </footer>
 
-      {/* Back To Top Floating Action */}
       <BackToTop />
     </div>
   );

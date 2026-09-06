@@ -30,10 +30,19 @@ def initialize_rag_task(self, job_id, username, method, model_config):
         return False
 
 @shared_task(bind=True)
-def run_single_analysis(self, batch_id, username, query, variant_config):
+def run_single_analysis(self, batch_id, username, query, variant_config, config=None):
+    """Run one variant out of band.
+
+    `config` is the run's analysis config and must be passed whenever the batch
+    has one: engines are cached per configuration, so omitting it silently runs
+    the variant on a default-shaped pipeline. The websocket consumer is the live
+    path today; this task is the queued equivalent.
+    """
     try:
         batch = AnalysisBatch.objects.get(job_id=batch_id)
-        engine = rag_registry.get_engine(variant_config["method"], variant_config["model"])
+        engine = rag_registry.get_engine(
+            variant_config["method"], variant_config["model"], config
+        )
         response = engine.run(username, query)
 
         context = response.get("context", [])  

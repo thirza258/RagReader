@@ -169,11 +169,16 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                         }))
                         continue
 
-                    engine = rag_registry.get_engine(method, model)
+                    # The config is part of the lookup: two runs that differ
+                    # only in reranker or temperature need different engines,
+                    # and the registry keys its cache on exactly that.
+                    engine = rag_registry.get_engine(method, model, config)
 
-                    # Engines are shared singletons — reapply the depth every
+                    # Engines are shared between runs — reapply the depth every
                     # variant so a previous run's Top-K never carries over.
-                    apply_retrieval_depth(engine, top_k)
+                    apply_retrieval_depth(
+                        engine, top_k, child_top_k=config["child_top_k"]
+                    )
 
                     is_initialized = await sync_to_async(engine.is_initialized)(username)
                     

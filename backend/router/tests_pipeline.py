@@ -26,8 +26,8 @@ rather than an arbitrary choice:
   `word_tokenize`, both of which need corpora that are downloaded at import
   time. Tests pass `remove_stop_words: False` and patch `word_tokenize`, so a
   missing corpus can never be the reason a pipeline test fails.
-* `HybridRAG.__init__` constructs a `CrossEncoder`, which downloads a model on
-  first use. Tests patch the class and score with a stub.
+* `HybridRAG.__init__` constructs an `OllamaCrossEncoder`, which would reach a
+  local Ollama over HTTP. Tests patch the class and score with a stub.
 """
 import os
 import pickle
@@ -42,7 +42,14 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 
+import hybrid_rag.hybrid_rag as hybrid_module
 import rag.rag_service as rag_service
+from common.constant import (
+    DEFAULT_RERANKER_MODEL,
+    METHOD_IDS,
+    MODEL_IDS,
+    RERANKER_MODEL_IDS,
+)
 from evaluation.models import Chunk, GroundTruthChunk, GroundTruthResponse
 from pipeline.base_pipeline import BasePipeline
 from pipeline.dense_rag_pipeline import DenseRAGPipeline
@@ -134,7 +141,7 @@ BASE_CONFIG = {
 
 
 class FakeCrossEncoder:
-    """Stand-in for sentence-transformers' CrossEncoder.
+    """Stand-in for the Ollama-backed reranker.
 
     Scores by keyword so the reranked order is predictable: alpha > beta >
     everything else.
@@ -169,11 +176,11 @@ class PipelineTestCase(TestCase):
         tokenize_patch.start()
         self.addCleanup(tokenize_patch.stop)
 
-        cross_encoder_patch = mock.patch(
-            "hybrid_rag.hybrid_rag.CrossEncoder", FakeCrossEncoder
-        )
-        cross_encoder_patch.start()
-        self.addCleanup(cross_encoder_patch.stop)
+        # Rerankers are cached by model name across instances, so the cache has
+        # to be emptied around the patch — otherwise this test gets whichever
+        # stub an earlier module happened to load first.
+        hybrid_module.clear_cross_encoder_cache()
+        self.addCleanup(hybrid_module.clear_cross_encoder_cache)
 
         ollama_cross_encoder_patch = mock.patch(
             "hybrid_rag.hybrid_rag.OllamaCrossEncoder", FakeCrossEncoder
@@ -419,6 +426,34 @@ class DensePipelineIndexTests(PipelineTestCase):
             np.asarray(reloaded.rag.document_vectors),
             np.asarray(self.pipeline.rag.document_vectors),
         )
+
+    def test_the_saved_index_records_which_embedding_model_built_it(self):
+        self.pipeline._build_index("alice", self.document)
+        vector = DocumentVector.objects.filter(document=self.document).last()
+        with open(vector.vectorstore_location, "rb") as handle:
+            saved = pickle.load(handle)
+        self.assertEqual(saved["embedding_model"], BASE_CONFIG["model"])
+
+    def test_an_index_from_a_different_embedding_model_is_rejected(self):
+        # Nothing in the database records the embedding model, so without this
+        # a query embedded with model B would be scored against vectors built
+        # with model A — meaningless similarities, and no error to notice.
+        path = self.pipeline._build_index("alice", self.document)
+
+        other = self.make_pipeline(
+            DenseRAGPipeline, model="qwen/qwen3-embedding-8b"
+        )
+        self.assertFalse(other._load_state(path))
+
+    def test_an_index_predating_the_stamp_is_still_trusted(self):
+        # Indexes written before the stamp existed carry no model; refusing
+        # them would re-embed every existing document on deploy.
+        path = os.path.join(self.vector_store_path, "legacy.pkl")
+        with open(path, "wb") as handle:
+            pickle.dump(
+                {"documents": ["a"], "vectors": [[1.0]], "metadata": [{}]}, handle
+            )
+        self.assertTrue(self.pipeline._load_state(path))
 
     def test_load_state_returns_false_for_a_missing_or_corrupt_file(self):
         self.assertFalse(
@@ -900,9 +935,105 @@ class OllamaCrossEncoderTests(TestCase):
             self.assertAlmostEqual(scores[0], 1.0, places=4)
             self.assertAlmostEqual(scores[1], 0.0, places=4)
 
+    def test_predict_raises_when_ollama_is_unreachable(self):
+        """A failed embed must not look like a successful all-zero scoring.
+
+        Returning zeros here used to be indistinguishable from a real result,
+        so the caller ranked on them and reported metrics for a rerank that
+        never ran — the case where Ollama is down or the model isn't pulled.
+        """
+        from hybrid_rag.hybrid_rag import OllamaCrossEncoder, RerankUnavailable
+
+        encoder = OllamaCrossEncoder(model_name="bge-m3")
+        mock_client = mock.Mock()
+        mock_client.embed.side_effect = ConnectionError("connection refused")
+
+        with mock.patch.object(encoder, "_client", mock_client):
+            with self.assertRaises(RerankUnavailable) as ctx:
+                encoder.predict([("alpha", "alpha doc")])
+
+        # The message has to name the model, since "pull it" is the usual fix.
+        self.assertIn("bge-m3", str(ctx.exception))
+
+
+class RerankOrderingTests(TestCase):
+    """`_rerank` orders candidates, including when it cannot score them."""
+
+    def _rerank_with(self, scores, candidates):
+        """Run `_rerank` against a stub scorer.
+
+        Built without `__init__` on purpose: this exercises the ordering logic
+        alone, with no sub-engines, vector store, or Ollama client involved.
+        """
+        from hybrid_rag.hybrid_rag import HybridRAG
+
+        rag = object.__new__(HybridRAG)
+        encoder = mock.Mock()
+        if isinstance(scores, Exception):
+            encoder.predict.side_effect = scores
+        else:
+            encoder.predict.return_value = np.array(scores)
+        rag._cross_encoder = encoder
+        return rag._rerank("query", candidates)
+
+    def _candidates(self, n):
+        return [{"text": f"doc {i}", "chunk_id": str(i), "score": 1.0} for i in range(n)]
+
+    def test_keeps_fused_order_when_reranker_is_unavailable(self):
+        """The fallback must preserve RRF order, not invert it.
+
+        Ranking an all-equal score array with `argsort(scores)[::-1]` returned
+        the candidates exactly reversed, so the top-K slice took the *worst*
+        candidates the fusion had found.
+        """
+        from hybrid_rag.hybrid_rag import RerankUnavailable
+
+        candidates = self._candidates(5)
+        ranked = self._rerank_with(RerankUnavailable("ollama down"), candidates)
+
+        self.assertEqual(
+            [c["chunk_id"] for c in ranked], ["0", "1", "2", "3", "4"]
+        )
+
+    def test_uniform_scores_do_not_reverse_the_order(self):
+        """The shape the old failure path produced: every score identical.
+
+        `argsort(scores)[::-1]` reversed such an array outright, so the slice
+        that followed took the worst candidates. Any scorer that returns a flat
+        array — not just a broken one — hit this.
+        """
+        candidates = self._candidates(5)
+        ranked = self._rerank_with([0.0] * 5, candidates)
+
+        self.assertEqual(
+            [c["chunk_id"] for c in ranked], ["0", "1", "2", "3", "4"]
+        )
+
+    def test_ties_keep_fused_order(self):
+        """Equal scores keep the order fusion gave them rather than flipping."""
+        candidates = self._candidates(4)
+        ranked = self._rerank_with([0.9, 0.5, 0.5, 0.1], candidates)
+
+        self.assertEqual(
+            [c["chunk_id"] for c in ranked], ["0", "1", "2", "3"]
+        )
+
+    def test_reranks_by_descending_score(self):
+        candidates = self._candidates(3)
+        ranked = self._rerank_with([0.1, 0.9, 0.5], candidates)
+
+        self.assertEqual([c["chunk_id"] for c in ranked], ["1", "2", "0"])
+        self.assertAlmostEqual(ranked[0]["score"], 0.9, places=4)
+
 
 class RagRegistryTests(TestCase):
-    """The method × model matrix, and the lookups the tasks make against it."""
+    """Lazy construction, the cache key, and the lookups callers make.
+
+    Engines used to be built eagerly at import — nine of them, one per method ×
+    model. That is impossible now that any OpenRouter model can be selected, so
+    they are built on demand and cached. These tests pin the parts of that
+    which callers depend on.
+    """
 
     def _fresh_registry(self, **env):
         original = rag_service.RAGRegistry._instance
@@ -910,67 +1041,132 @@ class RagRegistryTests(TestCase):
         self.addCleanup(
             setattr, rag_service.RAGRegistry, "_instance", original
         )
-        with mock.patch.dict(os.environ, env):
-            return rag_service.RAGRegistry()
+
+        # The flag is consulted on every get_engine now, not just once at
+        # construction, so the patch has to outlive this call.
+        env_patch = mock.patch.dict(os.environ, env)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+        return rag_service.RAGRegistry()
+
+    @staticmethod
+    def _stub_pipelines():
+        """Patch the three pipeline classes so nothing real gets constructed.
+
+        Each construction returns a *distinct* stub, so "is this the same
+        engine?" is a meaningful question — a bare Mock hands back one shared
+        return_value and every identity assertion would pass for free.
+        """
+        return mock.patch.dict(
+            rag_service.PIPELINE_CLASSES,
+            {
+                method: mock.Mock(side_effect=lambda config: mock.Mock())
+                for method in METHOD_IDS
+            },
+        )
 
     def test_the_registry_is_a_singleton(self):
         first = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="1")
         self.assertIs(first, rag_service.RAGRegistry())
 
-    def test_disable_flag_skips_engine_construction(self):
-        # This is what makes the whole suite runnable without API keys or
-        # model downloads.
-        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="1")
+    def test_nothing_is_built_until_something_is_asked_for(self):
+        # The whole point of going lazy: an open model list has no matrix to
+        # build up front.
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
         self.assertEqual(registry.engines, {})
 
-    def test_every_model_gets_every_method(self):
-        with mock.patch.multiple(
-            rag_service,
-            DenseRAGPipeline=mock.DEFAULT,
-            SparseRAGPipeline=mock.DEFAULT,
-            HybridRAGPipeline=mock.DEFAULT,
-        ):
-            registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
-
-        self.assertEqual(len(registry.engines), 3)
-        for methods in registry.engines.values():
-            self.assertEqual(
-                sorted(methods),
-                ["Dense Retrieval", "Hybrid Retrieval", "Sparse Retrieval"],
-            )
-
-    def test_one_broken_engine_does_not_stop_the_others(self):
-        with mock.patch.multiple(
-            rag_service,
-            DenseRAGPipeline=mock.Mock(side_effect=RuntimeError("no api key")),
-            SparseRAGPipeline=mock.DEFAULT,
-            HybridRAGPipeline=mock.DEFAULT,
-        ):
-            registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
-
-        for methods in registry.engines.values():
-            self.assertNotIn("Dense Retrieval", methods)
-            self.assertIn("Sparse Retrieval", methods)
-
-    def test_get_engine_returns_the_registered_pipeline(self):
+    def test_disable_flag_turns_a_cache_miss_into_an_error(self):
+        # This is what makes the suite runnable without API keys or model
+        # downloads: a miss must fail loudly, never quietly build.
         registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="1")
-        sentinel = object()
-        registry.engines = {"openai/gpt-4o-mini": {"Dense Retrieval": sentinel}}
+        with self.assertRaises(RuntimeError):
+            registry.get_engine("Dense Retrieval", MODEL_IDS[0])
 
-        self.assertIs(
-            registry.get_engine("Dense Retrieval", "openai/gpt-4o-mini"), sentinel
+    def test_an_engine_is_built_once_and_reused(self):
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
+        with self._stub_pipelines():
+            first = registry.get_engine("Dense Retrieval", MODEL_IDS[0])
+            second = registry.get_engine("Dense Retrieval", MODEL_IDS[0])
+
+        self.assertIs(first, second)
+        self.assertEqual(len(registry.engines), 1)
+
+    def test_a_model_outside_the_defaults_is_built_too(self):
+        # The feature: the selector is not limited to the three shipped models.
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
+        with self._stub_pipelines():
+            engine = registry.get_engine("Dense Retrieval", "deepseek/deepseek-chat")
+
+        self.assertIsNotNone(engine)
+        self.assertEqual(len(registry.engines), 1)
+
+    def test_a_different_config_gets_a_different_engine(self):
+        # Regression risk of caching on (method, model) alone: the second run
+        # would silently reuse the first run's reranker and report the scores
+        # as though the new one had been used.
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
+        other_reranker = next(
+            rid for rid in RERANKER_MODEL_IDS if rid != DEFAULT_RERANKER_MODEL
         )
 
-    def test_get_engine_error_names_what_is_available(self):
-        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="1")
-        registry.engines = {"openai/gpt-4o-mini": {"Dense Retrieval": object()}}
+        with self._stub_pipelines():
+            default = registry.get_engine(
+                "Hybrid Retrieval", MODEL_IDS[0],
+                {"reranker_model": DEFAULT_RERANKER_MODEL},
+            )
+            swapped = registry.get_engine(
+                "Hybrid Retrieval", MODEL_IDS[0],
+                {"reranker_model": other_reranker},
+            )
 
+        self.assertIsNot(default, swapped)
+        self.assertEqual(len(registry.engines), 2)
+
+    def test_retrieval_depth_alone_does_not_force_a_rebuild(self):
+        # Depth is set on a live engine by apply_retrieval_depth, so it must
+        # not be part of the cache key — otherwise every Top-K change would
+        # re-embed nothing but still pay for a fresh pipeline.
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="")
+        with self._stub_pipelines():
+            shallow = registry.get_engine("Dense Retrieval", MODEL_IDS[0], {"top_k": 3})
+            deep = registry.get_engine("Dense Retrieval", MODEL_IDS[0], {"top_k": 19})
+
+        self.assertIs(shallow, deep)
+
+    def test_the_cache_is_bounded(self):
+        # Cycling through models must not pin one pipeline per model in memory.
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="", RAG_ENGINE_CACHE_SIZE="2")
+        with self._stub_pipelines():
+            first = registry.get_engine("Dense Retrieval", "a/one")
+            registry.get_engine("Dense Retrieval", "b/two")
+            registry.get_engine("Dense Retrieval", "c/three")
+
+            self.assertEqual(len(registry.engines), 2)
+            # "a/one" was evicted, so asking again builds a new instance.
+            self.assertIsNot(registry.get_engine("Dense Retrieval", "a/one"), first)
+
+    def test_a_recent_hit_survives_eviction(self):
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="", RAG_ENGINE_CACHE_SIZE="2")
+        with self._stub_pipelines():
+            first = registry.get_engine("Dense Retrieval", "a/one")
+            registry.get_engine("Dense Retrieval", "b/two")
+            registry.get_engine("Dense Retrieval", "a/one")   # refresh
+            registry.get_engine("Dense Retrieval", "c/three") # evicts b/two
+
+            self.assertIs(registry.get_engine("Dense Retrieval", "a/one"), first)
+
+    def test_an_unknown_method_is_rejected(self):
+        # Methods stay closed — each one needs a pipeline class.
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="1")
         with self.assertRaises(ValueError) as ctx:
-            registry.get_engine("Sparse Retrieval", "openai/gpt-4o-mini")
+            registry.get_engine("Telepathic Retrieval", MODEL_IDS[0])
         self.assertIn("Dense Retrieval", str(ctx.exception))
 
+    def test_a_malformed_model_id_is_rejected(self):
+        registry = self._fresh_registry(RAG_DISABLE_ENGINE_INIT="1")
         with self.assertRaises(ValueError):
-            registry.get_engine("Dense Retrieval", "unknown/model")
+            registry.get_engine("Dense Retrieval", "mystery-model-9000")
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT)

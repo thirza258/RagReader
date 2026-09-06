@@ -16,6 +16,11 @@ from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 
 from evaluation.candidate_pooler import CandidatePooler, reciprocal_rank_fusion
+from common.constant import (
+    DEFAULT_RERANKER_MODEL,
+    DEFAULT_RRF_K,
+    RERANKER_MODEL_IDS,
+)
 from evaluation.eval import (
     calculate_precision_K,
     calculate_recall_K,
@@ -492,6 +497,50 @@ class CandidatePoolEndpointTests(TestCase):
         self.assertEqual(stored.count(), 3)
         self.assertTrue(all(gt.source == "pooled" for gt in stored))
         self.assertEqual(stored.first().rank, 1)
+
+    def test_pooling_builds_its_engines_with_the_runs_config(self):
+        # Engines are cached per configuration. Pooling with default-shaped
+        # ones would score a run against a consensus its own hybrid retriever
+        # — the reranker is what makes hybrid hybrid — never contributed to.
+        other_reranker = next(
+            rid for rid in RERANKER_MODEL_IDS if rid != DEFAULT_RERANKER_MODEL
+        )
+        with mock.patch(
+            "evaluation.views.build_default_pooler", return_value=self._pooler()
+        ) as build:
+            self.client.post(
+                "/api/v1/ground-truth-chunk/pool/",
+                {
+                    "conversation_id": self.conversation.id,
+                    "config": {"reranker_model": other_reranker, "rrf_k": 17},
+                },
+                content_type="application/json",
+            )
+
+        passed = build.call_args.kwargs["config"]
+        self.assertEqual(passed["reranker_model"], other_reranker)
+        self.assertEqual(passed["rrf_k"], 17)
+
+    def test_rrf_k_defaults_to_the_runs_value_then_the_global_one(self):
+        with mock.patch(
+            "evaluation.views.build_default_pooler", return_value=self._pooler()
+        ) as build:
+            self.client.post(
+                "/api/v1/ground-truth-chunk/pool/",
+                {"conversation_id": self.conversation.id, "config": {"rrf_k": 23}},
+                content_type="application/json",
+            )
+        self.assertEqual(build.call_args.kwargs["k"], 23)
+
+        with mock.patch(
+            "evaluation.views.build_default_pooler", return_value=self._pooler()
+        ) as build:
+            self.client.post(
+                "/api/v1/ground-truth-chunk/pool/",
+                {"conversation_id": self.conversation.id},
+                content_type="application/json",
+            )
+        self.assertEqual(build.call_args.kwargs["k"], DEFAULT_RRF_K)
 
     def test_pooling_replaces_a_previous_manual_selection(self):
         GroundTruthChunk.objects.create(

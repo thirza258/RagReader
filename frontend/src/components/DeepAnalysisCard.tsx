@@ -11,6 +11,33 @@ interface DeepAnalysisCardProps {
   className?: string;
 }
 
+const SECTION_LABEL_MAP: Record<string, string> = {
+  chunk_evaluation: "Retrieval",
+  response_evaluation: "Answer",
+};
+
+const METRIC_LABEL_MAP: Record<string, string> = {
+  precision_k: "Precision@K",
+  recall_k: "Recall@K",
+  f1_k: "F1@K",
+  rougeL_precision: "ROUGE-L precision",
+  rougeL_recall: "ROUGE-L recall",
+  rougeL_f1: "ROUGE-L F1",
+  faithfulness: "Faithfulness",
+  answer_relevance: "Answer relevance",
+  answer_coverage: "Answer coverage",
+};
+
+const getMetricLabel = (name: string): string =>
+  METRIC_LABEL_MAP[name] ??
+  name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+const formatMetricValue = (value: number | string): string => {
+  const num = typeof value === "string" ? parseFloat(value) : value;
+  if (isNaN(num)) return "N/A";
+  return (num * 100).toFixed(1) + "%";
+};
+
 const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
   method,
   aiModel,
@@ -19,162 +46,95 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
   retrievedChunks,
   evaluationMetrics,
   className = "",
-}) => {
-  const SECTION_LABEL_MAP: Record<string, string> = {
-    chunk_evaluation: "Chunk Evaluation",
-    response_evaluation: "Response Evaluation",
-  };
+}) => (
+  <article className={`border border-border bg-card ${className}`}>
+    <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
+      <h3 className="font-serif text-base font-semibold">{method}</h3>
+      <span className="font-mono text-xs text-muted-foreground">{aiModel}</span>
+    </header>
 
-  const METRIC_LABEL_MAP: Record<string, string> = {
-    precision_k: "Precision@K",
-    recall_k: "Recall@K",
-    f1_k: "F1@K",
-    rougeL_precision: "ROUGE-L Precision",
-    rougeL_recall: "ROUGE-L Recall",
-    rougeL_f1: "ROUGE-L F1",
-      faithfulness: "Faithfulness",
-      answer_relevance: "Answer Relevance",
-      answer_coverage: "Answer Coverage"
-  };
+    <dl className="divide-y divide-border text-sm">
+      <div className="px-4 py-3">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Query
+        </dt>
+        <dd className="mt-1">{query}</dd>
+      </div>
 
-  const getMetricLabel = (name: string): string =>
-    METRIC_LABEL_MAP[name] ??
-    name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      <div className="px-4 py-3">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Generated answer
+        </dt>
+        <dd className="prose-note mt-1 text-base">{answer}</dd>
+      </div>
 
-  const formatMetricValue = (value: number | string): string => {
-    const num = typeof value === "string" ? parseFloat(value) : value;
-    if (isNaN(num)) return "N/A";
-    return (num * 100).toFixed(1) + "%";
-  };
-  return (
-    <div className={`relative ${className}`}>
-      <div className="relative z-10 bg-slate-900 border border-slate-700 rounded-2xl p-4 shadow-2xl  ">
-        <div className="flex items-center gap-3 mb-4 border-b border-slate-700 pb-4">
-          <div className="flex gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-red-500" />
-            <div className="w-3 h-3 rounded-full bg-yellow-500" />
-            <div className="w-3 h-3 rounded-full bg-green-500" />
-          </div>
-          <div className="ml-2 text-white font-semibold text-sm">
-            {method} - <span className="text-slate-400">{aiModel}</span>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-            <div className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
-              Query
-            </div>
-            <div className="text-white font-medium text-sm leading-relaxed">
-              {query}
-            </div>
-          </div>
-
-          <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-            <div className="text-xs text-slate-400 mb-1 uppercase tracking-wider">
-              Generated Answer
-            </div>
-            <div className="text-white font-medium text-sm leading-relaxed">
-              {answer}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-xs text-slate-400 uppercase tracking-wider">
-              Retrieved Context
-            </div>
-
-            {retrievedChunks.length > 0 ? (
-              retrievedChunks.map((chunk) => (
-                <div
-                  key={chunk.id}
-                  className="bg-slate-800/70 rounded-lg border border-slate-700 overflow-hidden transition-colors hover:bg-slate-800"
-                >
-                  {/* Header row */}
-                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-700 bg-slate-900/50">
-                    <span className="text-cyan-400 font-mono text-xs">
-                      chunk {chunk.number} - ID: {chunk.id}
+      <div className="px-4 py-3">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Retrieved context
+        </dt>
+        <dd className="mt-2">
+          {retrievedChunks.length > 0 ? (
+            <ul className="border-t border-border">
+              {retrievedChunks.map((chunk) => (
+                <li key={chunk.id} className="border-b border-border py-2.5">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      chunk {chunk.number} · {chunk.id}
                     </span>
                     {chunk.score !== undefined && (
-                      <span
-                        className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
-                          chunk.score >= 0.75
-                            ? "bg-emerald-900/50 text-emerald-400"
-                            : chunk.score >= 0.5
-                              ? "bg-yellow-900/50 text-yellow-400"
-                              : "bg-red-900/50 text-red-400"
-                        }`}
-                      >
-                        {" "}
-                        Retrieval Score: {(chunk.score * 100).toFixed(1)}%
+                      <span className="font-mono text-xs tabular">
+                        {(chunk.score * 100).toFixed(1)}%
                       </span>
                     )}
                   </div>
-
-                  {/* Body */}
-                  <div className="px-3 py-2 text-sm text-slate-300 leading-relaxed">
-                    {chunk.text}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-slate-500 text-xs italic">
-                No chunks retrieved.
-              </div>
-            )}
-          </div>
-
-          {evaluationMetrics && (
-            <div className="space-y-4">
-              <div className="text-xs text-slate-400 uppercase tracking-wider">
-                Evaluation
-              </div>
-
-              {(["chunk_evaluation", "response_evaluation"] as const).map(
-                (section) => {
-                  const sectionData = evaluationMetrics[section];
-                  if (!sectionData || Object.keys(sectionData).length === 0)
-                    return null;
-
-                  return (
-                    <div
-                      key={section}
-                      className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden"
-                    >
-                      {/* Section header */}
-                      <div className="px-3 py-2 border-b border-slate-700 bg-slate-900/50">
-                        <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                          {SECTION_LABEL_MAP[section]}
-                        </span>
-                      </div>
-
-                      {/* Metrics grid */}
-                      <div className="grid grid-cols-3 gap-px bg-slate-700">
-                        {Object.entries(sectionData).map(([key, value]) => (
-                          <div
-                            key={key}
-                            className="bg-slate-800 p-3 text-center"
-                          >
-                            <div className="text-xs text-slate-500 mb-1">
-                              {getMetricLabel(key)}
-                            </div>
-                            <div className="text-lg font-bold text-cyan-400">
-                              {formatMetricValue(value as number)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                },
-              )}
-            </div>
+                  <p className="mt-1 text-muted-foreground">{chunk.text}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground">No chunks retrieved.</p>
           )}
-        </div>
+        </dd>
       </div>
-      <div className="absolute -inset-4 bg-gradient-to-r from-cyan-600 to-blue-600 opacity-30 blur-2xl -z-10 rounded-full pointer-events-none" />
-    </div>
-  );
-};
+    </dl>
+
+    {evaluationMetrics && (
+      <div className="border-t border-border">
+        {(["chunk_evaluation", "response_evaluation"] as const).map((section) => {
+          const sectionData = evaluationMetrics[section];
+          if (!sectionData || Object.keys(sectionData).length === 0) return null;
+
+          return (
+            <table key={section} className="w-full border-b border-border text-sm last:border-b-0">
+              <caption className="sr-only">{SECTION_LABEL_MAP[section]} metrics</caption>
+              <tbody>
+                <tr>
+                  <th
+                    scope="row"
+                    className="w-24 border-r border-border px-4 py-3 text-left align-top text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                  >
+                    {SECTION_LABEL_MAP[section]}
+                  </th>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+                      {Object.entries(sectionData).map(([key, value]) => (
+                        <span key={key} className="text-muted-foreground">
+                          {getMetricLabel(key)}{" "}
+                          <span className="font-mono text-foreground tabular">
+                            {formatMetricValue(value as number)}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          );
+        })}
+      </div>
+    )}
+  </article>
+);
 
 export default DeepAnalysisCard;

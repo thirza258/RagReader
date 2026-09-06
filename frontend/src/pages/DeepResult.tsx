@@ -166,6 +166,12 @@ const DeepResult: React.FC = () => {
           setRunState({ isRunning: true, completed: 0, total: 0 });
           await service.poolGroundTruthChunks(conversationId, {
             top_n: config.pool_top_n,
+            // The same RRF constant the hybrid pipeline fuses with, so the
+            // pooled ground truth and the run agree on how rank is weighted.
+            rrf_k: config.rrf_k,
+            // And the same engine configuration, so the consensus is built by
+            // the retrievers this run is about to be scored against.
+            config,
           });
         }
 
@@ -282,14 +288,19 @@ const DeepResult: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // The sidebar's "Run Deep Analysis" button.
+  // The sidebar's "Run Deep Analysis" and "Stop Analysis" buttons.
+  //
+  // These two effects react to a *signal* from the layout — a nonce and a
+  // counter — rather than to derived state, which is why they set state in the
+  // effect body. The sidebar owns the config and this page owns the socket;
+  // turning the signals into callbacks would mean reworking that contract.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!analysisRequest) return;
     runAnalysis(analysisRequest.config);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisRequest?.nonce]);
 
-  // The sidebar's "Stop Analysis" button.
   useEffect(() => {
     if (stopSignal === 0) return;
     closeSocket();
@@ -297,10 +308,11 @@ const DeepResult: React.FC = () => {
     setRunState({ isRunning: false, completed: resultCountRef.current, total: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopSignal]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!conversationId) {
     return (
-      <div className="text-center py-12 text-gray-400">
+      <div className="py-12 text-center text-sm text-muted-foreground">
         No conversation ID provided.
       </div>
     );
@@ -308,18 +320,19 @@ const DeepResult: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border pb-3 text-sm text-muted-foreground">
         <span className="flex items-center gap-2">
           <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              isConnected ? "bg-green-500 animate-pulse" : "bg-gray-400"
+            aria-hidden="true"
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              isConnected ? "bg-status-success" : "bg-border"
             }`}
           />
-          {isConnected ? "Receiving results…" : "Connection closed"}
+          {isConnected ? "Receiving results" : "Connection closed"}
         </span>
 
         {activeConfig && (
-          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs">
+          <span className="font-mono text-xs">
             Top-K {activeConfig.top_k} ·{" "}
             {activeConfig.ground_truth_mode === "pooled"
               ? `pooled ground truth (top ${activeConfig.pool_top_n})`
@@ -329,13 +342,13 @@ const DeepResult: React.FC = () => {
       </div>
 
       {runError && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           {runError}
         </div>
       )}
 
       {results.length === 0 && isConnected && (
-        <div className="text-center py-12 text-gray-400 animate-pulse">
+        <div className="py-12 text-center text-sm text-muted-foreground">
           Waiting for analysis results…
         </div>
       )}
@@ -345,9 +358,9 @@ const DeepResult: React.FC = () => {
           <div key={`${item.method}-${index}`} className="overflow-hidden">
             {progress[item.method] !== undefined &&
               progress[item.method] < 100 && (
-                <div className="mb-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+                <div className="mb-1 h-[3px] w-full overflow-hidden bg-muted">
                   <div
-                    className="h-full bg-blue-500 transition-all"
+                    className="h-full bg-foreground/60 transition-all"
                     style={{ width: `${progress[item.method]}%` }}
                   />
                 </div>

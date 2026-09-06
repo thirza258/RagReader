@@ -112,6 +112,16 @@ export interface DeepAnalysisConfig {
   top_k: number;
   ground_truth_mode: GroundTruthMode;
   pool_top_n: number;
+  /** Sampling temperature for every generation in the run. */
+  temperature: number;
+  /** How many candidates Hybrid's sub-engines feed the reranker. */
+  child_top_k: number;
+  /** The RRF constant, for Hybrid fusion and candidate pooling. */
+  rrf_k: number;
+  /** Cross-encoder id, from the server's closed `rerankers` list. */
+  reranker_model: string;
+  /** OpenRouter id of the model that scores faithfulness/relevance/coverage. */
+  judge_model: string;
 }
 
 export interface AnalysisOption {
@@ -121,14 +131,62 @@ export interface AnalysisOption {
   provider?: string;
 }
 
+/** A generation model as the server describes it.
+ *
+ * `models` is the live OpenRouter catalogue when it can be reached, so this
+ * list is long and changes over time. Any well-formed OpenRouter id runs
+ * whether or not it appears here — the list is a convenience, not the
+ * permitted set.
+ */
+export interface CatalogModel extends AnalysisOption {
+  provider?: string;
+  context_length?: number | null;
+  /** USD per prompt token, when OpenRouter reports one. */
+  prompt_price?: number | null;
+  /** USD per completion token, when OpenRouter reports one. */
+  completion_price?: number | null;
+  /** True for the three models this project ships with. */
+  is_default?: boolean;
+}
+
+export interface NumericRange {
+  min: number;
+  max: number;
+  default: number;
+}
+
 /** Served by GET /analysis-config/ — never hardcode these in the UI. */
 export interface AnalysisConfigOptions {
   retrieval_methods: AnalysisOption[];
-  models: AnalysisOption[];
+  models: CatalogModel[];
+  /** The ids pre-selected when nothing else is chosen. */
+  default_models: string[];
+  /** Where `models` came from, so the UI can say so. */
+  model_catalog: {
+    source: "openrouter" | "defaults";
+    count: number;
+    error: string | null;
+  };
+  /** Cross-encoders. Closed, unlike the generation models. */
+  rerankers: AnalysisOption[];
   ground_truth_modes: AnalysisOption[];
-  top_k: { min: number; max: number; default: number };
-  pool_top_n: { min: number; max: number; default: number };
+  top_k: NumericRange;
+  pool_top_n: NumericRange;
+  temperature: NumericRange;
+  child_top_k: NumericRange;
+  rrf_k: NumericRange;
+  judge_model: { default: string };
+  /** Applied once at ingest and read-only here — reported so the UI can
+   *  show the real values rather than repeating hardcoded ones. */
+  ingest: {
+    embedding_model: string;
+    chunk_strategy: string;
+    chunk_size: number;
+    overlap: number;
+    vector_store_path?: string;
+  };
   defaults: DeepAnalysisConfig;
+  /** Hard ceiling on methods x models for one run. */
   max_variants: number;
 }
 

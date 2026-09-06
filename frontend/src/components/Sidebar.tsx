@@ -69,139 +69,100 @@ const Sidebar: React.FC = () => {
   },[usernameFromStorage, navigate]);
 
   return (
-    <div className="w-1/3 min-w-[300px] max-w-[400px] h-full flex flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))] shadow-xl z-10">
-      <div className="p-4 border-b border-[hsl(var(--border))]">
-        <h2 className="text-xl font-bold tracking-tight text-[hsl(var(--foreground))]">
-          Context Details
-        </h2>
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">
-          Metadata & Session History
+    <aside className="z-10 flex h-full w-1/3 min-w-[300px] max-w-[380px] flex-col border-r border-border bg-muted">
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="font-serif text-lg font-semibold">Context</h2>
+        <p className="text-xs text-muted-foreground">
+          Document metadata and session history
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="custom-scrollbar flex-1 space-y-8 overflow-y-auto px-5 py-5">
         <section>
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-[hsl(var(--primary))] mb-3">
-            Current Active Content
+          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Active document
           </h3>
 
-          {/* SAFEGUARD: added safe optional chaining files?.length */}
           {!files?.length ? (
-            <div className="p-4 rounded-lg bg-[hsl(var(--muted))] border border-dashed border-[hsl(var(--border))] text-center">
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                No active content selected.
-              </p>
-            </div>
+            <p className="mt-3 border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
+              No active content selected.
+            </p>
           ) : (
-            <div className="space-y-4">
+            <div className="mt-3 space-y-4">
               {files.map((file) => (
-                <div
-                  key={file.id}
-                  className="p-4 rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] shadow-sm relative overflow-hidden"
-                >
-                  <div className="absolute top-0 left-0 w-1 h-full bg-[hsl(var(--primary))]"></div>
-                  <div className="flex items-center mb-2">
-                    <span className="bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-xs px-2 py-1 rounded">
-                      FILE
-                    </span>
+                <dl key={file.id} className="border-t border-border text-sm">
+                  <div className="border-b border-border py-2">
+                    <dt className="text-xs text-muted-foreground">Name</dt>
+                    <dd className="truncate font-medium" title={file.name}>
+                      {file.name}
+                    </dd>
                   </div>
-
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold">
-                        File Name
-                      </p>
-                      <p className="text-sm font-medium truncate" title={file.name}>
-                        {file.name}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold">
-                          Type
-                        </p>
-                        <p className="text-sm truncate" title={file.source_type}>
-                          {file.source_type || "Unknown"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold">
-                          Date Added
-                        </p>
-                        <p className="text-sm">
-                          {file.created_at ? new Date(file.created_at).toLocaleDateString() : "Unknown"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold">
-                        Source Path
-                      </p>
-                      <p className="text-sm truncate" title={file.source_path}>
-                        {file.source_path || "N/A"}
-                      </p>
-                    </div>
+                  <div className="border-b border-border py-2">
+                    <dt className="text-xs text-muted-foreground">Type</dt>
+                    <dd className="truncate" title={file.source_type}>
+                      {file.source_type || "Unknown"}
+                    </dd>
                   </div>
-                </div>
+                  <div className="border-b border-border py-2">
+                    <dt className="text-xs text-muted-foreground">Added</dt>
+                    <dd>
+                      {file.created_at
+                        ? new Date(file.created_at).toLocaleDateString()
+                        : "Unknown"}
+                    </dd>
+                  </div>
+                  <div className="border-b border-border py-2">
+                    <dt className="text-xs text-muted-foreground">Source</dt>
+                    <dd className="truncate" title={file.source_path}>
+                      {file.source_path || "N/A"}
+                    </dd>
+                  </div>
+                </dl>
               ))}
             </div>
           )}
         </section>
 
-        <hr className="border-[hsl(var(--border))]" />
-
         <section>
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">
-              Recent History
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Recent history
             </h3>
-            {/* SAFEGUARD: Fallback to 0 if history is undefined */}
-            <span className="text-xs text-[hsl(var(--muted-foreground))]">
-              {history?.length || 0} Items
+            <span className="font-mono text-xs text-muted-foreground tabular">
+              {history?.length || 0}
             </span>
           </div>
 
-          {/* SAFEGUARD: properly checks optional chaining */}
           {!history?.length ? (
-            <p className="text-sm text-[hsl(var(--muted-foreground))] italic">
-              No recent history.
-            </p>
+            <p className="mt-3 text-sm text-muted-foreground">No recent history.</p>
           ) : (
-            <div className="space-y-2">
+            <ul className="mt-3 border-t border-border">
               {history.map((item, index) => (
-                <div
+                <li
                   key={index}
-                  className="group p-3 rounded-md border border-transparent hover:border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))] cursor-pointer transition-all duration-200"
+                  className="cursor-pointer border-b border-border py-3 transition-colors hover:bg-accent"
                 >
-                  <div className="flex justify-between items-start">
-                    <p
-                      className="text-sm font-medium group-hover:text-[hsl(var(--primary))] transition-colors truncate pr-2"
-                      title={item.query}
-                    >
-                      {item.query}
-                    </p>
-                    <span className="text-[10px] bg-[hsl(var(--muted))] border border-[hsl(var(--border))] px-1 rounded text-[hsl(var(--muted-foreground))] whitespace-nowrap">
-                      Chat
-                    </span>
-                  </div>
+                  <p className="truncate text-sm font-medium" title={item.query}>
+                    {item.query}
+                  </p>
                   <p
-                    className="text-xs text-[hsl(var(--muted-foreground))] mt-1 line-clamp-2"
+                    className="mt-1 line-clamp-2 text-xs text-muted-foreground"
                     title={item.response}
                   >
                     {item.response}
                   </p>
-                  <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-2 opacity-70">
-                    {item.created_at ? new Date(item.created_at).toLocaleString() : "Unknown"}
+                  <p className="mt-1.5 font-mono text-[11px] text-muted-foreground">
+                    {item.created_at
+                      ? new Date(item.created_at).toLocaleString()
+                      : "Unknown"}
                   </p>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </section>
       </div>
-    </div>
+    </aside>
   );
 };
 

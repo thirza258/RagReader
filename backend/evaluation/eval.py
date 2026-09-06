@@ -3,6 +3,7 @@ import re
 from rouge_score import rouge_scorer
 
 from ai_handler.llm import MistralLLM
+from common.constant import DEFAULT_JUDGE_MODEL
 
 def calculate_recall_K(chunks, ground_truth_chunks):
     """
@@ -146,7 +147,7 @@ def _parse_llm_score(raw_response: str, key: str) -> float:
     return score / 5.0
 
 
-def evaluate_response(response, ground_truth_response, chunks=None):
+def evaluate_response(response, ground_truth_response, chunks=None, judge_model=None):
     """
     Evaluasi jawaban dengan menghitung ROUGE-L Score, Faithfulness,
     Answer Relevance, dan Answer Coverage.
@@ -155,6 +156,10 @@ def evaluate_response(response, ground_truth_response, chunks=None):
         response (str): Jawaban dari AI.
         ground_truth_response (str): Jawaban yang benar (ground truth).
         chunks (list, optional): List teks chunk yang diretrieve.
+        judge_model (str, optional): OpenRouter id of the judging model.
+            Defaults to DEFAULT_JUDGE_MODEL. Three of the six answer metrics
+            come from this one model, so which model it is belongs in the run
+            configuration rather than hardcoded here.
 
     Returns:
         dict: Dictionary berisi skor ROUGE-L Precision, Recall, F1,
@@ -167,7 +172,7 @@ def evaluate_response(response, ground_truth_response, chunks=None):
         relevance_prompt = build_relevance_prompt(response, "\n".join(chunks) if chunks else "")
         coverage_prompt = build_coverage_prompt(response, "\n".join(chunks) if chunks else "")
 
-        mistral = MistralLLM()
+        mistral = MistralLLM(model=judge_model or DEFAULT_JUDGE_MODEL)
 
         def _llm_score(prompt: str, key: str) -> float:
             try:

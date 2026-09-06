@@ -6,7 +6,6 @@ import uuid
 from typing import Dict, Any
 from pipeline.base_pipeline import BasePipeline
 from sparse_rag.sparse_rag import SparseRAG
-from ai_handler.llm import OpenAILLM
 from common.chunker import DocumentChunker
 from utils.insert_file import DataLoader 
 from router.models import (
@@ -23,6 +22,14 @@ from evaluation.models import (
     GroundTruthResponse
 )
 from evaluation.eval import evaluate_chunks, evaluate_response
+from common.constant import (
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CHUNK_STRATEGY,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_VECTOR_STORE_PATH,
+)
 logger = logging.getLogger(__name__)
 
 class SparseRAGPipeline(BasePipeline):
@@ -32,18 +39,18 @@ class SparseRAGPipeline(BasePipeline):
         self.method = "sparse"
         self.rag = SparseRAG(config)
 
-        self.llm = self._initialize_llm(config.get("llm_model", "openai"))
+        self.llm = self._initialize_llm(config.get("llm_model", DEFAULT_CHAT_MODEL))
 
         self.chunker = DocumentChunker(
-            strategy=config.get("chunk_strategy", "paragraph"),
-            chunk_size=config.get("chunk_size", 500),
-            overlap=config.get("overlap", 50),
+            strategy=config.get("chunk_strategy", DEFAULT_CHUNK_STRATEGY),
+            chunk_size=config.get("chunk_size", DEFAULT_CHUNK_SIZE),
+            overlap=config.get("overlap", DEFAULT_CHUNK_OVERLAP),
             embedding_client=None
         )
 
         self.loader = DataLoader()
 
-        self.vector_store_root = config.get("vector_store_path", "./vector_stores")
+        self.vector_store_root = config.get("vector_store_path", DEFAULT_VECTOR_STORE_PATH)
         os.makedirs(self.vector_store_root, exist_ok=True)
 
     def _save_state(self, path: str):
@@ -246,7 +253,12 @@ class SparseRAGPipeline(BasePipeline):
 
         ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
         if ground_truth_response:
-            evaluation_response_result = evaluate_response(result["answer"], ground_truth_response.response, chunks=[doc["text"] for doc in result.get("context", [])])
+            evaluation_response_result = evaluate_response(
+                result["answer"],
+                ground_truth_response.response,
+                chunks=[doc["text"] for doc in result.get("context", [])],
+                judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
+            )
         else:
             logger.warning(f"No ground truth response for conversation {conversation_id}")
 

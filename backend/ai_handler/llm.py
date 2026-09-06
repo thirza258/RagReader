@@ -1,11 +1,35 @@
-from common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
+"""LLM access — all of it through OpenRouter.
+
+Generation, query rewriting and LLM-judged evaluation all speak to the same
+OpenAI-compatible endpoint with one API key, so a model is fully described by
+its OpenRouter id (``provider/model``). There is no per-provider behaviour to
+implement: the provider-named classes below differ only in the default id they
+carry, and exist so call sites can stay readable.
+
+Because nothing is provider-specific, *any* id OpenRouter serves works here.
+`common.constant.is_valid_model_id` checks the shape; OpenRouter itself is the
+authority on whether the model exists, and says so in the error it returns.
+"""
 from abc import ABC, abstractmethod
 from typing import Optional
+
 from django.conf import settings
 from openai import OpenAI
 
-# All LLMs are routed through OpenRouter using a single API key.
-# Provider-specific classes just set the appropriate model prefix.
+from common.constant import (
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_JUDGE_MODEL,
+    is_valid_model_id,
+)
+from common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+# OpenRouter attributes traffic by these; they are cosmetic, not auth.
+OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://rag.nevatal.tech",
+    "X-Title": "RagReader",
+}
 
 
 class BaseLLM(ABC):
@@ -39,18 +63,25 @@ class BaseLLM(ABC):
         return self._call_api(formatted_prompt)
 
 
-class OpenRouterBase(BaseLLM):
-    """Base class for OpenRouter-routed models using the OpenAI-compatible API."""
+class OpenRouterLLM(BaseLLM):
+    """Any OpenRouter-served model, reached over the OpenAI-compatible API."""
 
-    def __init__(self, model: str, temperature: float = 0.0, api_key: str = ""):
+    def __init__(
+        self,
+        model: str = DEFAULT_CHAT_MODEL,
+        temperature: float = 0.0,
+        api_key: str = "",
+    ):
+        if not is_valid_model_id(model):
+            raise ValueError(
+                f"'{model}' is not a valid OpenRouter model id — "
+                "expected the form 'provider/model', e.g. 'openai/gpt-4o-mini'."
+            )
         super().__init__(model, temperature, api_key)
         self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url=OPENROUTER_BASE_URL,
             api_key=self.api_key,
-            default_headers={
-                "HTTP-Referer": "https://rag.nevatal.tech",
-                "X-Title": "RagReader",
-            },
+            default_headers=OPENROUTER_HEADERS,
         )
 
     def _call_api(self, prompt: str) -> str:
@@ -74,25 +105,33 @@ class OpenRouterBase(BaseLLM):
             raise RuntimeError(f"OpenRouter call failed ({self.model}): {e}") from e
 
 
-class OpenAILLM(OpenRouterBase):
+# ── Named defaults ───────────────────────────────────────────────────────────
+# Kept as separate classes because call sites read better as `MistralLLM()`
+# than `OpenRouterLLM("mistralai/mistral-nemo")`. They add no behaviour, and a
+# model id from any provider works through any of them.
+
+OpenRouterBase = OpenRouterLLM  # pre-existing name, kept for imports
+
+
+class OpenAILLM(OpenRouterLLM):
     """OpenAI models via OpenRouter (e.g. openai/gpt-4o, openai/gpt-4o-mini)."""
     def __init__(self, model: str = "openai/gpt-4o", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
 
 
-class ClaudeLLM(OpenRouterBase):
-    """Anthropic models via OpenRouter (e.g. anthropic/claude-3.5-sonnet)."""
+class ClaudeLLM(OpenRouterLLM):
+    """Anthropic models via OpenRouter (e.g. anthropic/claude-haiku-4.5)."""
     def __init__(self, model: str = "anthropic/claude-3.5-sonnet", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
 
 
-class GeminiLLM(OpenRouterBase):
-    """Google models via OpenRouter (e.g. google/gemini-2.0-flash)."""
+class GeminiLLM(OpenRouterLLM):
+    """Google models via OpenRouter (e.g. google/gemini-3-flash-preview)."""
     def __init__(self, model: str = "google/gemini-2.0-flash", temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)
 
 
-class MistralLLM(OpenRouterBase):
-    """Mistral models via OpenRouter (e.g. mistralai/mistral-nemo)."""
-    def __init__(self, model: str = "mistralai/mistral-nemo", temperature: float = 0.0, api_key: str = ""):
+class MistralLLM(OpenRouterLLM):
+    """Mistral models via OpenRouter — the default evaluation judge."""
+    def __init__(self, model: str = DEFAULT_JUDGE_MODEL, temperature: float = 0.0, api_key: str = ""):
         super().__init__(model, temperature, api_key)

@@ -4,72 +4,50 @@ import SEO from "../components/SEO";
 
 const Docs: React.FC = () => {
   return (
-    <div className="my-12 min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-primary-foreground">
+    <div className="min-h-screen bg-background text-foreground">
       <SEO
         title="Walkthrough Guide — RAGReader Step-by-Step"
         description="Learn how to upload documents, ask questions, select ground truth, and run 9-pipeline RAG benchmarks step-by-step with screenshots."
         canonicalUrl="https://rag.nevatal.tech/docs"
       />
 
-      <main className="container mx-auto px-4 py-12 max-w-5xl">
-        <header className="mb-12 pt-12 max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-400 mb-3">
-            Walkthrough Guide
-          </p>
-          <h1 className="text-4xl font-bold text-foreground mb-4">
-            RAGReader, step by step
-          </h1>
-          <p className="text-lg text-muted-foreground leading-relaxed">
+      <main className="container mx-auto max-w-4xl px-6 pb-24 pt-28">
+        <header className="border-b border-border pb-12">
+          <h1 className="text-4xl font-semibold">RAGReader, step by step</h1>
+          <p className="prose-note measure mt-4">
             Every screen you'll pass through, from signing in to reading the
             evaluation metrics for each retrieval method and model.
           </p>
         </header>
 
-        <div className="relative border-l border-border ml-4 md:ml-6 space-y-12">
+        <ol>
           {steps.map((step) => (
-            <div key={step.id} className="relative pl-8 md:pl-12">
-              {/* Timeline Dot */}
-              <div className="absolute -left-[20px] top-0 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card shadow-sm ring-4 ring-background">
-                <span className="text-primary font-bold text-sm">
-                  {step.id}
-                </span>
+            <li key={step.id} className="grid gap-6 border-b border-border py-10 md:grid-cols-2 md:gap-10">
+              <div>
+                <p className="font-mono text-sm text-muted-foreground tabular">
+                  {String(step.id).padStart(2, "0")}
+                </p>
+                <h2 className="mt-2 text-xl font-semibold">{step.title}</h2>
+                <p className="prose-note mt-3 text-base">{step.description}</p>
               </div>
 
-              {/* Content Card */}
-              <div className="grid gap-6 md:grid-cols-2 bg-card/50 border border-border rounded-lg p-6 hover:border-primary/50 transition-colors duration-300">
-                {/* Text Content */}
-                <div className="flex flex-col justify-center space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-md bg-accent text-primary">
-                      {step.icon}
-                    </div>
-                    <h2 className="text-2xl font-bold text-foreground">
-                      {step.title}
-                    </h2>
-                  </div>
-                  <p className="text-muted-foreground leading-relaxed">
-                    {step.description}
-                  </p>
-                </div>
-
-                {/* Image Content */}
-                <div className="relative rounded-lg overflow-hidden border border-border bg-muted/30 aspect-video group cursor-pointer">
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-transparent transition-all z-10">
-                    <span className="sr-only">View Screenshot</span>
-                  </div>
+              <figure className="border border-border">
+                {step.imagePath ? (
                   <img
-                    src={
-                      step.imagePath ||
-                      `https://placehold.co/600x400/0f172a/06b6d4?text=${encodeURIComponent(step.imagePlaceholderText)}`
-                    }
+                    src={step.imagePath}
                     alt={step.imageAlt}
-                    className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                    loading="lazy"
+                    className="aspect-video w-full object-cover"
                   />
-                </div>
-              </div>
-            </div>
+                ) : (
+                  <div className="flex aspect-video w-full items-center justify-center bg-muted px-4 text-center text-xs text-muted-foreground">
+                    {step.imagePlaceholderText}
+                  </div>
+                )}
+              </figure>
+            </li>
           ))}
-        </div>
+        </ol>
       </main>
     </div>
   );

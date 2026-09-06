@@ -282,7 +282,7 @@ class AnalysisConsumerTests(TransactionTestCase):
         batch = self.make_batch(models=(GPT, GEMINI))
         engine = make_engine()
 
-        def get_engine(method, model):
+        def get_engine(method, model, config=None):
             if model == GPT:
                 raise ValueError("Engine not found")
             return engine

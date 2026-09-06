@@ -29,21 +29,31 @@ from common.schema import get_responses
 from common.chunker import DocumentChunker
 from common.constant import (
     CONFIG_VARIANTS,
+    DEFAULT_CHAT_VARIANT,
+    DEFAULT_CHILD_TOP_K,
+    DEFAULT_JUDGE_MODEL,
     DEFAULT_POOL_TOP_N,
+    DEFAULT_RERANKER_MODEL,
+    DEFAULT_TEMPERATURE,
     DEFAULT_TOP_K,
+    MAX_VARIANTS,
     METHOD_IDS,
     MODEL_IDS,
     POOL_TOP_N_MAX,
     POOL_TOP_N_MIN,
+    TEMPERATURE_MAX,
     TOP_K_MAX,
     TOP_K_MIN,
+    build_pipeline_config,
     build_variants,
+    is_valid_model_id,
     normalize_analysis_config,
 )
 from rag.rag_service import apply_retrieval_depth
 from pipeline.base_pipeline import BasePipeline
 from dense_rag.dense_rag import DenseRAG
-from ai_handler.llm import OpenAILLM
+from ai_handler.llm import OpenRouterLLM
+from ai_handler.model_catalog import default_catalog, fetch_catalog
 
 TEST_MEDIA_ROOT = tempfile.mkdtemp(prefix="ragreader-test-media-")
 LOCMEM_CACHE = {
@@ -547,7 +557,7 @@ class BasePipelineHelperTests(TestCase):
         stub = mock.Mock(config={})
         with override_settings(OPENROUTER_API_KEY="test-key"):
             llm = BasePipeline._initialize_llm(stub, "openai/gpt-4o-mini")
-        self.assertIsInstance(llm, OpenAILLM)
+        self.assertIsInstance(llm, OpenRouterLLM)
         self.assertEqual(llm.model, "openai/gpt-4o-mini")
 
     def test_initialize_llm_rejects_unknown_models(self):
@@ -627,13 +637,15 @@ class AnalysisConfigTests(TestCase):
         config = normalize_analysis_config({"ground_truth_mode": "vibes"})
         self.assertEqual(config["ground_truth_mode"], "manual")
 
-    def test_first_variant_is_still_dense_gpt4o_mini(self):
-        # OpenChatView and QueryView both index CONFIG_VARIANTS[0] for the
-        # standard (non-deep) chat path.
+    def test_the_chat_variant_is_still_dense_gpt4o_mini(self):
+        # OpenChatView and QueryView both use DEFAULT_CHAT_VARIANT for the
+        # standard (non-deep) chat path. It used to be CONFIG_VARIANTS[0]; the
+        # pair is named now precisely so it can't drift when the matrix does.
         self.assertEqual(
-            CONFIG_VARIANTS[0],
+            DEFAULT_CHAT_VARIANT,
             {"method": "Dense Retrieval", "model": "openai/gpt-4o-mini"},
         )
+        self.assertEqual(DEFAULT_CHAT_VARIANT, CONFIG_VARIANTS[0])
 
 
 class RetrievalDepthTests(TestCase):
@@ -748,9 +760,12 @@ class HybridChildDepthTests(TestCase):
         # rerank until apply_retrieval_depth happened to be called.
         import hybrid_rag.hybrid_rag as hybrid_module
 
+        hybrid_module.clear_cross_encoder_cache()
+        self.addCleanup(hybrid_module.clear_cross_encoder_cache)
+
         with mock.patch.object(hybrid_module, "SparseRAG") as sparse_cls, \
              mock.patch.object(hybrid_module, "DenseRAG") as dense_cls, \
-             mock.patch.object(hybrid_module, "CrossEncoder"):
+             mock.patch.object(hybrid_module, "OllamaCrossEncoder"):
             engine = hybrid_module.HybridRAG({"top_k": 5, "child_top_k": 10})
 
         self.assertEqual(engine.final_top_k, 5)
@@ -762,10 +777,13 @@ class HybridChildDepthTests(TestCase):
     def test_caller_config_is_not_mutated(self):
         import hybrid_rag.hybrid_rag as hybrid_module
 
+        hybrid_module.clear_cross_encoder_cache()
+        self.addCleanup(hybrid_module.clear_cross_encoder_cache)
+
         config = {"top_k": 5, "child_top_k": 10}
         with mock.patch.object(hybrid_module, "SparseRAG"), \
              mock.patch.object(hybrid_module, "DenseRAG"), \
-             mock.patch.object(hybrid_module, "CrossEncoder"):
+             mock.patch.object(hybrid_module, "OllamaCrossEncoder"):
             hybrid_module.HybridRAG(config)
 
         # RAGRegistry hands the same dict shape to every variant.
@@ -794,16 +812,283 @@ class PoolTopNConfigTests(TestCase):
         self.assertGreater(DEFAULT_POOL_TOP_N, DEFAULT_TOP_K)
 
 
+class OpenModelSelectionTests(TestCase):
+    """Any OpenRouter model is runnable; the shipped three are just defaults."""
+
+    def test_a_model_outside_the_defaults_survives_normalization(self):
+        # The old contract dropped unrecognised ids, which is exactly what made
+        # the selector a fixed list of three.
+        config = normalize_analysis_config({"models": ["deepseek/deepseek-chat"]})
+        self.assertEqual(config["models"], ["deepseek/deepseek-chat"])
+
+    def test_the_order_the_client_sent_is_kept(self):
+        # MAX_VARIANTS trims from the end, so order is not cosmetic.
+        chosen = ["z/last", "a/first"]
+        self.assertEqual(normalize_analysis_config({"models": chosen})["models"], chosen)
+
+    def test_malformed_ids_are_dropped_not_run(self):
+        config = normalize_analysis_config(
+            {"models": ["openai/gpt-4o-mini", "no-slash", "", None, 42]}
+        )
+        self.assertEqual(config["models"], ["openai/gpt-4o-mini"])
+
+    def test_a_selection_of_only_junk_falls_back_to_the_defaults(self):
+        self.assertEqual(normalize_analysis_config({"models": ["???"]})["models"], MODEL_IDS)
+
+    def test_duplicates_are_collapsed(self):
+        config = normalize_analysis_config(
+            {"models": ["openai/gpt-4o-mini", "openai/gpt-4o-mini"]}
+        )
+        self.assertEqual(config["models"], ["openai/gpt-4o-mini"])
+
+    def test_model_id_shape(self):
+        for good in (
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o-mini-2024-07-18",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "x-ai/grok-2",
+        ):
+            self.assertTrue(is_valid_model_id(good), good)
+
+        for bad in ("", "gpt-4o", "openai/", "/gpt-4o", "open ai/gpt", None, 7, "a/" + "x" * 200):
+            self.assertFalse(is_valid_model_id(bad), repr(bad))
+
+
+class VariantCapTests(TestCase):
+    """One variant is a full retrieve-generate-judge cycle, so the matrix is capped."""
+
+    def test_the_default_matrix_still_fits(self):
+        # Nine (3 methods x 3 models) must stay reachable or the shipped
+        # defaults would be silently trimmed on every run.
+        self.assertEqual(len(build_variants(None)), len(CONFIG_VARIANTS))
+
+    def test_too_many_models_are_trimmed_rather_than_run(self):
+        many = [f"vendor/model-{n}" for n in range(40)]
+        config = normalize_analysis_config({"methods": METHOD_IDS, "models": many})
+        self.assertLessEqual(len(config["methods"]) * len(config["models"]), MAX_VARIANTS)
+        self.assertEqual(config["models"], many[: len(config["models"])])
+
+    def test_narrowing_the_methods_buys_more_models(self):
+        many = [f"vendor/model-{n}" for n in range(40)]
+        one_method = normalize_analysis_config(
+            {"methods": ["Hybrid Retrieval"], "models": many}
+        )
+        all_methods = normalize_analysis_config({"methods": METHOD_IDS, "models": many})
+        self.assertGreater(len(one_method["models"]), len(all_methods["models"]))
+
+    def test_the_variant_list_never_exceeds_the_cap(self):
+        many = [f"vendor/model-{n}" for n in range(40)]
+        variants = build_variants({"methods": METHOD_IDS, "models": many})
+        self.assertLessEqual(len(variants), MAX_VARIANTS)
+
+
+class PerRunKnobTests(TestCase):
+    """The Tier-A settings the sidebar can change, and their clamps."""
+
+    def test_defaults_are_filled_in_for_a_config_that_predates_them(self):
+        # AnalysisBatch.config rows written before these keys existed must
+        # still replay rather than KeyError.
+        config = normalize_analysis_config({"methods": METHOD_IDS, "top_k": 5})
+        self.assertEqual(config["temperature"], DEFAULT_TEMPERATURE)
+        self.assertEqual(config["child_top_k"], DEFAULT_CHILD_TOP_K)
+        self.assertEqual(config["reranker_model"], DEFAULT_RERANKER_MODEL)
+        self.assertEqual(config["judge_model"], DEFAULT_JUDGE_MODEL)
+
+    def test_temperature_is_clamped_and_junk_tolerated(self):
+        self.assertEqual(normalize_analysis_config({"temperature": 99})["temperature"], TEMPERATURE_MAX)
+        self.assertEqual(normalize_analysis_config({"temperature": -1})["temperature"], 0.0)
+        self.assertEqual(
+            normalize_analysis_config({"temperature": "hot"})["temperature"],
+            DEFAULT_TEMPERATURE,
+        )
+        self.assertEqual(normalize_analysis_config({"temperature": 0.7})["temperature"], 0.7)
+
+    def test_an_unknown_reranker_falls_back_to_the_default(self):
+        # Rerankers run on this server rather than through OpenRouter, so the
+        # set is closed: an arbitrary string would be an arbitrary download.
+        config = normalize_analysis_config({"reranker_model": "evil/backdoor"})
+        self.assertEqual(config["reranker_model"], DEFAULT_RERANKER_MODEL)
+
+    def test_the_judge_model_is_open_like_any_other_model(self):
+        config = normalize_analysis_config({"judge_model": "qwen/qwen-2.5-72b-instruct"})
+        self.assertEqual(config["judge_model"], "qwen/qwen-2.5-72b-instruct")
+        self.assertEqual(
+            normalize_analysis_config({"judge_model": "nonsense"})["judge_model"],
+            DEFAULT_JUDGE_MODEL,
+        )
+
+    def test_pipeline_config_merges_ingest_defaults_with_run_choices(self):
+        built = build_pipeline_config({"temperature": 0.4}, "deepseek/deepseek-chat")
+        self.assertEqual(built["llm_model"], "deepseek/deepseek-chat")
+        self.assertEqual(built["temperature"], 0.4)
+        # Both spellings of the embedding model resolve to the same value.
+        self.assertEqual(built["embedding_model"], built["model"])
+        self.assertIn("chunk_size", built)
+
+    def test_pipeline_config_refuses_to_pass_a_malformed_model_through(self):
+        built = build_pipeline_config(None, "not-a-model")
+        self.assertTrue(is_valid_model_id(built["llm_model"]))
+
+
+@override_settings(CACHES=LOCMEM_CACHE)
+class ModelCatalogTests(TestCase):
+    """The selector's list: live when OpenRouter answers, defaults when not."""
+
+    OPENROUTER_PAYLOAD = {
+        "data": [
+            {
+                "id": "deepseek/deepseek-chat",
+                "name": "DeepSeek V3",
+                "context_length": 64000,
+                "pricing": {"prompt": "0.00000027", "completion": "0.0000011"},
+                "architecture": {"output_modalities": ["text"]},
+            },
+            {
+                "id": "openai/text-embedding-3-small",
+                "name": "Embedding",
+                "architecture": {"output_modalities": ["embedding"]},
+            },
+            {"id": "not a model id", "name": "Junk"},
+        ]
+    }
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def _fetch(self, **kwargs):
+        return fetch_catalog(**kwargs)
+
+    def test_a_live_catalogue_is_normalized(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = self.OPENROUTER_PAYLOAD
+        with mock.patch("ai_handler.model_catalog.requests.get", return_value=response):
+            result = self._fetch()
+
+        self.assertEqual(result["source"], "openrouter")
+        ids = [m["id"] for m in result["models"]]
+        self.assertIn("deepseek/deepseek-chat", ids)
+        # Embedding-only and malformed entries are not generation models.
+        self.assertNotIn("openai/text-embedding-3-small", ids)
+        self.assertNotIn("not a model id", ids)
+
+    def test_the_shipped_defaults_are_always_present_and_first(self):
+        # Losing one would silently change what the sidebar pre-selects.
+        response = mock.Mock(status_code=200)
+        response.json.return_value = self.OPENROUTER_PAYLOAD
+        with mock.patch("ai_handler.model_catalog.requests.get", return_value=response):
+            result = self._fetch()
+
+        ids = [m["id"] for m in result["models"]]
+        self.assertEqual(ids[: len(MODEL_IDS)], MODEL_IDS)
+
+    def test_pricing_and_context_are_carried_through(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = self.OPENROUTER_PAYLOAD
+        with mock.patch("ai_handler.model_catalog.requests.get", return_value=response):
+            result = self._fetch()
+
+        entry = next(m for m in result["models"] if m["id"] == "deepseek/deepseek-chat")
+        self.assertEqual(entry["context_length"], 64000)
+        self.assertAlmostEqual(entry["prompt_price"], 0.00000027)
+        self.assertEqual(entry["provider"], "DeepSeek")
+        self.assertFalse(entry["is_default"])
+
+    def test_a_network_failure_falls_back_to_the_defaults(self):
+        # The catalogue is a convenience; the selector must stay usable.
+        with mock.patch(
+            "ai_handler.model_catalog.requests.get", side_effect=OSError("no route")
+        ):
+            result = self._fetch()
+
+        self.assertEqual(result["source"], "defaults")
+        self.assertEqual([m["id"] for m in result["models"]], MODEL_IDS)
+        self.assertIn("no route", result["error"])
+
+    def test_an_unexpected_payload_falls_back_to_the_defaults(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {"unexpected": True}
+        with mock.patch("ai_handler.model_catalog.requests.get", return_value=response):
+            result = self._fetch()
+
+        self.assertEqual(result["source"], "defaults")
+
+    def test_a_successful_fetch_is_cached(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = self.OPENROUTER_PAYLOAD
+        with mock.patch(
+            "ai_handler.model_catalog.requests.get", return_value=response
+        ) as get:
+            fetch_catalog()
+            fetch_catalog()
+
+        self.assertEqual(get.call_count, 1)
+
+    def test_a_fallback_is_not_cached(self):
+        # Otherwise one blip would pin the short list for six hours.
+        response = mock.Mock(status_code=200)
+        response.json.return_value = self.OPENROUTER_PAYLOAD
+        with mock.patch(
+            "ai_handler.model_catalog.requests.get", side_effect=OSError("blip")
+        ):
+            self.assertEqual(fetch_catalog()["source"], "defaults")
+        with mock.patch(
+            "ai_handler.model_catalog.requests.get", return_value=response
+        ):
+            self.assertEqual(fetch_catalog()["source"], "openrouter")
+
+
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
 class AnalysisConfigEndpointTests(TestCase):
-    def test_config_endpoint_lists_real_model_ids(self):
-        resp = self.client.get("/api/v1/analysis-config/")
+    def _get_config(self, catalog=None):
+        """Fetch the endpoint with the catalogue stubbed.
+
+        Never let this test reach the network: on a machine with connectivity
+        it would assert against whatever OpenRouter happens to serve today.
+        """
+        catalog = catalog or {
+            "models": default_catalog(),
+            "source": "defaults",
+            "error": None,
+        }
+        with mock.patch("router.views.fetch_catalog", return_value=catalog):
+            resp = self.client.get("/api/v1/analysis-config/")
         self.assertEqual(resp.status_code, 200)
-        body = resp.json()
+        return resp.json()
+
+    def test_config_endpoint_lists_the_default_models_and_methods(self):
+        body = self._get_config()
         self.assertEqual([m["id"] for m in body["models"]], MODEL_IDS)
+        self.assertEqual(body["default_models"], MODEL_IDS)
         self.assertEqual([m["id"] for m in body["retrieval_methods"]], METHOD_IDS)
         self.assertEqual(body["top_k"]["default"], DEFAULT_TOP_K)
-        self.assertEqual(body["max_variants"], len(CONFIG_VARIANTS))
+        self.assertEqual(body["max_variants"], MAX_VARIANTS)
+        self.assertGreaterEqual(MAX_VARIANTS, len(CONFIG_VARIANTS))
+
+    def test_config_endpoint_serves_the_whole_per_run_option_set(self):
+        # The sidebar renders from this payload; a missing range means a
+        # control silently falls back to a hardcoded guess in the browser.
+        body = self._get_config()
+        self.assertEqual(body["temperature"]["default"], DEFAULT_TEMPERATURE)
+        self.assertEqual(body["temperature"]["max"], TEMPERATURE_MAX)
+        self.assertEqual(body["child_top_k"]["default"], DEFAULT_CHILD_TOP_K)
+        self.assertIn("rrf_k", body)
+        self.assertEqual(body["judge_model"]["default"], DEFAULT_JUDGE_MODEL)
+        self.assertIn(DEFAULT_RERANKER_MODEL, [r["id"] for r in body["rerankers"]])
+        # Ingest settings are reported so the UI can show what they actually
+        # are, but they are not part of the per-run config.
+        self.assertIn("embedding_model", body["ingest"])
+        self.assertNotIn("embedding_model", body["defaults"])
+
+    def test_config_endpoint_says_where_the_model_list_came_from(self):
+        body = self._get_config({
+            "models": default_catalog(),
+            "source": "defaults",
+            "error": "connection refused",
+        })
+        self.assertEqual(body["model_catalog"]["source"], "defaults")
+        self.assertEqual(body["model_catalog"]["error"], "connection refused")
+        self.assertEqual(body["model_catalog"]["count"], len(MODEL_IDS))
 
     def test_start_analysis_stores_the_chosen_config(self):
         user = make_user("alice")

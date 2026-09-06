@@ -14,7 +14,7 @@ const ChatLayout = () => {
       <NavBar />
       <div className="flex flex-1 overflow-hidden pt-16">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto bg-gray-100 relative">
+        <main className="relative flex-1 overflow-y-auto bg-background">
            <Outlet />
         </main>
       </div>
@@ -74,7 +74,7 @@ const DeepResultLayout = () => {
           }
           onStop={() => setStopSignal((n) => n + 1)}
         />
-        <main className="flex-1 overflow-y-auto relative ps-5">
+        <main className="relative flex-1 overflow-y-auto bg-background px-6 py-6">
            <Outlet
              context={{
                setIds: setSharedIds,

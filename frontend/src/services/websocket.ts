@@ -88,12 +88,22 @@ export function transformToAnalysisResult(
   if (!msg.answer) return null;
 
   const rawChunks = msg.context ?? (msg as { retrievedChunks?: unknown[] }).retrievedChunks ?? [];
+  // Chunks arrive from the server under either spelling of the id.
+  type RawChunk = {
+    chunk_id?: string | number;
+    id?: string | number;
+    text?: string;
+    score?: number;
+  };
   const chunks: RetrievedChunk[] = (Array.isArray(rawChunks) ? rawChunks : []).map(
-    (chunk: any) => ({
-      id: chunk.chunk_id ?? chunk.id ?? "NULL",
-      text: (chunk.text ?? "").trim(),
-      score: chunk.score,
-    })
+    (chunk) => {
+      const raw = (chunk ?? {}) as RawChunk;
+      return {
+        id: raw.chunk_id ?? raw.id ?? "NULL",
+        text: (raw.text ?? "").trim(),
+        score: raw.score,
+      };
+    }
   );
 
   return {

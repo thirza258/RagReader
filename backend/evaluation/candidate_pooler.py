@@ -327,23 +327,32 @@ def build_default_pooler(
     k: int = DEFAULT_RRF_K,
     top_n: int | None = DEFAULT_TOP_N,
     llm_model: str | None = None,
+    config: dict | None = None,
 ) -> CandidatePooler:
     """Build a pooler holding exactly one pipeline per retrieval method.
 
     All pipelines share a single LLM because the LLM affects only query
     rewriting and answer generation, never which chunks are retrieved.
-    Returns a pooler with no pipelines when the registry is empty (e.g.
+
+    `config` is the run's analysis config, and it matters: engines are cached
+    per configuration, so pooling without it would build the *default*-shaped
+    hybrid — default reranker, default candidate depth — and then a run
+    configured otherwise would be scored against a consensus its own retriever
+    never took part in. The reranker is exactly what distinguishes hybrid, so
+    that is not a small difference.
+
+    Returns a pooler with no pipelines when none can be built (e.g.
     RAG_DISABLE_ENGINE_INIT is set) — callers should check `pipeline_names`.
     """
-    from common.constant import CONFIG_VARIANTS
+    from common.constant import DEFAULT_CHAT_VARIANT, METHOD_IDS
     from rag.rag_service import rag_registry
 
-    model = llm_model or CONFIG_VARIANTS[0]["model"]
+    model = llm_model or DEFAULT_CHAT_VARIANT["model"]
     pooler = CandidatePooler(k=k, top_n=top_n)
 
-    for method in dict.fromkeys(v["method"] for v in CONFIG_VARIANTS):
+    for method in METHOD_IDS:
         try:
-            pooler.register(method, rag_registry.get_engine(method, model))
+            pooler.register(method, rag_registry.get_engine(method, model, config))
         except Exception as e:
             logger.warning(f"Candidate pooling: skipping '{method}' — {e}")
 

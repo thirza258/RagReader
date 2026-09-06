@@ -4,6 +4,7 @@ import FileUploadSection from "./file/FileInput";
 import UrlUploadSection from "./file/URLInput";
 import TextUploadSection from "./file/TextInput";
 import { SubmitPayload } from "../types/types";
+import { errorMessage } from "../lib/utils";
 
 
 interface FileSubmitProps {
@@ -71,10 +72,9 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
         await onSubmit({ type: "text", text: textInput });
       }
       navigate("/loading");
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error submitting:", error);
-      const msg = error?.response?.data?.message || "Failed to submit.";
-      alert(msg);
+      alert(errorMessage(error, "Failed to submit."));
     } finally {
       setIsLoading(false);
     }
@@ -86,11 +86,9 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
   const isTextFilled = textInput.length > 0;
 
   return (
-    <div className="card w-full mx-auto p-6">
-
-      <div className="space-y-4 w-full">
-       
-      <FileUploadSection
+    <div className="w-full p-6">
+      <div className="w-full space-y-5">
+        <FileUploadSection
           inputRef={fileInputRef}
           onChange={handleFileChange}
           disabled={isUrlFilled || isTextFilled}
@@ -103,24 +101,23 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
           }}
         />
         <UrlUploadSection
-            value={url}
-            onChange={handleUrlChange}
-            disabled={isFileFilled || isTextFilled}
-          />
+          value={url}
+          onChange={handleUrlChange}
+          disabled={isFileFilled || isTextFilled}
+        />
         <TextUploadSection
-        value={textInput}
-        onChange={handleTextChange}
-        disabled={isFileFilled || isUrlFilled}
-      />
+          value={textInput}
+          onChange={handleTextChange}
+          disabled={isFileFilled || isUrlFilled}
+        />
       </div>
 
-      {/* Submit Button */}
       <button
         onClick={handleSubmit}
         disabled={isLoading}
-        className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed"
+        className="mt-6 w-full border border-primary bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isLoading ? "Submitting..." : "Submit"}
+        {isLoading ? "Submitting…" : "Submit"}
       </button>
     </div>
   );

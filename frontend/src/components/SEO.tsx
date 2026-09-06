@@ -7,7 +7,7 @@ interface SEOProps {
   canonicalUrl?: string;
   ogType?: string;
   ogImage?: string;
-  jsonLd?: Record<string, any> | Record<string, any>[];
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 }
 
 const DEFAULT_TITLE = "RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines";

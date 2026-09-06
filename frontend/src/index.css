@@ -4,79 +4,49 @@
 
 @layer base {
   :root {
-    /* --- DEEP OCEAN THEME --- */
-    
-    /* Background: Deepest Slate (#020617) */
-    --background: 222 84% 4.9%;
-    /* Foreground: White Text (#f8fafc) */
-    --foreground: 210 40% 98%;
+    /* --- WHITE / ACADEMIC ---
+       White ground, ink text, hairline rules and a single deep-red accent used
+       only for links, section numbers and active states. No gradients, no
+       glows: data stays black-on-white, because colour is not a metric. */
 
-    /* Card: Slightly lighter blue (#0f172a) */
-    --card: 222 47% 11.2%;
-    --card-foreground: 210 40% 98%;
+    /* Paper */
+    --background: 0 0% 100%;
+    /* Ink (#1C1E21) */
+    --foreground: 220 8% 12%;
 
-    /* Popover: Same as card */
-    --popover: 222 47% 11.2%;
-    --popover-foreground: 210 40% 98%;
+    /* Cards sit on the same white and are separated by a rule, not a fill */
+    --card: 0 0% 100%;
+    --card-foreground: 220 8% 12%;
 
-    /* Primary: Cyan (#06b6d4) */
-    --primary: 189 94% 43%;
-    --primary-foreground: 222 47% 11.2%; /* Dark text on bright button */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 8% 12%;
 
-    /* Secondary: Ocean Blue (#2563eb) */
-    --secondary: 221 83% 53%;
-    --secondary-foreground: 210 40% 98%;
+    /* Accent: deep red (#7A1F2B) */
+    --primary: 351 59% 30%;
+    --primary-foreground: 0 0% 100%;
 
-    /* Muted: Slate 800 (#1e293b) - Used for secondary backgrounds */
-    --muted: 217 33% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    /* Secondary: ink slate, for the rarer solid control */
+    --secondary: 220 10% 22%;
+    --secondary-foreground: 0 0% 100%;
 
-    /* Accent: Used for hover effects (#334155) */
-    --accent: 217 33% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    /* Muted: the faint grey fill used for zebra rows and inset blocks */
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 6% 42%;
 
-    /* Destructive: Red */
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    /* Accent surface: hover fill */
+    --accent: 220 14% 93%;
+    --accent-foreground: 220 8% 12%;
 
-    /* Border: Slate 800 (#1e293b) */
-    --border: 217 33% 17.5%;
-    /* Input: Same as border */
-    --input: 217 33% 17.5%;
-    
-    /* Ring: Matches Primary Cyan */
-    --ring: 189 94% 43%;
+    --destructive: 0 55% 38%;
+    --destructive-foreground: 0 0% 100%;
 
-    --radius: 0.5rem;
+    /* Hairlines */
+    --border: 220 13% 85%;
+    --input: 220 13% 80%;
+    --ring: 351 59% 30%;
 
-    /* Charts (Optional matches) */
-    --chart-1: 189 94% 43%; /* Cyan */
-    --chart-2: 221 83% 53%; /* Blue */
-    --chart-3: 217 33% 17%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-  }
-
-  .dark {
-    --background: 222 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11.2%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 11.2%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 189 94% 43%;
-    --primary-foreground: 222 47% 11.2%;
-    --secondary: 221 83% 53%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217 33% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 17.5%;
-    --input: 217 33% 17.5%;
-    --ring: 189 94% 43%;
+    /* Nearly square — a printed rule has no radius */
+    --radius: 0.125rem;
   }
 }
 
@@ -84,7 +54,61 @@
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground;
+
+  html {
+    -webkit-text-size-adjust: 100%;
   }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "kern" 1;
+  }
+
+  /* Headings carry the serif; UI furniture stays in the sans stack. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-serif text-foreground;
+    text-wrap: balance;
+  }
+
+  /* Lining figures in tables and metric readouts so columns align. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Long-form reading text: serif, generous leading, capped measure. */
+  .prose-note {
+    @apply font-serif text-[1.0625rem] leading-[1.7] text-foreground/85;
+  }
+
+  .measure {
+    max-width: 68ch;
+  }
+
+  /* The one link treatment used site-wide. */
+  .link {
+    @apply text-primary underline decoration-primary/30 underline-offset-[3px]
+           transition-colors hover:decoration-primary;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
 }

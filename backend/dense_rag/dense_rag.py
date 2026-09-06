@@ -4,6 +4,7 @@ from django.conf import settings
 from openai import OpenAI
 from sklearn.metrics.pairwise import cosine_similarity
 from rag.base_rag import BaseRAG
+from common.constant import DEFAULT_EMBEDDING_MODEL
 
 class DenseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):
@@ -12,8 +13,9 @@ class DenseRAG(BaseRAG):
         
         Config arguments:
         - top_k: (int) Number of chunks to retrieve.
-        - model: (str) OpenRouter model string 
-                 (e.g., "openai/text-embedding-3-small", "qwen/qwen3-embedding-8b")
+        - embedding_model: (str) OpenRouter embedding model
+                 (e.g., "openai/text-embedding-3-small", "qwen/qwen3-embedding-8b").
+                 Also accepted as "model", the engine's original spelling.
         """
         super().__init__(config)
         
@@ -27,7 +29,13 @@ class DenseRAG(BaseRAG):
         )
         
         self.top_k = config.get("top_k", 3)
-        self.model = config.get("model", "openai/text-embedding-3-small")
+        # "embedding_model" is the clear spelling; "model" is what this engine
+        # has always read and is still honoured so older configs keep working.
+        self.model = (
+            config.get("embedding_model")
+            or config.get("model")
+            or DEFAULT_EMBEDDING_MODEL
+        )
         
         self.documents: List[str] =[]  
         self.document_vectors: Optional[np.ndarray] = None 

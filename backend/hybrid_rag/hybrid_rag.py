@@ -7,12 +7,23 @@ from rag.base_rag import BaseRAG
 from sparse_rag.sparse_rag import SparseRAG
 from dense_rag.dense_rag import DenseRAG
 
-try:
-    from sentence_transformers import CrossEncoder
-except ImportError:
-    CrossEncoder = None
+from common.constant import (
+    DEFAULT_CHILD_TOP_K,
+    DEFAULT_OLLAMA_EMBED_MODEL,
+    DEFAULT_RERANKER_MODEL,
+    DEFAULT_RRF_K,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class RerankUnavailable(RuntimeError):
+    """Ollama could not score the candidates.
+
+    Raised rather than returning a neutral score array: uniform scores are
+    indistinguishable from a genuine result, so the caller would rank on them
+    and report retrieval metrics for a rerank that never happened.
+    """
 
 
 class OllamaCrossEncoder:
@@ -67,8 +78,44 @@ class OllamaCrossEncoder:
 
             return np.array(scores, dtype=np.float32)
         except Exception as e:
-            logger.error(f"Ollama nomic-embed-text reranker error: {e}")
-            return np.zeros(len(pairs), dtype=np.float32)
+            raise RerankUnavailable(
+                f"Ollama reranker '{self.model_name}' failed: {e}. "
+                f"Is Ollama reachable, and has the model been pulled "
+                f"(`ollama pull {self.model_name}`)?"
+            ) from e
+
+
+# Reranking runs through Ollama, which holds the model and decides GPU vs CPU
+# for itself. Pipelines are built per (method, model, config), so several
+# hybrid engines can be alive at once; caching the client keyed by model name
+# keeps them from each opening their own.
+_CROSS_ENCODER_CACHE: Dict[str, Any] = {}
+
+
+def build_cross_encoder(model_name: str = DEFAULT_OLLAMA_EMBED_MODEL):
+    """Construct the reranker for `model_name`.
+
+    An `ollama/` prefix is accepted and stripped, so a config written as
+    `ollama/nomic-embed-text` and one written as `nomic-embed-text` name the
+    same model.
+    """
+    embed_model = model_name.replace("ollama/", "", 1) if model_name.startswith("ollama/") else model_name
+    logger.info(f"Using Ollama ({embed_model}) for reranking.")
+    return OllamaCrossEncoder(model_name=embed_model)
+
+
+def get_cross_encoder(model_name: str = DEFAULT_OLLAMA_EMBED_MODEL):
+    """Return the shared reranker for `model_name`, building it once."""
+    encoder = _CROSS_ENCODER_CACHE.get(model_name)
+    if encoder is None:
+        encoder = build_cross_encoder(model_name)
+        _CROSS_ENCODER_CACHE[model_name] = encoder
+    return encoder
+
+
+def clear_cross_encoder_cache() -> None:
+    """Drop every cached reranker. For tests and for freeing memory."""
+    _CROSS_ENCODER_CACHE.clear()
 
 
 class HybridRAG(BaseRAG):
@@ -81,27 +128,17 @@ class HybridRAG(BaseRAG):
         - rrf_k: (int) The constant 'k' for RRF algorithm (default 60).
         - child_top_k: (int) How many docs to fetch from sub-engines before fusion.
                        Usually higher than top_k (e.g., fetch 10 from each to find the best 3).
-        - reranker_model: (str) Model name for reranking (default "nomic-embed-text" via Ollama).
-        - ollama_embed_model: (str) Ollama model for embedding reranking (default "nomic-embed-text").
-        - device: (str) Device to use for PyTorch models ("auto", "cuda", or "cpu").
+        - reranker_model: (str) Ollama model that reranks the fused candidates.
+                       Chosen from common.constant.RERANKER_MODELS — unlike a
+                       generation model this one is served by a local Ollama,
+                       so the set is closed rather than open.
         """
         super().__init__(config)
 
         self.final_top_k = config.get("top_k", 3)
-        self.child_top_k = config.get("child_top_k", 10)
-        self.rrf_k = config.get("rrf_k", 60)
-        self.reranker_model = config.get("reranker_model", "nomic-embed-text")
-        self.ollama_embed_model = config.get("ollama_embed_model", "nomic-embed-text")
-
-        # Determine device
-        device = config.get("device", "auto")
-        if not device or str(device).lower() == "auto":
-            try:
-                import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            except Exception:
-                device = "cpu"
-        self.device = str(device).lower()
+        self.child_top_k = config.get("child_top_k", DEFAULT_CHILD_TOP_K)
+        self.rrf_k = config.get("rrf_k", DEFAULT_RRF_K)
+        self.reranker_model = config.get("reranker_model", DEFAULT_RERANKER_MODEL)
 
         print(f"Initializing Hybrid Engine (fetching top {self.child_top_k} from children)...")
         # The sub-engines build the candidate pool the cross-encoder reranks, so
@@ -112,31 +149,7 @@ class HybridRAG(BaseRAG):
         self.sparse_engine = SparseRAG(child_config)
         self.dense_engine = DenseRAG(child_config)
 
-        is_ollama_model = (
-            self.reranker_model.startswith("ollama")
-            or self.reranker_model in ("nomic-embed-text", "ollama")
-            or "nomic" in self.reranker_model
-            or config.get("reranker_type") == "ollama"
-        )
-
-        if is_ollama_model or CrossEncoder is None:
-            embed_model = (
-                self.reranker_model.replace("ollama/", "")
-                if self.reranker_model.startswith("ollama/")
-                else self.ollama_embed_model
-            )
-            logger.info(f"Using Ollama ({embed_model}) for cross-encoder reranking (GPU/CPU managed by Ollama).")
-            self._cross_encoder = OllamaCrossEncoder(model_name=embed_model)
-        else:
-            try:
-                logger.info(f"Using CrossEncoder ({self.reranker_model}) on device: {self.device}")
-                self._cross_encoder = CrossEncoder(self.reranker_model, device=self.device)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to initialize CrossEncoder ({self.reranker_model}) on {self.device} ({e}), "
-                    f"falling back to Ollama {self.ollama_embed_model}"
-                )
-                self._cross_encoder = OllamaCrossEncoder(model_name=self.ollama_embed_model)
+        self._cross_encoder = get_cross_encoder(self.reranker_model)
 
         self.document_metadata = []
 
@@ -180,13 +193,21 @@ class HybridRAG(BaseRAG):
         try:
             pairs = [(query, doc["text"]) for doc in candidates]
             scores = self._cross_encoder.predict(pairs)
-            ranked = np.argsort(scores)[::-1]
+            # Descending, and stable so equal scores keep the fused order they
+            # arrived in. `argsort(scores)[::-1]` would reverse ties instead.
+            ranked = np.argsort(-np.asarray(scores), kind="stable")
             return [
                 {**candidates[i], "score": float(scores[i])}
                 for i in ranked
             ]
         except Exception as exc:
-            logger.error(f"Reranking error: {exc}")
+            # Fall back to the fused RRF order. It is the best ranking we have
+            # without the reranker, and it beats ranking on scores we could not
+            # actually compute.
+            logger.error(
+                f"Reranking failed, keeping fused RRF order for {len(candidates)} "
+                f"candidates: {exc}"
+            )
             return candidates
 
     def get_retrieved_scores(self, query: str) -> Dict[str, Any]:

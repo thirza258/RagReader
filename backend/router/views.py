@@ -24,16 +24,30 @@ from router.serializers import (
     InsertURLSerializer, 
     QuerySerializer 
 )
+from ai_handler.model_catalog import fetch_catalog
 from common.constant import (
-    CONFIG_VARIANTS,
+    CHILD_TOP_K_MAX,
+    CHILD_TOP_K_MIN,
     DEFAULT_ANALYSIS_CONFIG,
+    DEFAULT_CHAT_VARIANT,
+    DEFAULT_CHILD_TOP_K,
+    DEFAULT_JUDGE_MODEL,
     DEFAULT_POOL_TOP_N,
+    DEFAULT_RRF_K,
+    DEFAULT_TEMPERATURE,
     DEFAULT_TOP_K,
     GROUND_TRUTH_MODES,
-    LLM_MODELS,
+    INGEST_CONFIG,
+    MAX_VARIANTS,
+    MODEL_IDS,
     POOL_TOP_N_MAX,
     POOL_TOP_N_MIN,
+    RERANKER_MODELS,
     RETRIEVAL_METHODS,
+    RRF_K_MAX,
+    RRF_K_MIN,
+    TEMPERATURE_MAX,
+    TEMPERATURE_MIN,
     TOP_K_MAX,
     TOP_K_MIN,
     build_variants,
@@ -163,8 +177,8 @@ class OpenChatView(APIView):
 
             job = self.create_job(user)
 
-            method = CONFIG_VARIANTS[0]["method"]
-            model_config = CONFIG_VARIANTS[0]["model"]
+            method = DEFAULT_CHAT_VARIANT["method"]
+            model_config = DEFAULT_CHAT_VARIANT["model"]
             
             transaction.on_commit(lambda: initialize_rag_task.delay(
                 job_id=str(job.id),
@@ -293,7 +307,9 @@ class QueryView(GenericAPIView):
             document = last_job.document
             document_id = document.pk if document else None
             
-            engine = rag_registry.get_engine(CONFIG_VARIANTS[0]["method"], CONFIG_VARIANTS[0]["model"])
+            engine = rag_registry.get_engine(
+                DEFAULT_CHAT_VARIANT["method"], DEFAULT_CHAT_VARIANT["model"]
+            )
 
             # Engines are process-wide singletons, and both deep analysis and
             # candidate pooling re-depth them (up to TOP_K_MAX / POOL_TOP_N_MAX).
@@ -319,14 +335,28 @@ class QueryView(GenericAPIView):
 class AnalysisConfigView(APIView):
     """The option set the Deep Analysis sidebar renders.
 
-    Served rather than hardcoded in the frontend so the model list can never
-    drift from the models the backend actually knows how to instantiate.
+    Served rather than hardcoded in the frontend so the ranges, the defaults
+    and the model catalogue can never drift from what the backend will accept.
+
+    `models` is the live OpenRouter catalogue when it can be reached and the
+    three shipped defaults otherwise; `model_catalog.source` says which, so the
+    UI can be honest about it. Any well-formed OpenRouter id is runnable
+    whether or not it appears in this list.
     """
 
     def get(self, request):
+        catalog = fetch_catalog(force=request.query_params.get("refresh") == "1")
+
         return Response({
             "retrieval_methods": RETRIEVAL_METHODS,
-            "models": LLM_MODELS,
+            "models": catalog["models"],
+            "default_models": MODEL_IDS,
+            "model_catalog": {
+                "source": catalog["source"],
+                "count": len(catalog["models"]),
+                "error": catalog["error"],
+            },
+            "rerankers": RERANKER_MODELS,
             "ground_truth_modes": GROUND_TRUTH_MODES,
             "top_k": {"min": TOP_K_MIN, "max": TOP_K_MAX, "default": DEFAULT_TOP_K},
             "pool_top_n": {
@@ -334,8 +364,24 @@ class AnalysisConfigView(APIView):
                 "max": POOL_TOP_N_MAX,
                 "default": DEFAULT_POOL_TOP_N,
             },
+            "temperature": {
+                "min": TEMPERATURE_MIN,
+                "max": TEMPERATURE_MAX,
+                "default": DEFAULT_TEMPERATURE,
+            },
+            "child_top_k": {
+                "min": CHILD_TOP_K_MIN,
+                "max": CHILD_TOP_K_MAX,
+                "default": DEFAULT_CHILD_TOP_K,
+            },
+            "rrf_k": {"min": RRF_K_MIN, "max": RRF_K_MAX, "default": DEFAULT_RRF_K},
+            "judge_model": {"default": DEFAULT_JUDGE_MODEL},
+            # Applied once at ingest and therefore read-only here: the stored
+            # index is only meaningful against the settings that built it.
+            # See common/constant.py for the full reasoning.
+            "ingest": INGEST_CONFIG,
             "defaults": DEFAULT_ANALYSIS_CONFIG,
-            "max_variants": len(CONFIG_VARIANTS),
+            "max_variants": MAX_VARIANTS,
         }, status=status.HTTP_200_OK)
 
 

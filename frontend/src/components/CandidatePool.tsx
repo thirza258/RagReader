@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { AlertCircle, FileText, Layers, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import service from "../services/service";
 import { CandidatePoolResponse, PooledChunk } from "../interface";
 
@@ -27,33 +27,26 @@ function describeError(error: unknown): string {
 }
 
 const PooledChunkCard: React.FC<{ chunk: PooledChunk }> = ({ chunk }) => (
-  <div className="rounded-lg border border-border bg-card p-4">
-    <div className="flex items-start justify-between gap-3 mb-2">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-          {chunk.rank}
-        </span>
-        <FileText size={12} />
-        <span className="truncate max-w-[120px]">{chunk.chunk_id}</span>
-      </div>
-      <span className="shrink-0 rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+  <div className="border border-border p-4">
+    <div className="mb-2 flex items-baseline justify-between gap-3">
+      <span className="flex items-baseline gap-2 font-mono text-xs text-muted-foreground">
+        <span className="text-foreground tabular">{chunk.rank}.</span>
+        <span className="max-w-[140px] truncate">{chunk.chunk_id}</span>
+      </span>
+      <span className="shrink-0 font-mono text-xs text-muted-foreground tabular">
         RRF {chunk.rrf_score.toFixed(4)}
       </span>
     </div>
 
-    <p className="text-sm leading-relaxed text-foreground/90 line-clamp-4">{chunk.text}</p>
+    <p className="line-clamp-4 text-sm leading-relaxed text-muted-foreground">
+      {chunk.text}
+    </p>
 
-    <div className="mt-3 flex flex-wrap gap-1.5">
-      {chunk.sources.map((source) => (
-        <span
-          key={source.pipeline}
-          title={`${source.pipeline} ranked this #${source.rank}`}
-          className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground"
-        >
-          {source.pipeline.replace(" Retrieval", "")} #{source.rank}
-        </span>
-      ))}
-    </div>
+    <p className="mt-3 text-xs text-muted-foreground">
+      {chunk.sources
+        .map((source) => `${source.pipeline.replace(" Retrieval", "")} #${source.rank}`)
+        .join(" · ")}
+    </p>
   </div>
 );
 
@@ -90,7 +83,7 @@ const CandidatePool: React.FC<CandidatePoolProps> = ({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-lg border border-border bg-muted/20 p-4">
+      <div className="border-l-2 border-border py-1 pl-4">
         <p className="text-sm text-muted-foreground">
           Runs your question through <strong>Dense</strong>, <strong>Sparse</strong> and{" "}
           <strong>Hybrid</strong> retrieval, then fuses the three rankings with Reciprocal
@@ -107,52 +100,41 @@ const CandidatePool: React.FC<CandidatePoolProps> = ({
         onClick={runPooling}
         disabled={isPooling}
         className={cn(
-          "flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm font-medium transition-colors",
+          "flex items-center justify-center gap-2 border px-4 py-2.5 text-sm font-medium transition-colors",
           isPooling
-            ? "cursor-not-allowed bg-muted text-muted-foreground"
-            : "bg-primary text-primary-foreground hover:opacity-90"
+            ? "cursor-not-allowed border-border text-muted-foreground"
+            : "border-primary bg-primary text-primary-foreground hover:bg-primary-hover"
         )}
       >
-        {isPooling ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            Retrieving from every method…
-          </>
-        ) : (
-          <>
-            {pool ? <RefreshCw size={16} /> : <Sparkles size={16} />}
-            {pool ? `Re-run pooling (top ${poolTopN})` : `Run candidate pooling (top ${poolTopN})`}
-          </>
-        )}
+        {isPooling && <Loader2 size={15} className="animate-spin" />}
+        {isPooling
+          ? "Retrieving from every method…"
+          : pool
+            ? `Re-run pooling (top ${poolTopN})`
+            : `Run candidate pooling (top ${poolTopN})`}
       </button>
 
       {error && (
-        <div className="flex items-start gap-2 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertCircle size={16} className="mt-0.5 shrink-0" />
-          <span>{error}</span>
+        <div className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {error}
         </div>
       )}
 
       {pool && (
         <>
-          <div className="flex flex-wrap items-center gap-3 border-b border-border/40 pb-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5 font-medium text-foreground">
-              <Layers size={14} />
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 border-b border-border pb-3 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
               {pool.chunks.length} pooled chunks
             </span>
-            <span>RRF k = {pool.rrf_k}</span>
+            <span className="font-mono">RRF k = {pool.rrf_k}</span>
             {pool.pipelines.map((pipeline) => (
               <span
                 key={pipeline.name}
-                className={cn(
-                  "rounded-full px-2 py-0.5",
-                  pipeline.error
-                    ? "bg-destructive/10 text-destructive"
-                    : "bg-muted text-muted-foreground"
-                )}
+                className={cn("font-mono", pipeline.error ? "text-destructive" : "")}
                 title={pipeline.error ?? undefined}
               >
-                {pipeline.name.replace(" Retrieval", "")}: {pipeline.error ? "failed" : pipeline.retrieved}
+                {pipeline.name.replace(" Retrieval", "")}:{" "}
+                {pipeline.error ? "failed" : pipeline.retrieved}
               </span>
             ))}
           </div>

@@ -14,8 +14,9 @@ const LoginPage: React.FC = () => {
       alert("Please enter both username and email.");
       return;
     }
-    service.signUp(email, username)
-      .then(response => {
+    service
+      .signUp(email, username)
+      .then((response) => {
         if (response.status !== 200 && response.status !== 201) {
           throw new Error(response.message);
         }
@@ -26,19 +27,23 @@ const LoginPage: React.FC = () => {
 
         navigate("/");
       })
-      .catch(error => {
+      .catch((error) => {
         navigate("/error", {
           state: {
             status: error?.response?.status || 500,
-            error: "Sign Up Failed",
-            message: error?.response?.data?.message || error.message || "Sign up failed."
-          }
+            error: "Sign up failed",
+            message:
+              error?.response?.data?.message || error.message || "Sign up failed.",
+          },
         });
       });
   };
 
+  const field =
+    "w-full border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary";
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
+    <div className="flex min-h-screen items-center justify-center px-6">
       <SEO
         title="Sign In — RAGReader"
         description="Sign in or register your workspace to benchmark RAG retrieval pipelines."
@@ -46,52 +51,61 @@ const LoginPage: React.FC = () => {
       />
 
       <form
-        className="bg-slate-900 p-8 rounded-2xl shadow-2xl w-full max-w-sm space-y-4 border border-slate-800"
+        className="w-full max-w-sm border border-border p-8"
         onSubmit={handleSubmit}
       >
-        <h1 className="text-2xl font-bold text-center text-white">Welcome Back!</h1>
-        <p className="text-xs text-center text-slate-400 font-mono">RAGReader workspace sign in</p>
-        <div className="w-full h-px bg-slate-800 my-4"></div>
-        <div>
-          <label className="block mb-2 text-xs font-semibold uppercase tracking-wider text-slate-300" htmlFor="username">
-            Username
-          </label>
-          <input
-            id="username"
-            type="text"
-            className="w-full border border-slate-700 rounded-xl p-2.5 bg-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            autoComplete="username"
-            placeholder="e.g. alex"
-          />
+        <h1 className="font-serif text-2xl font-semibold">Sign in</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          A username and email is all it takes — no password.
+        </p>
+
+        <div className="mt-8 space-y-5">
+          <div>
+            <label
+              className="mb-1.5 block text-sm font-medium"
+              htmlFor="username"
+            >
+              Username
+            </label>
+            <input
+              id="username"
+              type="text"
+              className={field}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              placeholder="e.g. alex"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              className={field}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              placeholder="alex@example.com"
+            />
+          </div>
         </div>
-        <div>
-          <label className="block mb-2 text-xs font-semibold uppercase tracking-wider text-slate-300" htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            className="w-full border border-slate-700 rounded-xl p-2.5 bg-slate-800 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            autoComplete="email"
-            placeholder="alex@example.com"
-          />
-        </div>
+
         <button
           type="submit"
-          className="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2.5 rounded-xl font-medium transition-colors text-sm shadow-md shadow-cyan-600/20"
+          className="mt-8 w-full border border-primary bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
         >
-          Sign In
+          Continue
         </button>
         <button
           type="button"
           onClick={() => navigate(-1)}
-          className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 py-2.5 rounded-xl transition-colors text-sm"
+          className="mt-2 w-full border border-input px-4 py-2.5 text-sm transition-colors hover:bg-accent"
         >
-          Go Back
+          Go back
         </button>
       </form>
     </div>

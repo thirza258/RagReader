@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from router.models import Document, GuestUser
 from router.models import Job
 import logging
-from ai_handler.llm import OpenAILLM, GeminiLLM, ClaudeLLM
+from common.constant import DEFAULT_CHAT_MODEL, DEFAULT_TEMPERATURE, is_valid_model_id
 import os
 import glob
 import hashlib
@@ -92,27 +92,36 @@ class BasePipeline(ABC):
         return cleaned
     
     def _initialize_llm(self, model_name: str):
-        if model_name.startswith(("openai/", "gpt-", "text-")):
-            from ai_handler.llm import OpenAILLM
-            return OpenAILLM(
-                model=model_name,
-                temperature=self.config.get("temperature", 0.0)
+        """Build the generation client for this pipeline.
+
+        Every model is reached through OpenRouter's OpenAI-compatible endpoint,
+        so there is nothing provider-specific to dispatch on: any id of the
+        right shape is accepted, and OpenRouter reports an unknown model when
+        the call is actually made. That is what makes the model selector open
+        rather than a fixed list of three.
+        """
+        from ai_handler.llm import OpenRouterLLM
+
+        if not is_valid_model_id(model_name):
+            raise ValueError(
+                f"Unsupported LLM model: {model_name!r}. Expected an OpenRouter "
+                "id of the form 'provider/model', e.g. 'openai/gpt-4o-mini'."
             )
-        elif model_name.startswith("google"):
-            from ai_handler.llm import GeminiLLM
-            return GeminiLLM(
-                model=model_name,
-                temperature=self.config.get("temperature", 0.0)
-            )
-        elif model_name.startswith("anthropic"):
-            from ai_handler.llm import ClaudeLLM
-            return ClaudeLLM(
-                model=model_name,
-                temperature=self.config.get("temperature", 0.0)
-            )
-        else:
-            raise ValueError(f"Unsupported LLM model: {model_name}")
-        
+
+        return OpenRouterLLM(
+            model=model_name,
+            temperature=self.config.get("temperature", DEFAULT_TEMPERATURE),
+        )
+
+    def _embedding_model(self) -> str | None:
+        """The embedding model this pipeline's index was or will be built with.
+
+        Sparse retrieval has none, hence the Optional. Used to stamp the saved
+        index so a later load can tell whether the vectors still match.
+        """
+        return self.config.get("embedding_model") or self.config.get("model")
+
+    
     def is_initialized(self, username):
         """Check if this engine variant is already initialized for the user.
 

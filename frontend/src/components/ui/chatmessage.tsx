@@ -15,30 +15,26 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const isMe = user === "me";
 
   return (
-    <div className={`flex w-full mb-4 ${isMe ? "justify-end" : "justify-start"}`}>
+    <div className={`mb-4 flex w-full ${isMe ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-md p-4 rounded-2xl shadow-lg flex flex-col space-y-3
-          ${
-            isMe
-              ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-br-md"
-              : "bg-slate-800 text-slate-100 rounded-bl-md"
-          }
-        `}
+        className={`max-w-xl border px-4 py-3 text-sm ${
+          isMe
+            ? "border-border bg-muted"
+            : "border-border bg-card"
+        }`}
       >
-        <ReactMarkdown>{text}</ReactMarkdown>
+        <div className="prose-note text-base [&_p+p]:mt-3">
+          <ReactMarkdown>{text}</ReactMarkdown>
+        </div>
 
-        {/* Optional evaluation metrics */}
-          <div className="flex items-end mt-2">
-
-            {onDeepAnalysis && user === "bot" && (
-              <button
-                onClick={onDeepAnalysis}
-                className="bg-green-600 hover:bg-green-700 text-white text-xs px-4 py-1 rounded-full shadow transition-all"
-              >
-                Deep Analysis
-              </button>
-            )}
-          </div>
+        {onDeepAnalysis && !isMe && (
+          <button
+            onClick={onDeepAnalysis}
+            className="mt-3 border border-input px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent"
+          >
+            Deep analysis
+          </button>
+        )}
       </div>
     </div>
   );

@@ -27,7 +27,6 @@ export interface DocStep {
   id: number;
   title: string;
   description: React.ReactNode;
-  icon: React.ReactNode;
   imagePath?: string;
   imageAlt: string;
   imagePlaceholderText: string;

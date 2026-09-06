@@ -20,6 +20,14 @@ from router.models import (
 
 from evaluation.models import Chunk, GroundTruthChunk, GroundTruthResponse
 from evaluation.eval import evaluate_chunks, evaluate_response
+from common.constant import (
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CHUNK_STRATEGY,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_VECTOR_STORE_PATH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +38,18 @@ class HybridRAGPipeline(BasePipeline):
         self.method = "hybrid"
         self.rag = HybridRAG(config)
         
-        self.llm = self._initialize_llm(config.get("llm_model", "openai"))
+        self.llm = self._initialize_llm(config.get("llm_model", DEFAULT_CHAT_MODEL))
         embedding_client = getattr(self.rag.dense_engine, 'client', None)
-        
+
         self.chunker = DocumentChunker(
-            strategy=config.get("chunk_strategy", "paragraph"),
-            chunk_size=config.get("chunk_size", 500),
-            overlap=config.get("overlap", 50),
+            strategy=config.get("chunk_strategy", DEFAULT_CHUNK_STRATEGY),
+            chunk_size=config.get("chunk_size", DEFAULT_CHUNK_SIZE),
+            overlap=config.get("overlap", DEFAULT_CHUNK_OVERLAP),
             embedding_client=embedding_client
         )
         self.loader = DataLoader()
 
-        self.vector_store_root = config.get("vector_store_path", "./vector_stores")
+        self.vector_store_root = config.get("vector_store_path", DEFAULT_VECTOR_STORE_PATH)
         os.makedirs(self.vector_store_root, exist_ok=True)
 
     def _save_state(self, path: str):
@@ -58,6 +66,9 @@ class HybridRAGPipeline(BasePipeline):
             )
 
         data = {
+            # See DenseRAGPipeline._embeddings_still_match: the dense half of
+            # this index is only meaningful against the model that built it.
+            "embedding_model": self._embedding_model(),
             "sparse": {
                 "documents": sparse_docs,
                 "bm25": getattr(self.rag.sparse_engine, "bm25", None),
@@ -87,6 +98,22 @@ class HybridRAGPipeline(BasePipeline):
             raise
 
 
+    def _embeddings_still_match(self, stored_model: str | None) -> bool:
+        """False when the dense half was built by a different embedding model.
+
+        Indexes written before this stamp existed carry no model and are
+        trusted; a recorded mismatch routes into the same discard-and-rebuild
+        path as a corrupt file.
+        """
+        current = self._embedding_model()
+        if not stored_model or not current or stored_model == current:
+            return True
+        logger.warning(
+            f"Index was embedded with '{stored_model}' but this pipeline uses "
+            f"'{current}'. Discarding it and re-indexing."
+        )
+        return False
+
     def _load_state(self, path: str) -> bool:
         """
         Restores the state of both engines from disk.
@@ -94,6 +121,9 @@ class HybridRAGPipeline(BasePipeline):
         try:
             with open(path, "rb") as f:
                 data = pickle.load(f)
+
+            if not self._embeddings_still_match(data.get("embedding_model")):
+                return False
 
             if "sparse" in data:
                 self.rag.sparse_engine.documents = data["sparse"].get("documents") or []
@@ -326,7 +356,12 @@ class HybridRAGPipeline(BasePipeline):
 
         ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
         if ground_truth_response:
-            evaluation_response_result = evaluate_response(result["answer"], ground_truth_response.response, chunks=[doc["text"] for doc in result.get("context", [])])
+            evaluation_response_result = evaluate_response(
+                result["answer"],
+                ground_truth_response.response,
+                chunks=[doc["text"] for doc in result.get("context", [])],
+                judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
+            )
             
         else:
             logger.warning(f"No ground truth response for conversation {conversation_id}")
