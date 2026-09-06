@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -20,7 +21,44 @@ const CHUNK_GROUPS: Record<string, string[]> = {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: 'script',
+      workbox: {
+        // The webmanifest is precached automatically by the plugin.
+        globPatterns: ['**/*.{js,css,html,png,svg,jpg,jpeg,webp,ico,woff2,txt}'],
+        globIgnores: ['**/og-image*', '**/vite.svg'],
+        navigateFallback: '/index.html',
+        // nginx already falls back to index.html for unknown paths; the
+        // denylist just keeps API and WebSocket requests out of the fallback.
+        navigateFallbackDenylist: [/^\/_/, /^\/api\//, /^\/ws\//, /\/[^/?]+\.[^/]+$/],
+        cleanupOutdatedCaches: true,
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+              expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
+    }),
+  ],
   server: {
     port: 5173,
     proxy: {
