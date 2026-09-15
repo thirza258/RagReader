@@ -53,6 +53,24 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
       <span className="font-mono text-xs text-muted-foreground">{aiModel}</span>
     </header>
 
+    {evaluationMetrics?.module_trace && (
+      <details className="border-b border-border px-4 py-3 text-sm">
+        <summary className="cursor-pointer font-medium">
+          RAG modules · {evaluationMetrics.module_trace.enabled.length} enabled · {evaluationMetrics.module_trace.route} route
+        </summary>
+        <ul className="mt-3 space-y-3">
+          {evaluationMetrics.module_trace.steps.map((step, index) => (
+            <li key={`${step.module}-${index}`}>
+              <span className="font-medium">{step.label ?? getMetricLabel(step.module)}</span>
+              <span className="ml-2 text-xs text-muted-foreground">{step.status}</span>
+              <p className="mt-1 text-xs text-muted-foreground">{step.detail}</p>
+              {step.queries?.map((query) => <p key={query} className="mt-1 text-xs italic">{query}</p>)}
+            </li>
+          ))}
+        </ul>
+      </details>
+    )}
+
     <dl className="divide-y divide-border text-sm">
       <div className="px-4 py-3">
         <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

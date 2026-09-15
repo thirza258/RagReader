@@ -121,6 +121,35 @@ class BasePipeline(ABC):
         """
         return self.config.get("embedding_model") or self.config.get("model")
 
+    def _run_analysis_core(self, document, conversation):
+        """Optional stages are entered only by analysis, never by normal chat."""
+        if not self.config.get("modules"):
+            return self._run_core(document, conversation.query)
+
+        from pipeline.analysis_modules import AnalysisModules
+        from router.models import DocumentVector
+        from evaluation.models import GroundTruthResponse
+
+        # A cached engine may hold another user's document or a newer upload.
+        # Load the conversation's exact index on every module run.
+        index = DocumentVector.objects.filter(
+            document=document, status="ready", method=self.method,
+        ).last()
+        if not index or not self._load_state(index.vectorstore_location):
+            self._build_index(document.user.username, document)
+
+        examples = []
+        if "contextual_learning" in self.config["modules"]:
+            examples = [
+                {"question": row.conversation.query, "answer": row.response}
+                for row in GroundTruthResponse.objects.filter(
+                    conversation__document=document,
+                ).exclude(conversation=conversation).exclude(
+                    conversation__query__iexact=conversation.query,
+                ).select_related("conversation").order_by("-pk")[:3]
+            ]
+        return AnalysisModules(self, document.pk, examples=examples).run(conversation.query)
+
     
     def is_initialized(self, username):
         """Check if this engine variant is already initialized for the user.
@@ -276,5 +305,3 @@ class BasePipeline(ABC):
         Builds the vector index for the given document and user.
         """
         pass
-    
-    

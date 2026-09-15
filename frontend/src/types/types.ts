@@ -45,6 +45,8 @@ export type DeepResultContextType = {
   /** Incremented each time the user presses Stop. */
   stopSignal: number;
   setRunState: (state: AnalysisRunState) => void;
+  setModulesAvailable: (available: boolean) => void;
+  setSelectedModules: (modules: string[]) => void;
 };
 
 export type ErrorState = {

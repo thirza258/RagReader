@@ -1,5 +1,6 @@
 import { apiClient } from "./apiClient";
 import type {
+  AnalysisStatusResponse,
   AnalysisConfigOptions,
   CandidatePoolResponse,
   DeepAnalysisConfig,
@@ -122,7 +123,7 @@ const getAnalysisConfig = async (): Promise<AnalysisConfigOptions> => {
     return response.data;
 }
 
-const getAnalysisStatus = async (jobId: string) => {
+const getAnalysisStatus = async (jobId: string): Promise<AnalysisStatusResponse> => {
     const response = await apiClient.get(`/analysis-status/${jobId}/`, jsonConfig);
     return response.data;
 };

@@ -237,6 +237,19 @@ class AnalysisConsumerTests(TransactionTestCase):
             ["chunk_evaluation", "response_evaluation", "retrieval_score"],
         )
 
+    def test_module_trace_is_saved_and_replayed_from_the_batch_configuration(self):
+        batch = self.make_batch()
+        batch.config["modules"] = ["hyde", "contextual_learning"]
+        batch.save()
+        trace = {"enabled": batch.config["modules"], "route": "single", "steps": [], "queries": ["expanded query"]}
+        engine = make_engine(response={**ANALYSIS_RESPONSE, "module_trace": trace})
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=engine) as lookup:
+            frames = self.collect(batch.job_id)
+        self.assertEqual(lookup.call_args.args[2]["modules"], trace["enabled"])
+        self.assertEqual(self.results_in(frames)[0]["evaluation"]["module_trace"], trace)
+        replay = self.collect(batch.job_id)
+        self.assertEqual(self.results_in(replay)[0]["evaluation"]["module_trace"], trace)
+
     def test_retrieval_depth_is_reapplied_for_every_variant(self):
         # Engines are process-wide singletons; skipping this per variant is how
         # one run's Top-K leaks into the next.

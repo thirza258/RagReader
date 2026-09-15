@@ -75,6 +75,16 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 
 Once all services are running, access the app at [http://localhost:5173](http://localhost:5173) (or as indicated in the terminal).
 
+### Optional modules for follow-up deep analysis
+
+After the first deep analysis completes, use the **RAG modules** switches and
+click **Run deep analysis** again. All modules start off and can be disabled
+individually: RRF Hybrid, HyDE, RAG Fusion, Step Back Prompting, MemoRAG, Self
+Route, Rewrite Retrieve Read, RAPTOR, Contextual Learning (example Q&A pairs),
+LongRAG, FLARE, CRAG, and Adaptive RAG.
+
+See [module behavior, composition, and limits](docs/rag-modules.md).
+
 ### Running the tests
 
 The backend test suite is hermetic — it needs no Redis, database server,

@@ -117,6 +117,7 @@ export function transformToAnalysisResult(
       chunk_evaluation: msg.evaluation?.chunk_evaluation ?? {},
       response_evaluation: msg.evaluation?.response_evaluation ?? {},
       retrieval_score: msg.evaluation?.retrieval_score ?? [],
+      module_trace: msg.evaluation?.module_trace,
     },
     progress: msg.progress ?? 0,
   };

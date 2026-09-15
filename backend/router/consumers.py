@@ -182,7 +182,7 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
 
                     is_initialized = await sync_to_async(engine.is_initialized)(username)
                     
-                    if not is_initialized:
+                    if not is_initialized and not config["modules"]:
                         await self.send(text_data=json.dumps({
                             "status": "INITIALIZING",
                             "method": method,
@@ -212,6 +212,8 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                             for doc in context
                         ]
                     }
+                    if response.get("module_trace"):
+                        evaluation_with_retrieval["module_trace"] = response["module_trace"]
 
                     metrics = [
                         {"name": key, "value": value}
@@ -250,6 +252,7 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                     logger.error(f"Error running variant {method}/{model}: {e}", exc_info=True)
                     await self.send(text_data=json.dumps({
                         "method": method,
+                        "aiModel": model,
                         "error": str(e),
                         "progress": int(((index + 1) / total_variants) * 100)
                     }))

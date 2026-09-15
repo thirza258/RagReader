@@ -2,7 +2,8 @@ import logging
 
 from celery import shared_task
 from .models import Job, AnalysisBatch, AnalysisResult
-from rag.rag_service import rag_registry
+from rag.rag_service import apply_retrieval_depth, rag_registry
+from common.constant import normalize_analysis_config
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +34,23 @@ def initialize_rag_task(self, job_id, username, method, model_config):
 def run_single_analysis(self, batch_id, username, query, variant_config, config=None):
     """Run one variant out of band.
 
-    `config` is the run's analysis config and must be passed whenever the batch
-    has one: engines are cached per configuration, so omitting it silently runs
-    the variant on a default-shaped pipeline. The websocket consumer is the live
-    path today; this task is the queued equivalent.
+    The stored batch configuration is authoritative. The optional argument is
+    a fallback for legacy batches. The websocket consumer is the live path;
+    this task is the queued equivalent.
     """
     try:
         batch = AnalysisBatch.objects.get(job_id=batch_id)
+        config = normalize_analysis_config(batch.config or config)
         engine = rag_registry.get_engine(
             variant_config["method"], variant_config["model"], config
         )
-        response = engine.run(username, query)
+        apply_retrieval_depth(engine, config["top_k"], config["child_top_k"])
+        if config["modules"]:
+            if not batch.conversation or not batch.conversation.document_id:
+                raise ValueError("Module analysis requires a conversation document.")
+            response = engine.run_analysis(batch.conversation.document_id, batch.conversation_id)
+        else:
+            response = engine.run(username, query)
 
         context = response.get("context", [])  
         retrieved_chunks = [
@@ -64,6 +71,9 @@ def run_single_analysis(self, batch_id, username, query, variant_config, config=
                 ]
             }
         ]
+        metrics.extend({"name": name, "value": value} for name, value in response.get("evaluation", {}).items())
+        if response.get("module_trace"):
+            metrics.append({"name": "module_trace", "value": response["module_trace"]})
 
         AnalysisResult.objects.create(
             query=query,

@@ -1,19 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import DeepAnalysisCard from "../components/DeepAnalysisCard";
-import {
-  buildWebSocketUrl,
-  connectDeepAnalysisWebSocket,
-} from "../services/websocket";
+import { buildWebSocketUrl, connectDeepAnalysisWebSocket } from "../services/websocket";
 import service from "../services/service";
 import { useLocation, useOutletContext, useParams } from "react-router-dom";
 import type { DeepResultContextType } from "../types/types";
-import {
-  AnalysisResult,
-  DeepAnalysisConfig,
-  NormalizedChunk,
-  StartAnalysisResponse,
-} from "../interface";
-
+import type { AnalysisResult, DeepAnalysisConfig, NormalizedChunk } from "../interface";
 
 interface NormalizedResult extends Omit<AnalysisResult, "retrievedChunks"> {
   retrievedChunks: NormalizedChunk[];
@@ -23,10 +14,7 @@ function normalizeResult(result: AnalysisResult): NormalizedResult {
   return {
     ...result,
     retrievedChunks: result.retrievedChunks.map((chunk, i) => ({
-      number: i + 1,
-      id: chunk.id ?? `NULL`,
-      text: chunk.text,
-      score: chunk.score,
+      number: i + 1, id: chunk.id ?? "NULL", text: chunk.text, score: chunk.score,
     })),
   };
 }
@@ -35,345 +23,212 @@ const STORAGE_KEY = (id: string) => `deep_analysis_results_${id}`;
 
 const DeepResult: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
-  const { setIds, analysisRequest, stopSignal, setRunState } =
+  const { setIds, analysisRequest, stopSignal, setRunState, setModulesAvailable, setSelectedModules } =
     useOutletContext<DeepResultContextType>();
-
   const location = useLocation();
-
-  const [results, setResults] = useState<NormalizedResult[]>(() => {
-    if (!conversationId) return [];
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY(conversationId));
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [results, setResults] = useState<NormalizedResult[]>([]);
+  const resultsRef = useRef<NormalizedResult[]>([]);
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [isConnected, setIsConnected] = useState(false);
   const [runError, setRunError] = useState("");
   const [activeConfig, setActiveConfig] = useState<DeepAnalysisConfig | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const resultCountRef = useRef(0);
+  const epochRef = useRef(0);
 
   const closeSocket = useCallback(() => {
+    epochRef.current += 1;
     cleanupRef.current?.();
     cleanupRef.current = null;
   }, []);
 
-  const addOrUpdateResult = useCallback(
-    (result: AnalysisResult) => {
-      if (!conversationId) return;
-      const normalized = normalizeResult(result);
-      setResults((prev) => {
-        const idx = prev.findIndex(
-          (r) => r.method === result.method && r.aiModel === result.aiModel,
-        );
-        const updated =
-          idx !== -1
-            ? prev.map((r, i) => (i === idx ? normalized : r))
-            : [...prev, normalized];
-
-        localStorage.setItem(
-          STORAGE_KEY(conversationId),
-          JSON.stringify(updated),
-        );
-        resultCountRef.current = updated.length;
-        return updated;
-      });
-    },
-    [conversationId],
-  );
-
-  /** Opens the stream for a batch and reports progress back to the sidebar. */
-  const connect = useCallback(
-    (batchId: string, query: string, total: number) => {
-      closeSocket();
-      setRunError("");
-
-      const cleanup = connectDeepAnalysisWebSocket({
-        url: buildWebSocketUrl(batchId),
-        query,
-        onOpen: () => {
-          setIsConnected(true);
-          setRunError("");
-          setRunState({ isRunning: true, completed: resultCountRef.current, total });
-        },
-        onResult: (result) => {
-          addOrUpdateResult(result);
-          setRunState({
-            isRunning: true,
-            completed: resultCountRef.current,
-            total,
-          });
-        },
-        onProgress: (method, value) => {
-          setProgress((prev) => ({ ...prev, [method]: value }));
-        },
-        onError: async (err) => {
-          console.error("WebSocket error:", err);
-          setIsConnected(false);
-          try {
-            const statusData = await service.getAnalysisStatus(batchId);
-            if (statusData?.results && Array.isArray(statusData.results)) {
-              for (const r of statusData.results) {
-                addOrUpdateResult(r);
-              }
-              if (statusData.is_complete) {
-                setRunState({
-                  isRunning: false,
-                  completed: statusData.completed ?? statusData.results.length,
-                  total: statusData.total ?? total,
-                });
-                return;
-              }
-            }
-          } catch {
-            // Ignore fallback failure
-          }
-          setRunError("Lost the connection to the analysis stream.");
-        },
-        onClose: () => {
-          setIsConnected(false);
-          setRunState({ isRunning: false, completed: resultCountRef.current, total });
-        },
-      });
-
-      cleanupRef.current = cleanup;
-    },
-    [addOrUpdateResult, closeSocket, setRunState],
-  );
-
-  /**
-   * Starts a brand-new batch with the given config. In pooled mode the ground
-   * truth is rebuilt first, so the retrieval metrics score against the fused
-   * ranking rather than a stale manual selection.
-   */
-  const runAnalysis = useCallback(
-    async (config: DeepAnalysisConfig) => {
-      if (!conversationId) return;
-
-      closeSocket();
-      setResults([]);
-      setProgress({});
-      resultCountRef.current = 0;
-      localStorage.removeItem(STORAGE_KEY(conversationId));
-      setRunError("");
-      setActiveConfig(config);
-
+  const saveResults = useCallback((updated: NormalizedResult[]) => {
+    resultsRef.current = updated;
+    setResults(updated);
+    if (conversationId) {
       try {
-        if (config.ground_truth_mode === "pooled") {
-          setRunState({ isRunning: true, completed: 0, total: 0 });
-          await service.poolGroundTruthChunks(conversationId, {
-            top_n: config.pool_top_n,
-            // The same RRF constant the hybrid pipeline fuses with, so the
-            // pooled ground truth and the run agree on how rank is weighted.
-            rrf_k: config.rrf_k,
-            // And the same engine configuration, so the consensus is built by
-            // the retrievers this run is about to be scored against.
-            config,
-          });
-        }
-
-        const response: StartAnalysisResponse = await service.startDeepAnalysis(
-          conversationId,
-          config,
-        );
-
-        localStorage.setItem(`batch_id_${conversationId}`, response.batch_id);
-        localStorage.setItem("document_id", String(response.document_id));
-        localStorage.setItem("conversation_id", conversationId);
-        setIds({ conversationId, documentId: String(response.document_id) });
-
-        connect(response.batch_id, response.query, response.expected_count);
-      } catch (error) {
-        console.error("Error starting deep analysis:", error);
-        const message =
-          (error as { response?: { data?: { error?: string } } })?.response?.data
-            ?.error ?? "Failed to start the analysis.";
-        setRunError(message);
-        setRunState({ isRunning: false, completed: 0, total: 0 });
-      }
-    },
-    [conversationId, closeSocket, connect, setIds, setRunState],
-  );
-
-  // First load: resume the batch we were handed (or already started) rather
-  // than kicking off a duplicate run.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function resume() {
-      if (!conversationId) return;
-
-      try {
-        const stateData = location.state as {
-          batch_id?: string;
-          query?: string;
-          document_id?: string;
-          expected_count?: number;
-        } | null;
-
-        let batch_id: string;
-        let query: string;
-        let document_id: string;
-        let expected = 0;
-
-        if (stateData?.batch_id && stateData?.query && stateData?.document_id) {
-          ({ batch_id, query, document_id } = stateData);
-          expected = stateData.expected_count ?? 0;
-        } else {
-          const existingBatchId = localStorage.getItem(
-            `batch_id_${conversationId}`,
-          );
-          const existingDocId = localStorage.getItem("document_id") || "";
-
-          if (existingBatchId) {
-            batch_id = existingBatchId;
-            document_id = existingDocId;
-            query = "";
-
-            try {
-              const statusData = await service.getAnalysisStatus(existingBatchId);
-              if (cancelled) return;
-
-              if (statusData?.results && Array.isArray(statusData.results)) {
-                for (const r of statusData.results) {
-                  addOrUpdateResult(r);
-                }
-              }
-              expected = statusData?.total ?? 0;
-              if (statusData?.is_complete) {
-                setIds({ conversationId, documentId: document_id });
-                setRunState({
-                  isRunning: false,
-                  completed: statusData.completed ?? statusData.results?.length ?? 0,
-                  total: expected,
-                });
-                return;
-              }
-            } catch (err) {
-              console.warn("Could not check existing batch status via REST:", err);
-            }
-          } else {
-            const result = await service.startDeepAnalysis(conversationId);
-            if (cancelled) return;
-            ({ batch_id, query } = result);
-            document_id = String(result.document_id);
-            expected = result.expected_count;
-
-            localStorage.setItem(`batch_id_${conversationId}`, batch_id);
-            localStorage.setItem("document_id", document_id);
-            localStorage.setItem("conversation_id", conversationId);
-          }
-        }
-
-        if (cancelled) return;
-        setIds({ conversationId, documentId: document_id });
-        connect(batch_id, query, expected);
-      } catch (error) {
-        console.error("Error starting deep analysis:", error);
-        setIsConnected(false);
+        localStorage.setItem(STORAGE_KEY(conversationId), JSON.stringify(updated));
+      } catch {
+        // The batch remains available through REST if browser storage is full.
       }
     }
+  }, [conversationId]);
 
-    resume();
+  const addOrUpdateResult = useCallback((result: AnalysisResult) => {
+    const normalized = normalizeResult(result);
+    const previous = resultsRef.current;
+    const index = previous.findIndex((r) => r.method === result.method && r.aiModel === result.aiModel);
+    saveResults(index < 0 ? [...previous, normalized] : previous.map((r, i) => i === index ? normalized : r));
+  }, [saveResults]);
 
-    return () => {
-      cancelled = true;
-      closeSocket();
+  const restoreConfig = useCallback((config: DeepAnalysisConfig) => {
+    setActiveConfig(config);
+    setSelectedModules(config.modules ?? []);
+  }, [setSelectedModules]);
+
+  const connect = useCallback((batchId: string, query: string, total: number) => {
+    closeSocket();
+    const epoch = epochRef.current;
+    setRunError("");
+    const current = () => epochRef.current === epoch;
+    const refreshStatus = async () => {
+      const data = await service.getAnalysisStatus(batchId);
+      if (!current()) return;
+      setModulesAvailable(data.modules_available);
+      for (const result of data.results) addOrUpdateResult(result);
+      return data;
     };
-    // Deliberately not depending on `connect`: this effect must run once per
-    // conversation, not every time a callback identity changes.
+    cleanupRef.current = connectDeepAnalysisWebSocket({
+      url: buildWebSocketUrl(batchId), query,
+      onOpen: () => {
+        if (!current()) return;
+        setIsConnected(true);
+        setRunState({ isRunning: true, completed: resultsRef.current.length, total });
+      },
+      onResult: (result) => {
+        if (!current()) return;
+        addOrUpdateResult(result);
+        setRunState({ isRunning: true, completed: resultsRef.current.length, total });
+      },
+      onProgress: (method, value) => {
+        if (current()) setProgress((prev) => ({ ...prev, [method]: value }));
+      },
+      onError: async () => {
+        try {
+          const status = await refreshStatus();
+          if (status?.is_complete || !current()) return;
+        } catch {
+          // Report the stream failure if REST is also unavailable.
+        }
+        if (current()) setRunError("Lost the connection to the analysis stream.");
+      },
+      onClose: async () => {
+        if (!current()) return;
+        setIsConnected(false);
+        setRunState({ isRunning: false, completed: resultsRef.current.length, total });
+        try {
+          // Errors and the Stop button must not unlock modules.
+          const status = await refreshStatus();
+          if (status && !status.is_complete) {
+            setRunError("Some variants did not complete. Run Deep Analysis again to retry.");
+          }
+        } catch {
+          if (current()) setRunError("Could not confirm completion. Reload to check the saved analysis.");
+        }
+      },
+    });
+  }, [addOrUpdateResult, closeSocket, setModulesAvailable, setRunState]);
+
+  const runAnalysis = useCallback(async (config: DeepAnalysisConfig) => {
+    if (!conversationId) return;
+    closeSocket();
+    const epoch = epochRef.current;
+    setIsConnected(false);
+    setRunError("");
+    setRunState({ isRunning: true, completed: 0, total: config.methods.length * config.models.length });
+    try {
+      if (config.ground_truth_mode === "pooled") {
+        await service.poolGroundTruthChunks(conversationId, {
+          top_n: config.pool_top_n, rrf_k: config.rrf_k, config,
+        });
+        if (epoch !== epochRef.current) return;
+      }
+      const response = await service.startDeepAnalysis(conversationId, config);
+      if (epoch !== epochRef.current) return;
+      // Preserve the previous results until the server accepts the new run.
+      saveResults([]);
+      setProgress({});
+      restoreConfig(response.config);
+      setModulesAvailable(response.modules_available);
+      localStorage.setItem(`batch_id_${conversationId}`, response.batch_id);
+      localStorage.setItem("document_id", String(response.document_id));
+      setIds({ conversationId, documentId: String(response.document_id) });
+      connect(response.batch_id, response.query, response.expected_count);
+    } catch (error) {
+      if (epoch !== epochRef.current) return;
+      setRunError((error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Failed to start the analysis.");
+      setRunState({ isRunning: false, completed: resultsRef.current.length, total: 0 });
+    }
+  }, [conversationId, closeSocket, connect, restoreConfig, saveResults, setIds, setModulesAvailable, setRunState]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resume() {
+      if (!conversationId) return;
+      try {
+        const state = location.state as { batch_id?: string; document_id?: string; query?: string } | null;
+        // A rerun supersedes the original navigation state, including reloads.
+        let batchId = localStorage.getItem(`batch_id_${conversationId}`) || state?.batch_id;
+        let documentId = state?.document_id || localStorage.getItem("document_id") || "";
+        let query = state?.query || "";
+        if (!batchId) {
+          const initial = await service.startDeepAnalysis(conversationId);
+          if (cancelled) return;
+          batchId = initial.batch_id;
+          documentId = String(initial.document_id);
+          query = initial.query;
+        }
+        localStorage.setItem(`batch_id_${conversationId}`, batchId);
+        const status = await service.getAnalysisStatus(batchId);
+        if (cancelled) return;
+        saveResults(status.results.map(normalizeResult));
+        restoreConfig(status.config);
+        setModulesAvailable(status.modules_available);
+        setIds({ conversationId, documentId: String(status.document_id ?? documentId) });
+        if (status.is_complete) {
+          setRunState({ isRunning: false, completed: status.completed, total: status.total });
+        } else {
+          connect(batchId, query, status.total);
+        }
+      } catch {
+        if (cancelled) return;
+        setRunError("Could not load the saved analysis. Reload to try again.");
+        setRunState({ isRunning: false, completed: 0, total: 0 });
+      }
+    }
+    resume();
+    return () => { cancelled = true; closeSocket(); };
+    // Sidebar changes must not reconnect or replace a running batch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // The sidebar's "Run Deep Analysis" and "Stop Analysis" buttons.
-  //
-  // These two effects react to a *signal* from the layout — a nonce and a
-  // counter — rather than to derived state, which is why they set state in the
-  // effect body. The sidebar owns the config and this page owns the socket;
-  // turning the signals into callbacks would mean reworking that contract.
+  // Nonces represent explicit user actions, including repeat configurations.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!analysisRequest) return;
-    runAnalysis(analysisRequest.config);
+    if (analysisRequest) runAnalysis(analysisRequest.config);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisRequest?.nonce]);
-
   useEffect(() => {
-    if (stopSignal === 0) return;
+    if (!stopSignal) return;
     closeSocket();
     setIsConnected(false);
-    setRunState({ isRunning: false, completed: resultCountRef.current, total: 0 });
+    setRunState({ isRunning: false, completed: resultsRef.current.length, total: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopSignal]);
   /* eslint-enable react-hooks/set-state-in-effect */
-
-  if (!conversationId) {
-    return (
-      <div className="py-12 text-center text-sm text-muted-foreground">
-        No conversation ID provided.
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border pb-3 text-sm text-muted-foreground">
         <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className={`inline-block h-1.5 w-1.5 rounded-full ${
-              isConnected ? "bg-status-success" : "bg-border"
-            }`}
-          />
+          <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${isConnected ? "bg-status-success" : "bg-border"}`} />
           {isConnected ? "Receiving results" : "Connection closed"}
         </span>
-
         {activeConfig && (
           <span className="font-mono text-xs">
-            Top-K {activeConfig.top_k} ·{" "}
-            {activeConfig.ground_truth_mode === "pooled"
-              ? `pooled ground truth (top ${activeConfig.pool_top_n})`
-              : "manual ground truth"}
+            Top-K {activeConfig.top_k} · {activeConfig.ground_truth_mode === "pooled" ? `pooled ground truth (top ${activeConfig.pool_top_n})` : "manual ground truth"}
+            {" · "}{activeConfig.modules?.length ? `${activeConfig.modules.length} RAG modules enabled` : "Baseline · modules off"}
           </span>
         )}
       </div>
-
-      {runError && (
-        <div className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          {runError}
-        </div>
-      )}
-
-      {results.length === 0 && isConnected && (
-        <div className="py-12 text-center text-sm text-muted-foreground">
-          Waiting for analysis results…
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {results.map((item, index) => (
-          <div key={`${item.method}-${index}`} className="overflow-hidden">
-            {progress[item.method] !== undefined &&
-              progress[item.method] < 100 && (
-                <div className="mb-1 h-[3px] w-full overflow-hidden bg-muted">
-                  <div
-                    className="h-full bg-foreground/60 transition-all"
-                    style={{ width: `${progress[item.method]}%` }}
-                  />
-                </div>
-              )}
-
-            <DeepAnalysisCard
-              method={item.method}
-              aiModel={item.aiModel}
-              query={item.query}
-              answer={item.answer}
-              retrievedChunks={item.retrievedChunks}
-              evaluationMetrics={item.evaluation}
-            />
+      {runError && <div role="alert" className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{runError}</div>}
+      {results.length === 0 && isConnected && <div className="py-12 text-center text-sm text-muted-foreground">Waiting for analysis results…</div>}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {results.map((item) => (
+          <div key={`${item.method}-${item.aiModel}`} className="overflow-hidden">
+            {progress[item.method] !== undefined && progress[item.method] < 100 && (
+              <div className="mb-1 h-[3px] w-full overflow-hidden bg-muted"><div className="h-full bg-foreground/60 transition-all" style={{ width: `${progress[item.method]}%` }} /></div>
+            )}
+            <DeepAnalysisCard method={item.method} aiModel={item.aiModel} query={item.query} answer={item.answer} retrievedChunks={item.retrievedChunks} evaluationMetrics={item.evaluation} />
           </div>
         ))}
       </div>

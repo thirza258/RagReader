@@ -25,6 +25,8 @@ from router.serializers import (
     QuerySerializer 
 )
 from ai_handler.model_catalog import fetch_catalog
+from common.analysis_modules import RAG_MODULES
+from router.analysis import has_completed_analysis
 from common.constant import (
     CHILD_TOP_K_MAX,
     CHILD_TOP_K_MIN,
@@ -349,6 +351,7 @@ class AnalysisConfigView(APIView):
 
         return Response({
             "retrieval_methods": RETRIEVAL_METHODS,
+            "modules": RAG_MODULES,
             "models": catalog["models"],
             "default_models": MODEL_IDS,
             "model_catalog": {
@@ -432,6 +435,12 @@ class StartAnalysisView(GenericAPIView):
             # Which method × model variants to run, and how deep to retrieve.
             # Absent or partial input falls back to the full matrix.
             config = normalize_analysis_config(request.data.get("config"))
+            modules_available = has_completed_analysis(current_conversation.pk)
+            if config["modules"] and not modules_available:
+                return Response(
+                    {"error": "Complete the first deep analysis before enabling RAG modules."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             variants = build_variants(config)
 
             batch_id = str(uuid.uuid4())
@@ -461,6 +470,7 @@ class StartAnalysisView(GenericAPIView):
                 "query": query,
                 "config": config,
                 "expected_count": len(variants),
+                "modules_available": modules_available,
                 # What the retrieval metrics will actually be scored against.
                 # Surfaced so the UI can flag "you asked for pooling but the
                 # stored ground truth is still your manual selection".
@@ -498,6 +508,7 @@ class AnalysisStatusView(GenericAPIView):
                 chunks = [
                     {
                         "chunk_id": chunk.get("id") or chunk.get("chunk_id"),
+                        "id": chunk.get("id") or chunk.get("chunk_id"),
                         "text": chunk.get("text", ""),
                         "score": chunk.get("score")
                     }
@@ -527,6 +538,9 @@ class AnalysisStatusView(GenericAPIView):
                 "is_complete": is_complete,
                 "total": total_expected,
                 "completed": len(data),
+                "document_id": analysis_batch.conversation.document_id if analysis_batch.conversation else None,
+                "config": normalize_analysis_config(analysis_batch.config),
+                "modules_available": has_completed_analysis(analysis_batch.conversation_id),
                 "results": data,
                 "data": data 
             }

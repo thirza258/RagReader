@@ -277,11 +277,11 @@ class DenseRAGPipeline(BasePipeline):
         document = Document.objects.get(id=document_id)
         conversation = Conversation.objects.get(id=conversation_id)
 
-        result = self._run_core(document, conversation.query)
+        result = self._run_analysis_core(document, conversation)
 
         retrieved_docs = result.pop("retrieved_docs", [])
 
-        if not retrieved_docs:
+        if not retrieved_docs and not self.config.get("modules"):
             result["evaluation"] = {}
             return result
 

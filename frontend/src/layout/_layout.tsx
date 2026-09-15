@@ -1,6 +1,6 @@
 import NavBar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useNavigate, useParams } from "react-router-dom";
 import DeepSidebar, { AnalysisRunState } from "../components/DeepSidebar";
 import { AnalysisRequest, DeepResultContextType } from "../types/types";
 
@@ -41,6 +41,11 @@ const LoginPageLayout = () => {
 };
 
 const DeepResultLayout = () => {
+  const { conversationId } = useParams();
+  return <DeepResultWorkspace key={conversationId} />;
+};
+
+const DeepResultWorkspace = () => {
   const navigate = useNavigate();
 
   const [sharedIds, setSharedIds] = useState<{
@@ -52,8 +57,10 @@ const DeepResultLayout = () => {
   // pieces of state are the whole conversation between them.
   const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const [stopSignal, setStopSignal] = useState(0);
+  const [modulesAvailable, setModulesAvailable] = useState(false);
+  const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [runState, setRunState] = useState<AnalysisRunState>({
-    isRunning: false,
+    isRunning: true,
     completed: 0,
     total: 0,
   });
@@ -66,6 +73,9 @@ const DeepResultLayout = () => {
           conversationId={sharedIds.conversationId}
           documentId={sharedIds.documentId}
           runState={runState}
+          modulesAvailable={modulesAvailable}
+          selectedModules={selectedModules}
+          onModulesChange={setSelectedModules}
           onBack={() => navigate(-1)}
           onAnalyze={(config) =>
             // A fresh nonce is what makes pressing Run twice with the same
@@ -81,6 +91,8 @@ const DeepResultLayout = () => {
                analysisRequest,
                stopSignal,
                setRunState,
+               setModulesAvailable,
+               setSelectedModules,
              } satisfies DeepResultContextType}
            />
         </main>

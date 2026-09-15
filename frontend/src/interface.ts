@@ -22,6 +22,14 @@ export interface EvaluationMetric {
   chunk_evaluation: Record<string, number>;
     response_evaluation: Record<string, number | string>;
     retrieval_score?: { chunk_id: string; score: number }[];
+    module_trace?: ModuleTrace;
+}
+
+export interface ModuleTrace {
+  enabled: string[];
+  route: string;
+  steps: { module: string; label?: string; status: "completed" | "skipped" | "fallback"; detail: string; queries?: string[] }[];
+  queries: string[];
 }
 
 export interface AnalysisResult {
@@ -78,6 +86,7 @@ export interface StartAnalysisResponse {
   query: string;
   expected_count: number;
   config: DeepAnalysisConfig;
+  modules_available: boolean;
   /** What the retrieval metrics will actually be scored against. */
   ground_truth: { count: number; source: GroundTruthMode | null };
 }
@@ -87,6 +96,17 @@ export interface HistoryItem {
   title: string;
   type: "file" | "url";
   date: string; 
+}
+
+export interface AnalysisStatusResponse {
+  batch_id: string;
+  document_id: string | number | null;
+  is_complete: boolean;
+  total: number;
+  completed: number;
+  config: DeepAnalysisConfig;
+  modules_available: boolean;
+  results: AnalysisResult[];
 }
 
 export interface TaskData {
@@ -107,6 +127,7 @@ export type GroundTruthMode = "manual" | "pooled";
  * so the config round-trips without a mapping layer.
  */
 export interface DeepAnalysisConfig {
+  modules: string[];
   methods: string[];
   models: string[];
   top_k: number;
@@ -157,6 +178,7 @@ export interface NumericRange {
 
 /** Served by GET /analysis-config/ — never hardcode these in the UI. */
 export interface AnalysisConfigOptions {
+  modules: (AnalysisOption & { stage: string })[];
   retrieval_methods: AnalysisOption[];
   models: CatalogModel[];
   /** The ids pre-selected when nothing else is chosen. */

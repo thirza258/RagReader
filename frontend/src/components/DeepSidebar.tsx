@@ -22,6 +22,9 @@ interface DeepSidebarProps {
   conversationId: string | null;
   documentId: string | null;
   runState: AnalysisRunState;
+  modulesAvailable: boolean;
+  selectedModules: string[];
+  onModulesChange: (modules: string[]) => void;
   onBack: () => void;
   onAnalyze: (config: DeepAnalysisConfig) => void;
   onStop: () => void;
@@ -30,6 +33,7 @@ interface DeepSidebarProps {
 // Used only until GET /analysis-config/ answers, so the panel never renders
 // with an empty selection. The server is the authority on every value here.
 const FALLBACK_OPTIONS: AnalysisConfigOptions = {
+  modules: [],
   retrieval_methods: [
     { id: "Dense Retrieval", label: "Dense" },
     { id: "Sparse Retrieval", label: "Sparse" },
@@ -56,6 +60,7 @@ const FALLBACK_OPTIONS: AnalysisConfigOptions = {
     overlap: 50,
   },
   defaults: {
+    modules: [],
     methods: ["Dense Retrieval", "Sparse Retrieval", "Hybrid Retrieval"],
     models: [],
     top_k: 5,
@@ -126,6 +131,9 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
   conversationId,
   documentId,
   runState,
+  modulesAvailable,
+  selectedModules,
+  onModulesChange,
   onBack,
   onAnalyze,
   onStop,
@@ -214,6 +222,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
 
   const config: DeepAnalysisConfig = useMemo(
     () => ({
+      modules: modulesAvailable ? selectedModules : [],
       methods,
       models,
       top_k: topK,
@@ -226,6 +235,8 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
       judge_model: judgeModel,
     }),
     [
+      modulesAvailable,
+      selectedModules,
       methods,
       models,
       topK,
@@ -317,6 +328,44 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
               </label>
             ))}
           </div>
+        </section>
+
+        <section aria-labelledby="rag-modules-heading">
+          <h3 id="rag-modules-heading" className="mb-3 border-b border-border pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            RAG modules · {selectedModules.length} enabled
+          </h3>
+          <p id="rag-modules-help" className="mb-3 text-xs text-muted-foreground">
+            {modulesAvailable
+              ? "Choose modules, then click Run Deep Analysis again. They work together on each selected method and model. Extra stages may take longer."
+              : "Modules unlock after the first deep analysis completes. Enable them for your next run."}
+          </p>
+          <fieldset disabled={!modulesAvailable || runState.isRunning || isLoadingOptions} aria-describedby="rag-modules-help" className="space-y-2 disabled:opacity-60">
+            <legend className="sr-only">Optional RAG modules</legend>
+            {options.modules.map((module) => (
+              <label key={module.id} className="flex items-start justify-between gap-3 border border-border bg-background p-3">
+                <span>
+                  <span className="block text-sm font-medium">{module.label}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{module.description}</span>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={module.label}
+                  checked={selectedModules.includes(module.id)}
+                  onChange={() => onModulesChange(toggle(selectedModules, module.id))}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                />
+              </label>
+            ))}
+            {selectedModules.length > 0 && (
+              <button type="button" onClick={() => onModulesChange([])} className="text-xs underline underline-offset-4 disabled:cursor-not-allowed">
+                Turn all modules off
+              </button>
+            )}
+          </fieldset>
+          {!isLoadingOptions && options.modules.length === 0 && (
+            <p className="text-xs text-muted-foreground">Module options could not be loaded. Reload to try again.</p>
+          )}
         </section>
 
         {/* --- 3. MODELS --- */}

@@ -30,6 +30,7 @@ this one.
 """
 import os
 import re
+from common.analysis_modules import normalize_modules
 
 RETRIEVAL_METHODS = [
     {"id": "Dense Retrieval", "label": "Dense", "description": "Semantic vector search over embeddings."},
@@ -200,6 +201,7 @@ INGEST_CONFIG = {
 
 
 DEFAULT_ANALYSIS_CONFIG = {
+    "modules": [],
     "methods": METHOD_IDS,
     "models": MODEL_IDS[:DEFAULT_MODEL_LIMIT],
     "top_k": DEFAULT_TOP_K,
@@ -216,6 +218,8 @@ DEFAULT_ANALYSIS_CONFIG = {
 # retrieves, which `apply_retrieval_depth` sets per call). Two configs that
 # agree on these can share one cached engine.
 PIPELINE_SHAPING_KEYS = (
+    "modules",
+    "judge_model",
     "llm_model",
     "temperature",
     "embedding_model",
@@ -294,6 +298,7 @@ def normalize_analysis_config(raw: dict | None) -> dict:
 
     return {
         "methods": methods,
+        "modules": normalize_modules(raw.get("modules")),
         "models": models,
         "top_k": _clamped_int(raw.get("top_k"), DEFAULT_TOP_K, TOP_K_MIN, TOP_K_MAX),
         "ground_truth_mode": _clean_choice(
@@ -352,4 +357,5 @@ def build_pipeline_config(config: dict | None = None, model: str | None = None) 
         "rrf_k": config["rrf_k"],
         "reranker_model": config["reranker_model"],
         "judge_model": config["judge_model"],
+        "modules": config["modules"],
     }
