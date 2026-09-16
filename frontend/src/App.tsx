@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import {
   ChatLayout,
@@ -14,6 +15,13 @@ import ErrorPage from "./pages/ErrorPage";
 import LoadingPage from "./pages/LoadingPage";
 import GroundTruthSelector from "./pages/GroundTruth";
 import Docs from "./pages/Docs";
+
+const Courses = lazy(() => import("./pages/Courses"));
+const coursePage = (
+  <Suspense fallback={<main className="container mx-auto px-6 pt-28" role="status">Loading courses…</main>}>
+    <Courses />
+  </Suspense>
+);
 
 function App() {
   return (
@@ -54,6 +62,8 @@ function App() {
 
         <Route element={<LandingPageLayout />}>
           <Route path="/docs" element={<Docs />} />
+          <Route path="/courses/:courseId?/:lessonId?" element={coursePage} />
+          <Route path="/courses/*" element={coursePage} />
         </Route>
 
       </Routes>

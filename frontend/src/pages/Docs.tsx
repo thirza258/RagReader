@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { steps } from "../components/data/DocsData";
 import SEO from "../components/SEO";
 
@@ -17,6 +18,9 @@ const Docs: React.FC = () => {
           <p className="prose-note measure mt-4">
             Every screen you'll pass through, from signing in to reading the
             evaluation metrics for each retrieval method and model.
+          </p>
+          <p className="mt-5 text-sm text-muted-foreground">
+            Learn the ideas behind each step in the <Link to="/courses" className="link">full RAG courses</Link>, from fundamentals to all 13 optional modules.
           </p>
         </header>
 

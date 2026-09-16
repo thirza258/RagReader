@@ -1,10 +1,11 @@
 # https://rag.nevatal.tech/robots.txt
-# Only marketing, walkthrough, and sign-in entry points are public.
+# Marketing, courses, walkthrough, and sign-in entry points are public.
 # Dynamic user application routes are dis-allowed.
 
 User-agent: *
 Allow: /
 Allow: /docs
+Allow: /courses
 Allow: /login
 Disallow: /chat
 Disallow: /deep-result/

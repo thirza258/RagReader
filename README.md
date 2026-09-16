@@ -75,6 +75,23 @@ RAGReader is an advanced AI-powered application designed to revolutionize how yo
 
 Once all services are running, access the app at [http://localhost:5173](http://localhost:5173) (or as indicated in the terminal).
 
+### Learn RAG in the app
+
+Open **Courses** in the navigation (or visit `/courses`) for a complete learning
+path: six courses and 28 lessons covering RAG fundamentals, all 13 optional
+modules, evaluation, module composition, and a final experiment capstone.
+Each lesson includes objectives, explanations, worked examples, a practical
+exercise with a suggested solution, and a quiz with feedback.
+
+Courses are public and need no backend or model calls to read. Correctly answer
+the knowledge check, then mark a lesson complete to save progress in the current
+browser. Progress is local to that browser, not synced to a user account.
+The course overview provides a fictional practice handbook and an experiment
+worksheet; running the analysis exercises uses the normal configured services.
+
+Course content lives in `frontend/src/data/courses/`. Module lessons describe
+this project's adaptations and limits and link to original research.
+
 ### Optional modules for follow-up deep analysis
 
 After the first deep analysis completes, use the **RAG modules** switches and

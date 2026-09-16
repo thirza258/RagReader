@@ -763,6 +763,9 @@ const LandingPage: React.FC = () => {
             >
               Read the walkthrough
             </Link>
+            <Link to="/courses" className="border border-input px-5 py-2.5 text-sm font-medium transition-colors hover:bg-accent">
+              Take the RAG courses
+            </Link>
           </div>
         </section>
       </main>
@@ -803,6 +806,9 @@ const LandingPage: React.FC = () => {
                   <Link to="/docs" className="link">
                     Walkthrough guide
                   </Link>
+                </li>
+                <li>
+                  <Link to="/courses" className="link">RAG courses</Link>
                 </li>
                 <li>
                   <a href={`${REPO_URL}#readme`} className="link" target="_blank" rel="noreferrer">

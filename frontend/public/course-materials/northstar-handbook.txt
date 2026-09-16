@@ -1,0 +1,27 @@
+NORTHSTAR SEARCH HANDBOOK
+Fictional course practice document, version 1.
+All names, events, and policies in this document are invented for RAG exercises.
+
+1. Purpose and vocabulary
+Northstar provides a search service for internal product catalogs. Atlas is one of the catalogs served by Northstar. A search cache stores previously computed search results so repeated requests do not need to repeat all search work. Cache duration is distinct from request-log retention: cached results help serve queries, while request logs help investigate operational behavior. This handbook covers the current search cache rules, access process, and an incident used for training. It does not identify the designer of Atlas or specify a service launch date.
+
+2. Standard cache policy
+The standard search cache lasts 15 minutes. A cached result may be reused during that interval. After the interval expires, the service recomputes the result on a subsequent request. The 15-minute rule balances repeated search work with the need for fresh catalog information. The standard applies unless a catalog has a documented exception. A cache duration is an upper bound on reuse under this policy; an explicit invalidation can clear a result earlier. The cache duration must not be confused with how long operational request logs are retained.
+
+3. Atlas exception
+Atlas uses a 5-minute search cache instead of the standard 15-minute cache. Its catalog changes more frequently, so the shorter duration reduces the time users can see outdated results. The documented reason for Atlas's exception is catalog freshness. This handbook does not attribute the exception to different hardware, a server replacement, or a different access policy. Explicit invalidation after a catalog change can clear Atlas results before the five-minute interval ends, just as it can clear results for other catalogs.
+
+4. Request-log retention
+Northstar request logs are retained for 30 days. They record operational request information for debugging and incident review. After the retention period, the logs are deleted under this policy. The 30-day retention period does not determine the search cache duration: the standard cache is 15 minutes and Atlas has its own 5-minute exception. Request logs and cached search results serve different purposes and have separate lifecycles. A question about keeping request records should be answered from the log policy, not from a cache duration.
+
+5. Access approval
+New access to the Northstar service requires approval from a team lead. The requester supplies a business purpose and the catalog they need to use. After approval, an administrator grants the appropriate role. The team lead approves the request; the administrator performs the access change. The process applies to Atlas as well as other catalogs. An approved request does not authorize access to unrelated catalogs. This handbook does not publish any passwords, API keys, private credentials, or instructions for bypassing the access process.
+
+6. Stale-results incident
+In a fictional training incident, catalog records changed but some users continued to receive cached results reflecting the old records. Waiting for each cache interval to expire allowed the stale results to persist temporarily. The incident concerned freshness after a catalog change, not the request-log deletion schedule. The investigation distinguished a configured cache duration from an explicit invalidation event. A short duration reduces the possible stale interval, but it does not ensure a cached result is cleared immediately after every catalog update.
+
+7. Corrective action and policy relationship
+The team added explicit cache invalidation after catalog changes to address the stale-results incident. This clears affected cached results before their ordinary time-based expiry. The action complements the existing durations: the standard remains 15 minutes and Atlas remains 5 minutes. The handbook records no server replacement as part of the corrective action. When explaining the incident, connect the stale cached results to the added invalidation step. Do not confuse that action with the 30-day log-retention policy or the team-lead approval process.
+
+8. Unsupported questions
+The handbook does not identify Atlas's designer, the service's exact launch date, or the number of production servers. A reader using only this document should state that these facts are not provided. Related facts about access, cache duration, or incident response do not establish any of those missing details. The document is intentionally small and fictional so learners can independently label evidence, inspect retrieval mistakes, test abstention, and compare methods without using private business data.

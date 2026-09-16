@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Search } from "lucide-react";
 import service from "../services/service";
 import ModuleCompatibilityPanel from "./ModuleCompatibilityPanel";
@@ -343,6 +344,9 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
               ? "Choose modules, then click Run Deep Analysis again. They work together on each selected method and model. Extra stages may take longer."
               : "Modules unlock after the first deep analysis completes. Enable them for your next run."}
           </p>
+          <Link to="/courses?category=RAG+modules" target="_blank" rel="noreferrer" className="link mb-3 inline-block text-xs">
+            Learn how each module works <span className="sr-only">(opens in a new tab)</span>
+          </Link>
           <ModuleCompatibilityPanel
             compatibility={options.module_compatibility}
             modules={options.modules}

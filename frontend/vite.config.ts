@@ -28,7 +28,7 @@ export default defineConfig({
       injectRegister: 'script',
       workbox: {
         // The webmanifest is precached automatically by the plugin.
-        globPatterns: ['**/*.{js,css,html,png,svg,jpg,jpeg,webp,ico,woff2,txt}'],
+        globPatterns: ['**/*.{js,css,html,png,svg,jpg,jpeg,webp,ico,woff2,txt,md}'],
         globIgnores: ['**/og-image*', '**/vite.svg'],
         navigateFallback: '/index.html',
         // nginx already falls back to index.html for unknown paths; the

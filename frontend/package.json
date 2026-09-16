@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test:modules": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:courses": "node --experimental-strip-types --test tests/courses.test.mjs",
     "preview": "vite preview",
     "icons:pwa": "node scripts/generate-pwa-icons.mjs"
   },

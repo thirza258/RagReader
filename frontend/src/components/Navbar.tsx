@@ -57,7 +57,7 @@ const Navbar: React.FC = () => {
 
   return (
     <nav className="fixed top-0 z-50 w-full border-b border-border bg-background">
-      <div className="container mx-auto flex h-16 max-w-4xl items-center justify-between px-6">
+      <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         {/* Wordmark */}
         <Link
           to="/"
@@ -67,9 +67,12 @@ const Navbar: React.FC = () => {
         </Link>
 
         {/* Desktop navigation */}
-        <div className="hidden items-center gap-6 text-sm md:flex">
+        <div className="hidden items-center gap-5 text-sm lg:flex">
           <Link to="/" className={navLink(location.pathname === "/")}>
             Home
+          </Link>
+          <Link to="/courses" aria-current={location.pathname.startsWith("/courses") ? "page" : undefined} className={navLink(location.pathname.startsWith("/courses"))}>
+            Courses
           </Link>
           {SECTIONS.map((section) => (
             <button
@@ -94,7 +97,7 @@ const Navbar: React.FC = () => {
         </div>
 
         {/* Desktop account actions */}
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="hidden items-center gap-2 lg:flex">
           {username ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -155,7 +158,7 @@ const Navbar: React.FC = () => {
 
         {/* Mobile toggle */}
         <button
-          className="rounded-sm p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+          className="rounded-sm p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
           onClick={() => setIsMenuOpen(!isMenuOpen)}
           aria-label="Toggle navigation menu"
           aria-expanded={isMenuOpen}
@@ -166,9 +169,12 @@ const Navbar: React.FC = () => {
 
       {/* Mobile menu */}
       {isMenuOpen && (
-        <div className="flex flex-col gap-4 border-t border-border bg-background px-6 py-5 text-sm md:hidden">
+        <div className="flex max-h-[calc(100dvh-4rem)] flex-col gap-4 overflow-y-auto border-t border-border bg-background px-6 py-5 text-sm lg:hidden">
           <Link to="/" onClick={() => setIsMenuOpen(false)} className="hover:text-primary">
             Home
+          </Link>
+          <Link to="/courses" onClick={() => setIsMenuOpen(false)} aria-current={location.pathname.startsWith("/courses") ? "page" : undefined} className={navLink(location.pathname.startsWith("/courses"))}>
+            Courses
           </Link>
           {SECTIONS.map((section) => (
             <button
