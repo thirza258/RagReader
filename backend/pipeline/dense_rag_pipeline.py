@@ -1,3 +1,6 @@
+from django.db import transaction
+from common.analysis_progress import progress_stage, report_progress
+from common.embeddings import validate_vectors
 import os
 import pickle
 import logging
@@ -46,7 +49,8 @@ class DenseRAGPipeline(BasePipeline):
             strategy=config.get("chunk_strategy", DEFAULT_CHUNK_STRATEGY),
             chunk_size=config.get("chunk_size", DEFAULT_CHUNK_SIZE),
             overlap=config.get("overlap", DEFAULT_CHUNK_OVERLAP),
-            embedding_client=self.rag.client
+            embedding_client=self.rag.client,
+            embedding_model=self.rag.model,
         )
         self.loader = DataLoader()
 
@@ -63,6 +67,7 @@ class DenseRAGPipeline(BasePipeline):
             # records that, and comparing across two embedding spaces produces
             # meaningless similarities rather than an error.
             "embedding_model": self._embedding_model(),
+            "chunk_config": self._get_chunk_config(),
         }
         with open(path, "wb") as f:
             pickle.dump(data, f)
@@ -74,10 +79,13 @@ class DenseRAGPipeline(BasePipeline):
 
             if not self._embeddings_still_match(data.get("embedding_model")):
                 return False
-
-            self.rag.documents = data.get('documents', [])
-            self.rag.document_vectors = data.get('vectors', [])
-            self.rag.document_metadata = data.get("metadata", []) 
+            if data.get("chunk_config") and data["chunk_config"] != self._get_chunk_config():
+                return False
+            documents, metadata = data.get("documents", []), data.get("metadata", [])
+            vectors = validate_vectors(data.get("vectors", []), len(documents))
+            if len(metadata) != len(documents) or any(not isinstance(row, dict) or row.get("chunk_id") is None for row in metadata):
+                return False
+            self.rag.documents, self.rag.document_metadata, self.rag.document_vectors = documents, metadata, vectors
             return True
         except Exception as e:
             logger.error(f"Error loading state from {path}: {e}")
@@ -86,12 +94,11 @@ class DenseRAGPipeline(BasePipeline):
     def _embeddings_still_match(self, stored_model: str | None) -> bool:
         """False when the index on disk came from a different embedding model.
 
-        Indexes written before this stamp existed carry no model and are
-        trusted; a recorded mismatch routes into the same discard-and-rebuild
-        path as a corrupt file.
+        Indexes without a model stamp cannot safely be mixed with new query
+        vectors. A missing stamp or model mismatch requires re-embedding.
         """
         current = self._embedding_model()
-        if not stored_model or not current or stored_model == current:
+        if stored_model and stored_model == current:
             return True
         logger.warning(
             f"Index was embedded with '{stored_model}' but this pipeline uses "
@@ -99,6 +106,7 @@ class DenseRAGPipeline(BasePipeline):
         )
         return False
 
+    @transaction.atomic
     def _build_index(self, username: str, document: Document) -> str:
         """
         Internal function that performs the heavy indexing work.
@@ -218,14 +226,20 @@ class DenseRAGPipeline(BasePipeline):
             if not self.rag.documents or len(self.rag.documents) == 0:
                 raise RuntimeError("State loaded from disk, but memory is still empty.")
 
+        progress_stage("search", "Optimizing the question and searching the document.")
         optimized_query = self.optimize_query(query)
         retrieved_docs = self.rag.retrieve(optimized_query)
 
         if not retrieved_docs:
             retrieved_docs = self.rag.retrieve(query)
 
+        report_progress("activity", "retrieval", "completed", f"Retrieved {len(retrieved_docs)} source passages.", queries=[optimized_query])
+        progress_stage("evidence", f"Preparing {len(retrieved_docs)} source passages for the answer.")
+
         if not retrieved_docs:
             logger.warning(f"No relevant documents found for query: {query}")
+            progress_stage("evidence", "No document evidence was retrieved.", status="skipped")
+            progress_stage("answer", "Writing an answer without retrieved evidence.")
             answer = self.llm.rag_generate(query, context="")
             return {
                 "answer": answer,
@@ -235,6 +249,7 @@ class DenseRAGPipeline(BasePipeline):
             }
 
         context_str = "\n\n".join(doc["text"] for doc in retrieved_docs)
+        progress_stage("answer", "Writing the answer using the retrieved evidence.")
         answer = self.llm.rag_generate(optimized_query, context_str)
 
         return {
@@ -252,16 +267,17 @@ class DenseRAGPipeline(BasePipeline):
         }
 
 
-    def run(self, username: str, query: str) -> Dict[str, Any]:
+    def run(self, username: str, query: str, document_id=None) -> Dict[str, Any]:
         """
         Retrieves relevant documents and generates an answer.
         """
         logger.info(f"Running Chat for {username}...")
 
-        document = self.get_document(username)
+        document = Document.objects.get(pk=document_id, user__username=username) if document_id is not None else self.get_document(username)
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
+        self.prepare_document(document)
         result = self._run_core(document, query)
 
         result.pop("retrieved_docs", None)
@@ -279,11 +295,8 @@ class DenseRAGPipeline(BasePipeline):
 
         result = self._run_analysis_core(document, conversation)
 
-        retrieved_docs = result.pop("retrieved_docs", [])
-
-        if not retrieved_docs and not self.config.get("modules"):
-            result["evaluation"] = {}
-            return result
+        progress_stage("evaluate", "Comparing retrieved chunks and evaluating the answer with Ragas.")
+        result.pop("retrieved_docs", None)
 
         retrieved_ids = set(result["chunk_ids"])
 
@@ -297,22 +310,23 @@ class DenseRAGPipeline(BasePipeline):
         )
 
         evaluation_chunks_results = evaluate_chunks(retrieved_ids, ground_truth_ids)
+        for name, score in evaluation_chunks_results.items():
+            report_progress("metric", name, "completed", "Compared retrieved and reference chunk IDs.", score=score)
 
         ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
-        if ground_truth_response:
-            evaluation_response_result = evaluate_response(
-                result["answer"],
-                ground_truth_response.response,
-                chunks=[doc["text"] for doc in result.get("context", [])],
-                judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
-            )
-        else:
-            logger.warning(f"No ground truth response for conversation {conversation_id}")
-
+        report = evaluate_response(
+            result["answer"],
+            ground_truth_response.response if ground_truth_response else None,
+            chunks=[doc["text"] for doc in result.get("context", [])],
+            judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
+            question=conversation.query,
+        )
         result["evaluation"] = {
             "chunk_evaluation": evaluation_chunks_results,
-            "response_evaluation": evaluation_response_result if ground_truth_response else {}
+            "response_evaluation": report["scores"],
+            "response_evaluation_details": report["details"],
         }
+        progress_stage("evaluate", "Evaluation finished. Saving the result.", status="completed")
         return result
 
     
@@ -324,9 +338,9 @@ class DenseRAGPipeline(BasePipeline):
 
         if job:
             job.progress = 10
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
-        document = self.get_document(username)
+        document = job.document if job is not None else self.get_document(username)
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
@@ -341,7 +355,7 @@ class DenseRAGPipeline(BasePipeline):
 
             if job:
                 job.progress = 80
-                job.save()
+                job.save(update_fields=["progress", "updated_at"])
 
             success = self._load_state(doc_vector.vectorstore_location)
             if success:
@@ -352,13 +366,13 @@ class DenseRAGPipeline(BasePipeline):
 
         if job:
             job.progress = 20
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
         self._build_index(username, document)
 
         if job:
             job.progress = 90
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
         logger.info("Initialization Complete.")
         return True

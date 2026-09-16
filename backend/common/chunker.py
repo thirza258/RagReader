@@ -2,17 +2,21 @@ import re
 import numpy as np
 from typing import List, Literal
 from sklearn.metrics.pairwise import cosine_similarity
+from common.constant import DEFAULT_EMBEDDING_MODEL
+from common.embeddings import embed_texts
 
 class DocumentChunker:
     def __init__(self, 
                  strategy: Literal["fixed", "paragraph", "semantic"] = "paragraph",
                  chunk_size: int = 500, 
                  overlap: int = 50,
-                 embedding_client=None):
+                 embedding_client=None,
+                 embedding_model=DEFAULT_EMBEDDING_MODEL):
         self.strategy = strategy
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.client = embedding_client
+        self.embedding_model = embedding_model
 
     def chunk(self, text: str) -> List[str]:
         print(f"Chunking document with strategy '{self.strategy}'...")
@@ -88,15 +92,7 @@ class DocumentChunker:
         if not sentences:
             return[]
 
-        try:
-            embeddings_resp = self.client.embeddings.create(
-                input=sentences,
-                model="openai/text-embedding-3-small"
-            )
-            vecs =[d.embedding for d in embeddings_resp.data]
-        except Exception as e:
-            print(f"Embedding failed: {e}")
-            return sentences
+        vecs = embed_texts(self.client, sentences, self.embedding_model)
 
         distances =[]
         for i in range(len(vecs) - 1):

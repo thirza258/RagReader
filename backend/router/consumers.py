@@ -1,265 +1,226 @@
-import json
+"""Analysis streaming with durable outcomes and one owner per batch."""
 import asyncio
-from channels.generic.websocket import AsyncWebsocketConsumer
-from django.core.cache import cache
-from asgiref.sync import sync_to_async
-from django.core.exceptions import ObjectDoesNotExist
-
-from router.models import AnalysisBatch, AnalysisResult, GuestUser
-from rag.rag_service import apply_retrieval_depth, rag_registry
-from common.constant import build_variants, normalize_analysis_config
-
+import json
 import logging
+from uuid import UUID, uuid4
+
+from channels.db import database_sync_to_async
+from channels.generic.websocket import AsyncWebsocketConsumer
+
+from common.analysis_progress import progress_scope, progress_stage
+from common.constant import build_variants
+from common.errors import PipelineError, error_payload
+from rag.rag_service import apply_retrieval_depth, engine_execution, rag_registry
+from router.analysis import (
+    HEARTBEAT_SECONDS, batch_snapshot, claim_batch, completion_frame,
+    format_metrics, release_batch, renew_batch, result_frame, save_variant,
+)
+from router.models import AnalysisBatch
 
 logger = logging.getLogger(__name__)
+format_evaluation_metrics = format_metrics  # Historical import used by callers.
+FOLLOW_INTERVAL_SECONDS = 1
+# Orchestration/heartbeats must not queue behind a long synchronous model call.
+def db_call(function):
+    return database_sync_to_async(function, thread_sensitive=False)
 
-def format_evaluation_metrics(metrics):
-    if not metrics:
-        return {}
-    if isinstance(metrics, dict):
-        return metrics
-    if isinstance(metrics, list):
-        out = {}
-        for m in metrics:
-            if isinstance(m, dict) and "name" in m and "value" in m:
-                out[m["name"]] = m["value"]
-            elif isinstance(m, dict):
-                out.update(m)
-        return out
-    return {}
 
 class AnalysisConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        self.stream_available = True
+        self.group_available = False
+        self.job_id = self.scope['url_route']['kwargs']['job_id']
+        await self.accept()
         try:
-            self.job_id = self.scope['url_route']['kwargs']['job_id']
-            self.group_name = f"analysis_{self.job_id}"
-
-            await self.accept()
-
-            if self.channel_layer is not None:
-                try:
-                    await self.channel_layer.group_add(
-                        self.group_name,
-                        self.channel_name
-                    )
-                except Exception as ce:
-                    logger.warning(f"Failed to add to channel group: {ce}")
-
-            asyncio.create_task(self.run_rag_pipeline())
-        except Exception as e:
-            logger.error(f"Error during WebSocket connection: {e}", exc_info=True)
+            self.job_id = str(UUID(self.job_id))
+        except (ValueError, TypeError, AttributeError):
+            await self.send_frame({"status": "ERROR", **error_payload(PipelineError(
+                "invalid_job_id", "Analysis job ID must be a valid UUID.", http_status=400)), "terminal": True})
+            await self.close(code=4400)
+            return
+        self.group_name = f"analysis_{self.job_id}"
+        if self.channel_layer is not None:
             try:
-                await self.accept()
-                await self.send(text_data=json.dumps({"error": f"Connection error: {str(e)}"}))
+                await self.channel_layer.group_add(self.group_name, self.channel_name)
+                self.group_available = True
             except Exception:
-                pass
-            await self.close()
+                logger.warning("Live analysis fan-out unavailable; the direct stream remains usable.")
+        self.pipeline_task = asyncio.create_task(self.run_rag_pipeline())
 
     async def disconnect(self, close_code):
+        self.stream_available = False
+        if self.group_available:
+            try:
+                await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            except Exception:
+                logger.debug("Could not discard analysis subscription", exc_info=True)
+
+    async def send_frame(self, payload, *, broadcast=False):
+        payload = {"batch_id": str(self.job_id), **payload}
+        if self.stream_available:
+            try:
+                await self.send(text_data=json.dumps(payload, allow_nan=False))
+            except Exception:
+                self.stream_available = False
+        if broadcast and getattr(self, "group_available", False):
+            try:
+                await self.channel_layer.group_send(self.group_name, {
+                    "type": "analysis.update", "payload": payload, "sender": self.channel_name,
+                })
+            except Exception:
+                self.group_available = False
+                logger.warning("Analysis subscribers will recover saved outcomes by polling.")
+
+    async def analysis_update(self, event):
+        if event["sender"] == self.channel_name or not self.stream_available:
+            return
+        await self.send_frame(event["payload"])
+        if event["payload"].get("status") == "COMPLETE":
+            self.stream_available = False
+            await self.close()
+
+    async def run_variant(self, method, model, config, username, document_id, conversation_id):
+        loop = asyncio.get_running_loop()
+        events = asyncio.Queue()
+        attempt_id = str(uuid4())
+
+        def publish(event):
+            loop.call_soon_threadsafe(events.put_nowait, event)
+
+        async def stream():
+            sequence = 0
+            while (event := await events.get()) is not None:
+                sequence += 1
+                await self.send_frame({
+                    "status": "STAGE_PROGRESS", "method": method, "aiModel": model,
+                    "attempt_id": attempt_id, "sequence": sequence, "event": event,
+                }, broadcast=True)
+
+        def analyze():
+            with progress_scope(publish):
+                progress_stage("question", "Preparing the document and retrieval index for this question.")
+                engine = rag_registry.get_engine(method, model, config)
+                with engine_execution(engine):
+                    apply_retrieval_depth(engine, config["top_k"], child_top_k=config["child_top_k"])
+                    # Real pipelines load the conversation's exact document in
+                    # _run_analysis_core, rather than the user's latest upload.
+                    return engine.run_analysis(document_id, conversation_id)
+
+        sender = asyncio.create_task(stream())
         try:
-            if self.channel_layer is not None:
-                await self.channel_layer.group_discard(
-                    self.group_name,
-                    self.channel_name
-                )
-        except Exception as e:
-            logger.debug(f"Error during disconnect: {e}")
+            # Channels also uses its thread-sensitive executor for connection
+            # cleanup. Keeping model calls there blocks other sockets opening.
+            return await database_sync_to_async(analyze, thread_sensitive=False)()
+        finally:
+            loop.call_soon_threadsafe(events.put_nowait, None)
+            await sender
+
+    async def heartbeat(self, batch_id, token, stopped):
+        while not stopped.is_set():
+            try:
+                await asyncio.wait_for(stopped.wait(), timeout=HEARTBEAT_SECONDS)
+            except TimeoutError:
+                try:
+                    if not await db_call(renew_batch)(batch_id, token):
+                        return
+                except Exception:
+                    logger.warning("Could not renew analysis execution lease", exc_info=True)
 
     async def run_rag_pipeline(self):
+        batch = None
+        owner = False
+        token = uuid4()
+        heartbeat = None
+        stopped = asyncio.Event()
         try:
-            analysis_batch = None
             try:
-                analysis_batch = await sync_to_async(
-                    lambda: AnalysisBatch.objects.select_related("user", "conversation", "conversation__document").get(job_id=self.job_id)
-                )()
-            except (ObjectDoesNotExist, ValueError):
-                analysis_batch = None
-
-            input_data = await sync_to_async(cache.get)(f"job_input_{self.job_id}")
-
-            if not input_data and not analysis_batch:
-                await self.send(text_data=json.dumps({"error": "Batch record not found in DB"}))
+                batch = await db_call(lambda: AnalysisBatch.objects.select_related(
+                    "user", "conversation", "conversation__document",
+                ).get(job_id=self.job_id))()
+            except AnalysisBatch.DoesNotExist:
+                raise PipelineError("job_not_found", "Analysis batch not found. Start a new analysis.", http_status=404)
+            # Cached request data is optional and never overrides the DB binding.
+            snapshot = await db_call(batch_snapshot)(batch)
+            if snapshot["is_finished"]:
+                await self.send_frame({"status": "REPLAYING"})
+                for result in snapshot["results"]:
+                    await self.send_frame({**result, "replayed": True})
+                await self.send_frame(completion_frame(snapshot))
                 await self.close()
                 return
+            if not batch.conversation or not batch.conversation.document_id:
+                raise PipelineError("missing_document", "The analysis conversation has no document. Upload a document and start a new conversation.", http_status=400)
+            if batch.conversation.user_id != batch.user_id or batch.conversation.document.user_id != batch.user_id:
+                raise PipelineError("document_mismatch", "The analysis document does not belong to this conversation's user.", http_status=400)
 
-            if analysis_batch and not input_data:
-                username = analysis_batch.user.username if analysis_batch.user else None
-                query = analysis_batch.query
-                conversation_id = str(analysis_batch.conversation_id) if analysis_batch.conversation_id else None
-                document_id = (
-                    str(analysis_batch.conversation.document_id)
-                    if (analysis_batch.conversation and analysis_batch.conversation.document_id)
-                    else None
-                )
-                config_data = analysis_batch.config
-            else:
-                username = input_data['username']
-                query = input_data['query']
-                document_id = input_data.get('document_id')
-                conversation_id = input_data.get('conversation_id')
-                config_data = input_data.get("config")
-                if not analysis_batch:
-                    try:
-                        analysis_batch = await sync_to_async(AnalysisBatch.objects.get)(job_id=self.job_id)
-                    except ObjectDoesNotExist:
-                        await self.send(text_data=json.dumps({"error": "Batch record not found in DB"}))
-                        await self.close()
-                        return
-
-            # The batch records the config chosen in the sidebar; batches
-            # created before that field existed fall back to the full matrix.
-            config = normalize_analysis_config(analysis_batch.config or config_data)
-            variants = build_variants(config)
-            top_k = config["top_k"]
-
-            existing_results = await sync_to_async(
-                lambda: list(AnalysisResult.objects.filter(batch=analysis_batch))
-            )()
-
-            completed_variants = {
-                (r.method, r.ai_model) for r in existing_results
-            }
-
-            if len(completed_variants) >= len(variants):
-                await self.send(text_data=json.dumps({"status": "REPLAYING"}))
-                for result in existing_results:
-                    await self.send(text_data=json.dumps({
-                        "batch_id": str(self.job_id),
-                        "query": result.query,
-                        "method": result.method,
-                        "aiModel": result.ai_model,
-                        "answer": result.answer,
-                        "context": result.retrieved_chunks or [],
-                        "evaluation": format_evaluation_metrics(result.evaluation_metrics),
-                        "progress": 100,
-                        "replayed": True
-                    }))
-                await self.send(text_data=json.dumps({"status": "COMPLETE", "progress": 100}))
-                await self.close()
+            await self.send_frame({"status": "CONFIG", "config": snapshot["config"], "expected_count": snapshot["total"]})
+            seen = set()
+            waiting_sent = False
+            while self.stream_available:
+                snapshot = await db_call(batch_snapshot)(batch)
+                for result in snapshot["results"]:
+                    key = (result["method"], result["aiModel"])
+                    if key not in seen:
+                        seen.add(key)
+                        await self.send_frame({**result, "replayed": True})
+                if snapshot["is_finished"]:
+                    await self.send_frame(completion_frame(snapshot))
+                    await self.close()
+                    return
+                owner = await db_call(claim_batch)(batch.pk, token)
+                if owner:
+                    break
+                if not waiting_sent:
+                    await self.send_frame({"status": "WAITING", "message": "This batch is already running. Waiting for its current work; the job ID stays the same."})
+                    waiting_sent = True
+                await asyncio.sleep(FOLLOW_INTERVAL_SECONDS)
+            if not owner:
                 return
-
-            total_variants = len(variants)
-
-            await self.send(text_data=json.dumps({
-                "status": "CONFIG",
-                "config": config,
-                "expected_count": total_variants,
-            }))
-
-            for index, variant in enumerate(variants):
-                method = variant["method"]
-                model = variant["model"]
+            heartbeat = asyncio.create_task(self.heartbeat(batch.pk, token, stopped))
+            # Re-read after claiming: the previous owner may have just saved.
+            snapshot = await db_call(batch_snapshot)(batch)
+            for result in snapshot["results"]:
+                if (result["method"], result["aiModel"]) not in seen:
+                    await self.send_frame({**result, "replayed": True})
+            existing = {(result["method"], result["aiModel"]) for result in snapshot["results"]}
+            config = snapshot["config"]
+            for variant in build_variants(config):
+                if not self.stream_available:
+                    return
+                method, model = variant["method"], variant["model"]
+                if (method, model) in existing:
+                    continue
+                response, failure = None, None
                 try:
-                    if (method, model) in completed_variants:
-                        existing = next(
-                            r for r in existing_results
-                            if r.method == method and r.ai_model == model
-                        )
-                        progress = int(((index + 1) / total_variants) * 100)
-                        await self.send(text_data=json.dumps({
-                            "batch_id": str(self.job_id),
-                            "query": existing.query,
-                            "method": existing.method,
-                            "aiModel": existing.ai_model,
-                            "answer": existing.answer,
-                            "context": existing.retrieved_chunks or [],
-                            "evaluation": format_evaluation_metrics(existing.evaluation_metrics),
-                            "progress": progress,
-                            "replayed": True
-                        }))
-                        continue
-
-                    # The config is part of the lookup: two runs that differ
-                    # only in reranker or temperature need different engines,
-                    # and the registry keys its cache on exactly that.
-                    engine = rag_registry.get_engine(method, model, config)
-
-                    # Engines are shared between runs — reapply the depth every
-                    # variant so a previous run's Top-K never carries over.
-                    apply_retrieval_depth(
-                        engine, top_k, child_top_k=config["child_top_k"]
-                    )
-
-                    is_initialized = await sync_to_async(engine.is_initialized)(username)
-                    
-                    if not is_initialized and not config["modules"]:
-                        await self.send(text_data=json.dumps({
-                            "status": "INITIALIZING",
-                            "method": method,
-                            "aiModel": model,
-                            "progress": int(((index + 0.5) / total_variants) * 100)
-                        }))
-                        await sync_to_async(engine.init)(username)
-
-                    response = await sync_to_async(engine.run_analysis)(document_id, conversation_id)
-
-                    llm_answer = response.get("answer", "")
-                    context = response.get("context", [])
-                    evaluation = response.get("evaluation", {})
-                    
-                    logger.info(f"Evaluation for method {method} and model {model}: {evaluation}")
-                    
-                    retrieved_chunks = [
-                        {"id": doc.get("chunk_id") or doc.get("id"), "text": doc.get("text", ""), "score": doc.get("score")}
-                        for doc in context
-                    ]
-                    
-                    evaluation_with_retrieval = {
-                        "chunk_evaluation": evaluation.get("chunk_evaluation", {}),
-                        "response_evaluation": evaluation.get("response_evaluation", {}),
-                        "retrieval_score": [
-                            {"chunk_id": doc.get("chunk_id") or doc.get("id"), "score": doc.get("score")}
-                            for doc in context
-                        ]
-                    }
-                    if response.get("module_trace"):
-                        evaluation_with_retrieval["module_trace"] = response["module_trace"]
-
-                    metrics = [
-                        {"name": key, "value": value}
-                        for key, value in evaluation_with_retrieval.items()
-                    ]
-
-                    def save_result():
-                        res, _ = AnalysisResult.objects.update_or_create(
-                            batch=analysis_batch,
-                            method=method,
-                            ai_model=model,
-                            defaults={
-                                "answer": llm_answer,
-                                "query": query,
-                                "retrieved_chunks": retrieved_chunks,
-                                "evaluation_metrics": metrics,
-                            }
-                        )
-                        return res
-
-                    await sync_to_async(save_result)()
-
-                    progress = int(((index + 1) / total_variants) * 100)
-                    await self.send(text_data=json.dumps({
-                        "batch_id": str(self.job_id),
-                        "query": query,
-                        "method": method,
-                        "aiModel": model,
-                        "answer": llm_answer,
-                        "context": context,
-                        "evaluation": evaluation_with_retrieval,
-                        "progress": progress
-                    }))
-
-                except Exception as e:
-                    logger.error(f"Error running variant {method}/{model}: {e}", exc_info=True)
-                    await self.send(text_data=json.dumps({
-                        "method": method,
-                        "aiModel": model,
-                        "error": str(e),
-                        "progress": int(((index + 1) / total_variants) * 100)
-                    }))
-
-            await self.send(text_data=json.dumps({"status": "COMPLETE", "progress": 100}))
-            await self.close()
-        except Exception as e:
-            logger.error(f"Pipeline error for job {self.job_id}: {e}", exc_info=True)
-            await self.send(text_data=json.dumps({"error": f"Pipeline error: {str(e)}"}))
-            await self.close()
+                    response = await self.run_variant(method, model, config, batch.user.username,
+                                                      str(batch.conversation.document_id), str(batch.conversation_id))
+                    if not isinstance(response, dict) or not isinstance(response.get("answer"), str) or not response["answer"].strip():
+                        raise PipelineError("empty_model_response", "The answer model returned an empty response. Try again.", retryable=True, http_status=502)
+                except Exception as exc:
+                    logger.warning("Analysis variant failed: %s / %s", method, model, exc_info=True)
+                    failure = error_payload(exc)
+                if not await db_call(renew_batch)(batch.pk, token):
+                    raise PipelineError("analysis_lease_lost", "This analysis was resumed by another worker. Reconnect to follow the same batch.", retryable=True, http_status=409)
+                result = await db_call(save_variant)(batch, method, model, response, failure, token=token)
+                frame = result_frame(batch, result)
+                snapshot = await db_call(batch_snapshot)(batch)
+                frame["progress"] = snapshot["progress"]
+                await self.send_frame(frame, broadcast=True)
+            snapshot = await db_call(batch_snapshot)(batch)
+            await self.send_frame(completion_frame(snapshot), broadcast=True)
+            if self.stream_available:
+                await self.close()
+        except Exception as exc:
+            logger.warning("Analysis batch failed: %s", self.job_id, exc_info=True)
+            await self.send_frame({"status": "ERROR", **error_payload(exc), "terminal": True})
+            if self.stream_available:
+                await self.close(code=4400)
+        finally:
+            stopped.set()
+            if heartbeat:
+                await heartbeat
+            if owner and batch:
+                try:
+                    await db_call(release_batch)(batch.pk, token)
+                except Exception:
+                    logger.warning("Analysis lease will expire after a failed release", exc_info=True)

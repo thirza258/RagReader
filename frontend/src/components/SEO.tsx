@@ -23,7 +23,7 @@ const DEFAULT_KEYWORDS = [
   "RAG evaluation metrics",
   "Precision@K",
   "Recall@K",
-  "ROUGE-L",
+  "Ragas evaluation",
   "Reciprocal Rank Fusion",
   "LLM evaluation benchmark",
   "OpenRouter RAG",

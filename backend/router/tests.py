@@ -254,7 +254,7 @@ class QueryEndpointTests(TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
-    def test_query_while_initializing_returns_400(self):
+    def test_query_while_initializing_returns_409(self):
         user = make_user("alice")
         Job.objects.create(user=user, status=Job.Status.PROCESSING)
         resp = self.client.post(
@@ -262,7 +262,8 @@ class QueryEndpointTests(TestCase):
             {"USER": "alice", "QUERY": "what is this?"},
             content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json()["error_code"], "job_not_ready")
 
     def test_query_happy_path_saves_conversation(self):
         user = make_user("alice")
@@ -298,7 +299,7 @@ class JobAndConversationEndpointTests(TestCase):
 
     def test_job_status_found(self):
         user = make_user("alice")
-        job = Job.objects.create(user=user)
+        job = Job.objects.create(user=user, document=Document.objects.create(user=user, name="d", source_type="text"))
         resp = self.client.get(f"/api/v1/job-status/{job.id}/")
         self.assertEqual(resp.status_code, 200)
 
@@ -319,7 +320,7 @@ class JobAndConversationEndpointTests(TestCase):
     def test_conversation_found(self):
         user = make_user("alice")
         conversation = Conversation.objects.create(
-            user=user, query="q", response="r", context="c"
+            user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
         resp = self.client.get(f"/api/v1/conversation/{conversation.id}/")
         self.assertEqual(resp.status_code, 200)
@@ -328,7 +329,8 @@ class JobAndConversationEndpointTests(TestCase):
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
 class OpenChatAndAnalysisEndpointTests(TestCase):
     def test_open_chat_creates_job_and_schedules_task(self):
-        make_user("alice")
+        user = make_user("alice")
+        Document.objects.create(user=user, name="d", source_type="text")
         import router.views as views
         with mock.patch.object(views, "initialize_rag_task") as task:
             with self.captureOnCommitCallbacks(execute=True):
@@ -344,7 +346,7 @@ class OpenChatAndAnalysisEndpointTests(TestCase):
     def test_start_analysis_creates_batch(self):
         user = make_user("alice")
         conversation = Conversation.objects.create(
-            user=user, query="q", response="r", context="c"
+            user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
         resp = self.client.post(
             "/api/v1/start-analysis/",
@@ -375,7 +377,7 @@ class OpenChatAndAnalysisEndpointTests(TestCase):
 class InitializeRagTaskTests(TestCase):
     def test_success_marks_job_ready(self):
         user = make_user("alice")
-        job = Job.objects.create(user=user)
+        job = Job.objects.create(user=user, document=Document.objects.create(user=user, name="d", source_type="text"))
         engine = mock.Mock()
         with mock.patch.object(tasks.rag_registry, "get_engine", return_value=engine):
             result = tasks.initialize_rag_task(
@@ -391,7 +393,7 @@ class InitializeRagTaskTests(TestCase):
 
     def test_failure_marks_job_failed(self):
         user = make_user("alice")
-        job = Job.objects.create(user=user)
+        job = Job.objects.create(user=user, document=Document.objects.create(user=user, name="d", source_type="text"))
         with mock.patch.object(
             tasks.rag_registry, "get_engine", side_effect=Exception("boom")
         ):
@@ -404,7 +406,9 @@ class InitializeRagTaskTests(TestCase):
         self.assertFalse(result)
         job.refresh_from_db()
         self.assertEqual(job.status, Job.Status.FAILED)
-        self.assertIn("boom", job.error_message)
+        self.assertEqual(job.error_code, "initialization_failed")
+        self.assertTrue(job.retryable)
+        self.assertNotIn("boom", job.error_message)
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
@@ -523,7 +527,7 @@ class DenseRetrieveContractTests(TestCase):
         engine.document_vectors = np.array([[1.0, 0.0], [0.0, 1.0]])
         engine.document_metadata = [{"chunk_id": 1}, {"chunk_id": 2}]
         engine.client.embeddings.create.return_value = mock.Mock(
-            data=[mock.Mock(embedding=[1.0, 0.0])]
+            data=[mock.Mock(index=0, embedding=[1.0, 0.0])]
         )
         results = engine.retrieve("q")
         self.assertEqual(results[0]["chunk_id"], 1)
@@ -735,7 +739,7 @@ class ChatRetrievalDepthTests(TestCase):
 
         depth_at_run_time = {}
 
-        def record_depth(username, query):
+        def record_depth(username, query, document_id=None):
             depth_at_run_time["top_k"] = engine.rag.top_k
             return {"answer": "a", "context": [], "chunk_ids": []}
 
@@ -1106,7 +1110,7 @@ class AnalysisConfigEndpointTests(TestCase):
     def test_start_analysis_stores_the_chosen_config(self):
         user = make_user("alice")
         conversation = Conversation.objects.create(
-            user=user, query="q", response="r", context="c"
+            user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
         resp = self.client.post(
             "/api/v1/start-analysis/",
@@ -1132,7 +1136,7 @@ class AnalysisConfigEndpointTests(TestCase):
     def test_start_analysis_without_config_runs_everything(self):
         user = make_user("alice")
         conversation = Conversation.objects.create(
-            user=user, query="q", response="r", context="c"
+            user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
         resp = self.client.post(
             "/api/v1/start-analysis/",

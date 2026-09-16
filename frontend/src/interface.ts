@@ -1,4 +1,4 @@
-import { OnErrorCallback, OnProgressCallback, OnResultCallback } from "./services/websocket";
+import type { OnErrorCallback, OnProgressCallback, OnResultCallback } from "./services/websocket";
 
 export interface ChatResponse {
   status: number;
@@ -20,9 +20,19 @@ export interface RetrievedChunk {
 
 export interface EvaluationMetric {
   chunk_evaluation: Record<string, number>;
-    response_evaluation: Record<string, number | string>;
-    retrieval_score?: { chunk_id: string; score: number }[];
-    module_trace?: ModuleTrace;
+  response_evaluation: Record<string, number | string | null>;
+  response_evaluation_details?: EvaluationDetails;
+  retrieval_score?: { chunk_id: string; score: number }[];
+  module_trace?: ModuleTrace;
+}
+
+export interface EvaluationDetails {
+  framework: string;
+  version: string;
+  provider: string;
+  judge_model: string;
+  embedding_model: string;
+  metrics: Record<string, { status: "completed" | "skipped" | "unavailable"; reason?: string }>;
 }
 
 export interface ModuleTrace {
@@ -42,6 +52,8 @@ export interface AnalysisResult {
   evaluation?: EvaluationMetric;
   progress: number;
   error?: string;
+  error_code?: string;
+  retryable?: boolean;
 }
 
 export interface WebSocketMessage {
@@ -52,6 +64,10 @@ export interface WebSocketMessage {
   progress?: number;
   batch_id?: string;
   error?: string;
+  error_code?: string;
+  retryable?: boolean;
+  terminal?: boolean;
+  message?: string;
   answer?: string;
   context?: {
     text: string;
@@ -59,6 +75,28 @@ export interface WebSocketMessage {
     score?: number;
   }[];
   evaluation?: EvaluationMetric;
+}
+
+export type AnalysisEventStatus = "running" | "completed" | "skipped" | "fallback" | "unavailable" | "failed";
+export interface AnalysisProgressEvent {
+  kind: "stage" | "module" | "metric" | "route" | "activity";
+  id: string;
+  status: AnalysisEventStatus;
+  detail: string;
+  stage?: string | null;
+  label?: string;
+  queries?: string[];
+  score?: number | null;
+}
+
+export interface AnalysisProgressMessage {
+  status: "STAGE_PROGRESS";
+  batch_id: string;
+  method: string;
+  aiModel: string;
+  attempt_id: string;
+  sequence: number;
+  event: AnalysisProgressEvent;
 }
 
 export interface NormalizedChunk {
@@ -70,10 +108,15 @@ export interface NormalizedChunk {
 
 export interface DeepAnalysisServiceOptions {
   url: string;
+  batchId?: string;
   query?: string;
   onOpen?: () => void;
   onResult: OnResultCallback;
   onProgress?: OnProgressCallback;
+  onStageProgress?: (message: AnalysisProgressMessage) => void;
+  onReconnecting?: () => void;
+  onServerError?: (message: WebSocketMessage) => void;
+  onWaiting?: (message: string) => void;
   onError?: OnErrorCallback;
   onClose?: () => void;
 }
@@ -102,8 +145,12 @@ export interface AnalysisStatusResponse {
   batch_id: string;
   document_id: string | number | null;
   is_complete: boolean;
+  is_finished: boolean;
+  conversation_id: string | number | null;
   total: number;
   completed: number;
+  failed: number;
+  finished: number;
   config: DeepAnalysisConfig;
   modules_available: boolean;
   results: AnalysisResult[];
@@ -141,7 +188,7 @@ export interface DeepAnalysisConfig {
   rrf_k: number;
   /** Cross-encoder id, from the server's closed `rerankers` list. */
   reranker_model: string;
-  /** OpenRouter id of the model that scores faithfulness/relevance/coverage. */
+  /** OpenRouter id used by Ragas for answer evaluation. */
   judge_model: string;
 }
 
@@ -189,7 +236,7 @@ export interface ModuleCompatibilityRule {
 export interface ModuleCompatibility {
   all_modules_supported: boolean;
   summary: string;
-  stages: { label: string; modules: string[] }[];
+  stages: { id?: string; label: string; modules: string[] }[];
   rules: ModuleCompatibilityRule[];
 }
 

@@ -1,3 +1,5 @@
+from django.db import transaction
+from common.analysis_progress import progress_stage, report_progress
 import os
 import pickle
 import logging
@@ -59,6 +61,7 @@ class SparseRAGPipeline(BasePipeline):
             "bm25": self.rag.bm25,
             "metadata": self.rag.document_metadata
         }
+        data["chunk_config"] = self._get_chunk_config()
         with open(path, "wb") as f:
             pickle.dump(data, f)
 
@@ -66,14 +69,18 @@ class SparseRAGPipeline(BasePipeline):
         try:
             with open(path, "rb") as f:
                 data = pickle.load(f)
-            self.rag.documents = data.get("documents", [])
-            self.rag.bm25 = data.get("bm25", None)
-            self.rag.document_metadata = data.get("metadata", [])
+            if data.get("chunk_config") and data["chunk_config"] != self._get_chunk_config():
+                return False
+            documents, bm25, metadata = data.get("documents", []), data.get("bm25"), data.get("metadata", [])
+            if not documents or bm25 is None or len(metadata) != len(documents):
+                return False
+            self.rag.documents, self.rag.bm25, self.rag.document_metadata = documents, bm25, metadata
             return True
         except Exception as e:
             logger.error(f"Error loading state from {path}: {e}")
             return False
         
+    @transaction.atomic
     def _build_index(self, username: str, document) -> str:
         """
         Internal function that performs Sparse indexing.
@@ -169,6 +176,7 @@ class SparseRAGPipeline(BasePipeline):
                 raise RuntimeError("State loaded from disk, but memory is still empty. The .pkl file might be corrupt or empty.")
 
         # Retrieval
+        progress_stage("search", "Optimizing the question and searching the document.")
         optimized_query = self.optimize_query(query)
 
         retrieved_docs = self.rag.retrieve(optimized_query)
@@ -177,8 +185,13 @@ class SparseRAGPipeline(BasePipeline):
             retrieved_docs = self.rag.retrieve(query)
 
         # No results fallback
+        report_progress("activity", "retrieval", "completed", f"Retrieved {len(retrieved_docs)} source passages.", queries=[optimized_query])
+        progress_stage("evidence", f"Preparing {len(retrieved_docs)} source passages for the answer.")
+
         if not retrieved_docs:
             logger.warning(f"No relevant documents found for query: {query}")
+            progress_stage("evidence", "No document evidence was retrieved.", status="skipped")
+            progress_stage("answer", "Writing an answer without retrieved evidence.")
             answer = self.llm.rag_generate(query, context="")
             return {
                 "answer": answer,
@@ -189,6 +202,7 @@ class SparseRAGPipeline(BasePipeline):
 
         # LLM generation
         context_str = "\n\n".join(doc["text"] for doc in retrieved_docs)
+        progress_stage("answer", "Writing the answer using the retrieved evidence.")
         answer = self.llm.rag_generate(optimized_query, context_str)
 
         return {
@@ -206,16 +220,17 @@ class SparseRAGPipeline(BasePipeline):
         }
 
 
-    def run(self, username: str, query: str) -> Dict[str, Any]:
+    def run(self, username: str, query: str, document_id=None) -> Dict[str, Any]:
         """
         Retrieves relevant documents and generates an answer using Sparse RAG.
         """
         logger.info(f"Running Sparse RAG for {username}...")
 
-        document = self.get_document(username)
+        document = Document.objects.get(pk=document_id, user__username=username) if document_id is not None else self.get_document(username)
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
+        self.prepare_document(document)
         result = self._run_core(document, query)
         result.pop("retrieved_docs", None)
         return result
@@ -232,11 +247,8 @@ class SparseRAGPipeline(BasePipeline):
 
         result = self._run_analysis_core(document, conversation)
 
-        retrieved_docs = result.pop("retrieved_docs", [])
-
-        if not retrieved_docs and not self.config.get("modules"):
-            result["evaluation"] = {}
-            return result
+        progress_stage("evaluate", "Comparing retrieved chunks and evaluating the answer with Ragas.")
+        result.pop("retrieved_docs", None)
 
         retrieved_ids = set(result["chunk_ids"])
 
@@ -250,22 +262,23 @@ class SparseRAGPipeline(BasePipeline):
         )
         
         evaluation_chunks_results = evaluate_chunks(retrieved_ids, ground_truth_ids)
+        for name, score in evaluation_chunks_results.items():
+            report_progress("metric", name, "completed", "Compared retrieved and reference chunk IDs.", score=score)
 
         ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
-        if ground_truth_response:
-            evaluation_response_result = evaluate_response(
-                result["answer"],
-                ground_truth_response.response,
-                chunks=[doc["text"] for doc in result.get("context", [])],
-                judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
-            )
-        else:
-            logger.warning(f"No ground truth response for conversation {conversation_id}")
-
+        report = evaluate_response(
+            result["answer"],
+            ground_truth_response.response if ground_truth_response else None,
+            chunks=[doc["text"] for doc in result.get("context", [])],
+            judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
+            question=conversation.query,
+        )
         result["evaluation"] = {
             "chunk_evaluation": evaluation_chunks_results,
-            "response_evaluation": evaluation_response_result if ground_truth_response else {}
+            "response_evaluation": report["scores"],
+            "response_evaluation_details": report["details"],
         }
+        progress_stage("evaluate", "Evaluation finished. Saving the result.", status="completed")
         return result
     
     def init_job(self, username: str, job=None) -> bool:
@@ -277,9 +290,9 @@ class SparseRAGPipeline(BasePipeline):
 
         if job:
             job.progress = 10
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
-        document = self.get_document(username)
+        document = job.document if job is not None else self.get_document(username)
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
@@ -296,7 +309,7 @@ class SparseRAGPipeline(BasePipeline):
             if success:
                 if job:
                     job.progress = 80
-                    job.save()
+                    job.save(update_fields=["progress", "updated_at"])
                 return True
 
             logger.warning("Corrupt or missing index. Deleting record and re-indexing...")
@@ -304,13 +317,13 @@ class SparseRAGPipeline(BasePipeline):
 
         if job:
             job.progress = 20
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
         self._build_index(username, document)
 
         if job:
             job.progress = 90
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
         logger.info("Initialization Complete.")
         return True

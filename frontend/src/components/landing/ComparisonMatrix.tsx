@@ -39,7 +39,7 @@ const FEATURES: {
   },
   {
     name: "Retrieval and answer metrics",
-    desc: "Precision@K, Recall@K, F1@K, ROUGE-L and a judge model",
+    desc: "Precision@K, Recall@K, F1@K and Ragas answer evaluation",
     ragReader: true,
     standardVector: false,
     basicChatbot: false,

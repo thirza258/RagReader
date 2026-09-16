@@ -50,7 +50,7 @@ const SAMPLE_METRICS: { group: string; rows: [string, string][] }[] = [
   {
     group: "Answer",
     rows: [
-      ["ROUGE-L F1", "41.2%"],
+      ["ROUGE-L F1 (legacy sample)", "41.2%"],
       ["Faithfulness", "80.0%"],
       ["Answer relevance", "80.0%"],
     ],
@@ -112,7 +112,7 @@ const SUPPORTING_MODELS = [
   {
     role: "Evaluation judge",
     id: "mistralai/mistral-nemo",
-    note: "Scores faithfulness, answer relevance and answer coverage.",
+    note: "Ragas scores faithfulness, response relevance and factual correctness.",
   },
 ];
 
@@ -133,20 +133,16 @@ const RETRIEVAL_METRICS = [
 
 const ANSWER_METRICS = [
   {
-    name: "ROUGE-L (precision / recall / F1)",
-    body: "Longest-common-subsequence overlap between the generated answer and the answer you said you expected.",
-  },
-  {
     name: "Faithfulness",
     body: "Is every claim in the answer supported by the retrieved chunks, or did the model invent some of it?",
   },
   {
-    name: "Answer relevance",
-    body: "How well the answer speaks to the context that was actually retrieved.",
+    name: "Response relevance",
+    body: "Ragas generates questions from the answer, then compares their meaning to your original question using remote embeddings.",
   },
   {
-    name: "Answer coverage",
-    body: "Whether the answer uses the important information in the chunks, or leaves most of it on the floor.",
+    name: "Factual correctness (F1)",
+    body: "Ragas checks answer claims against your expected answer and balances factual precision with completeness.",
   },
 ];
 
@@ -165,8 +161,8 @@ const STACK = [
   { name: "Celery + Redis", note: "Indexing and analysis run as background jobs" },
   { name: "PostgreSQL", note: "Documents, chunks, batches, results" },
   { name: "rank-bm25 + NLTK", note: "Sparse retrieval and tokenization" },
-  { name: "sentence-transformers", note: "Cross-encoder reranking" },
-  { name: "rouge-score", note: "ROUGE-L scoring" },
+  { name: "Ollama", note: "Remote embedding reranking" },
+  { name: "Ragas + OpenAI SDK", note: "Remote answer evaluation through OpenRouter" },
   { name: "React + Vite + Tailwind", note: "This interface" },
 ];
 
@@ -189,7 +185,7 @@ const FAQ = [
   },
   {
     q: "Is this a benchmark I can cite?",
-    a: "It's a comparison on your document with your ground truth, which is exactly what a public benchmark can't give you — and exactly why the numbers aren't transferable. Retrieval metrics are set overlap rather than rank-aware, and three of the answer metrics come from a single judge model.",
+    a: "It's a comparison on your document with your ground truth, which is exactly what a public benchmark can't give you — and exactly why the numbers aren't transferable. Retrieval metrics are set overlap rather than rank-aware, and Ragas answer metrics depend on the selected judge and embedding models.",
   },
   {
     q: "Is it open source?",
@@ -448,8 +444,8 @@ const LandingPage: React.FC = () => {
               </table>
             </div>
             <figcaption className="mt-3 text-sm text-muted-foreground">
-              Figure 1. One pipeline's result. Nine metrics per pipeline are reported
-              live during a deep-analysis run; six are shown here.
+              Figure 1. A historical result from the earlier evaluator. New deep-analysis
+              runs report three retrieval metrics and three Ragas answer metrics.
             </figcaption>
           </figure>
         </section>
@@ -577,20 +573,18 @@ const LandingPage: React.FC = () => {
                 ))}
               </dl>
               <p className="mt-4 text-sm text-muted-foreground">
-                Faithfulness, relevance and coverage are judged by Mistral Nemo on a
-                1–5 scale and reported normalized to 0–1, so every metric shares one
-                axis.
+                Ragas uses your selected OpenRouter judge and remote embeddings.
+                Scores are shown as percentages. Missing inputs or failed evaluations
+                show as unavailable, with a reason.
               </p>
             </div>
           </div>
 
           <div className="mt-10">
             <Note>
-              Metrics only exist where ground truth does. Without ground-truth chunks
-              the retrieval scores have nothing to compare against, and without an
-              expected answer the answer metrics are skipped entirely — which is why
-              setting ground truth is a step in the flow rather than an optional
-              extra.
+              Retrieval metrics compare against your reference chunks. Factual
+              correctness needs an expected answer. Faithfulness and response relevance
+              can run without that reference; faithfulness still needs source evidence.
             </Note>
           </div>
         </Section>
@@ -664,7 +658,7 @@ const LandingPage: React.FC = () => {
           id="benchmark"
           number={7}
           title="Worked example"
-          lede="Recorded results for one sample document. Switch the retrieval method or the model to see how the same question scores differently before you run your own."
+          lede="Historical results for one sample document, saved before Ragas evaluation. Switch methods or models to explore the older scores; new analyses use the metrics described above."
         >
           <InteractiveBenchmarkSimulator />
         </Section>

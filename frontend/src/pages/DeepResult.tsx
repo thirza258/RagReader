@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import DeepAnalysisCard from "../components/DeepAnalysisCard";
+import AnalysisFlow from "../components/AnalysisFlow";
+import { variantKey } from "../lib/analysisFlow";
+import { interruptLiveProgress, updateLiveProgress } from "../lib/liveAnalysis";
+import type { LiveAnalysisProgress } from "../lib/liveAnalysis";
+import { analysisFailureSummary, analysisRequestId } from "../lib/analysisRequest";
+import { errorMessage } from "../lib/utils";
 import { buildWebSocketUrl, connectDeepAnalysisWebSocket } from "../services/websocket";
 import service from "../services/service";
 import { useLocation, useOutletContext, useParams } from "react-router-dom";
@@ -23,15 +29,18 @@ const STORAGE_KEY = (id: string) => `deep_analysis_results_${id}`;
 
 const DeepResult: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
-  const { setIds, analysisRequest, stopSignal, setRunState, setModulesAvailable, setSelectedModules } =
+  const { setIds, analysisRequest, stopSignal, setRunState, runState, analysisOptions, setModulesAvailable, setSelectedModules } =
     useOutletContext<DeepResultContextType>();
   const location = useLocation();
   const [results, setResults] = useState<NormalizedResult[]>([]);
   const resultsRef = useRef<NormalizedResult[]>([]);
-  const [progress, setProgress] = useState<Record<string, number>>({});
+  const [liveProgress, setLiveProgress] = useState<LiveAnalysisProgress>({});
   const [isConnected, setIsConnected] = useState(false);
   const [runError, setRunError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [activeBatchId, setActiveBatchId] = useState("");
   const [activeConfig, setActiveConfig] = useState<DeepAnalysisConfig | null>(null);
+  const [flowVariant, setFlowVariant] = useState("");
   const cleanupRef = useRef<(() => void) | null>(null);
   const epochRef = useRef(0);
 
@@ -69,61 +78,89 @@ const DeepResult: React.FC = () => {
     closeSocket();
     const epoch = epochRef.current;
     setRunError("");
+    setNotice("");
+    setActiveBatchId(batchId);
+    let serverError = "";
     const current = () => epochRef.current === epoch;
     const refreshStatus = async () => {
-      const data = await service.getAnalysisStatus(batchId);
+      const data = await service.getAnalysisStatus(batchId, conversationId);
       if (!current()) return;
       setModulesAvailable(data.modules_available);
       for (const result of data.results) addOrUpdateResult(result);
       return data;
     };
     cleanupRef.current = connectDeepAnalysisWebSocket({
-      url: buildWebSocketUrl(batchId), query,
+      url: buildWebSocketUrl(batchId), batchId, query,
       onOpen: () => {
         if (!current()) return;
         setIsConnected(true);
-        setRunState({ isRunning: true, completed: resultsRef.current.length, total });
+        if (!serverError) setRunError("");
+        setRunState({ isRunning: true, completed: resultsRef.current.filter((r) => !r.error).length, total });
       },
       onResult: (result) => {
         if (!current()) return;
+        if (result.batch_id !== batchId) return;
+        setNotice("");
         addOrUpdateResult(result);
-        setRunState({ isRunning: true, completed: resultsRef.current.length, total });
+        setRunState({ isRunning: true, completed: resultsRef.current.filter((r) => !r.error).length, total });
       },
-      onProgress: (method, value) => {
-        if (current()) setProgress((prev) => ({ ...prev, [method]: value }));
+      onStageProgress: (message) => {
+        if (current()) setLiveProgress((previous) => updateLiveProgress(previous, message, batchId));
+      },
+      onWaiting: (message) => { if (current()) setNotice(message); },
+      onServerError: (message) => {
+        if (!current()) return;
+        serverError = message.error ?? "The server could not run this analysis.";
+        setRunError(serverError);
+        setNotice("");
+        setLiveProgress(interruptLiveProgress);
+      },
+      onReconnecting: () => {
+        if (!current()) return;
+        setIsConnected(false);
+        setLiveProgress(interruptLiveProgress);
+        setRunError("Connection interrupted. Reconnecting to the analysis stream…");
       },
       onError: async () => {
+        if (!current()) return;
+        setIsConnected(false);
+        setLiveProgress(interruptLiveProgress);
         try {
           const status = await refreshStatus();
-          if (status?.is_complete || !current()) return;
+          if (status?.is_finished || serverError || !current()) return;
         } catch {
           // Report the stream failure if REST is also unavailable.
         }
-        if (current()) setRunError("Lost the connection to the analysis stream.");
+        if (current() && !serverError) setRunError("Lost the connection to the analysis stream.");
       },
       onClose: async () => {
         if (!current()) return;
         setIsConnected(false);
-        setRunState({ isRunning: false, completed: resultsRef.current.length, total });
+        setNotice("");
+        setRunState({ isRunning: false, completed: resultsRef.current.filter((r) => !r.error).length, total });
         try {
           // Errors and the Stop button must not unlock modules.
           const status = await refreshStatus();
-          if (status && !status.is_complete) {
-            setRunError("Some variants did not complete. Run Deep Analysis again to retry.");
+          if (status) {
+            setRunState({ isRunning: false, completed: status.completed, total: status.total });
+            if (!serverError) setRunError(status.is_finished
+              ? analysisFailureSummary(status.failed, status.total)
+              : "Some variants did not finish. Reload to resume the same batch, or run Deep Analysis again.");
           }
         } catch {
-          if (current()) setRunError("Could not confirm completion. Reload to check the saved analysis.");
+          if (current() && !serverError) setRunError("Could not confirm completion. Reload to check the saved analysis.");
         }
       },
     });
-  }, [addOrUpdateResult, closeSocket, setModulesAvailable, setRunState]);
+  }, [addOrUpdateResult, closeSocket, conversationId, setModulesAvailable, setRunState]);
 
-  const runAnalysis = useCallback(async (config: DeepAnalysisConfig) => {
+  const runAnalysis = useCallback(async (config: DeepAnalysisConfig, intent: string) => {
     if (!conversationId) return;
     closeSocket();
     const epoch = epochRef.current;
     setIsConnected(false);
     setRunError("");
+    setNotice("");
     setRunState({ isRunning: true, completed: 0, total: config.methods.length * config.models.length });
     try {
       if (config.ground_truth_mode === "pooled") {
@@ -132,11 +169,12 @@ const DeepResult: React.FC = () => {
         });
         if (epoch !== epochRef.current) return;
       }
-      const response = await service.startDeepAnalysis(conversationId, config);
+      const response = await service.startDeepAnalysis(conversationId, config, analysisRequestId(conversationId, intent));
       if (epoch !== epochRef.current) return;
       // Preserve the previous results until the server accepts the new run.
       saveResults([]);
-      setProgress({});
+      setLiveProgress({});
+      setFlowVariant("");
       restoreConfig(response.config);
       setModulesAvailable(response.modules_available);
       localStorage.setItem(`batch_id_${conversationId}`, response.batch_id);
@@ -145,8 +183,8 @@ const DeepResult: React.FC = () => {
       connect(response.batch_id, response.query, response.expected_count);
     } catch (error) {
       if (epoch !== epochRef.current) return;
-      setRunError((error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Failed to start the analysis.");
-      setRunState({ isRunning: false, completed: resultsRef.current.length, total: 0 });
+      setRunError(errorMessage(error, "Failed to start the analysis."));
+      setRunState({ isRunning: false, completed: resultsRef.current.filter((r) => !r.error).length, total: 0 });
     }
   }, [conversationId, closeSocket, connect, restoreConfig, saveResults, setIds, setModulesAvailable, setRunState]);
 
@@ -154,6 +192,10 @@ const DeepResult: React.FC = () => {
     let cancelled = false;
     async function resume() {
       if (!conversationId) return;
+      setLiveProgress({});
+      setFlowVariant("");
+      setRunError("");
+      setNotice("");
       try {
         const state = location.state as { batch_id?: string; document_id?: string; query?: string } | null;
         // A rerun supersedes the original navigation state, including reloads.
@@ -161,27 +203,31 @@ const DeepResult: React.FC = () => {
         let documentId = state?.document_id || localStorage.getItem("document_id") || "";
         let query = state?.query || "";
         if (!batchId) {
-          const initial = await service.startDeepAnalysis(conversationId);
+          const initial = await service.startDeepAnalysis(conversationId, undefined, analysisRequestId(conversationId));
           if (cancelled) return;
           batchId = initial.batch_id;
           documentId = String(initial.document_id);
           query = initial.query;
         }
         localStorage.setItem(`batch_id_${conversationId}`, batchId);
-        const status = await service.getAnalysisStatus(batchId);
+        const status = await service.getAnalysisStatus(batchId, conversationId);
         if (cancelled) return;
+        batchId = status.batch_id;
+        localStorage.setItem(`batch_id_${conversationId}`, batchId);
+        setActiveBatchId(status.batch_id);
         saveResults(status.results.map(normalizeResult));
         restoreConfig(status.config);
         setModulesAvailable(status.modules_available);
         setIds({ conversationId, documentId: String(status.document_id ?? documentId) });
-        if (status.is_complete) {
+        if (status.is_finished) {
+          setRunError(analysisFailureSummary(status.failed, status.total));
           setRunState({ isRunning: false, completed: status.completed, total: status.total });
         } else {
           connect(batchId, query, status.total);
         }
-      } catch {
+      } catch (error) {
         if (cancelled) return;
-        setRunError("Could not load the saved analysis. Reload to try again.");
+        setRunError(errorMessage(error, "Could not load the saved analysis. Reload to try again."));
         setRunState({ isRunning: false, completed: 0, total: 0 });
       }
     }
@@ -194,14 +240,15 @@ const DeepResult: React.FC = () => {
   // Nonces represent explicit user actions, including repeat configurations.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (analysisRequest) runAnalysis(analysisRequest.config);
+    if (analysisRequest) runAnalysis(analysisRequest.config, `run_${analysisRequest.nonce}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisRequest?.nonce]);
   useEffect(() => {
     if (!stopSignal) return;
     closeSocket();
     setIsConnected(false);
-    setRunState({ isRunning: false, completed: resultsRef.current.length, total: 0 });
+    setNotice("");
+    setRunState({ isRunning: false, completed: resultsRef.current.filter((r) => !r.error).length, total: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopSignal]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -211,7 +258,7 @@ const DeepResult: React.FC = () => {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border pb-3 text-sm text-muted-foreground">
         <span className="flex items-center gap-2">
           <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${isConnected ? "bg-status-success" : "bg-border"}`} />
-          {isConnected ? "Receiving results" : "Connection closed"}
+          {isConnected ? "Receiving results" : runState.isRunning ? "Preparing analysis" : runError ? "Analysis needs attention" : runState.total > 0 && results.filter((result) => !result.error).length >= runState.total ? "Analysis complete" : "Analysis stopped"}
         </span>
         {activeConfig && (
           <span className="font-mono text-xs">
@@ -220,15 +267,20 @@ const DeepResult: React.FC = () => {
           </span>
         )}
       </div>
+      {activeBatchId && <p className="break-all font-mono text-xs text-muted-foreground">Batch {activeBatchId}{results.some((result) => result.error) && ` · ${results.filter((result) => result.error).length} failed`}</p>}
+      {notice && <p role="status" className="border border-border p-3 text-sm text-muted-foreground">{notice}</p>}
       {runError && <div role="alert" className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{runError}</div>}
+      {activeConfig && <AnalysisFlow config={activeConfig} options={analysisOptions} results={results} runState={runState} liveProgress={liveProgress} streaming={isConnected && runState.isRunning} selectedVariant={flowVariant} onVariantChange={setFlowVariant} />}
       {results.length === 0 && isConnected && <div className="py-12 text-center text-sm text-muted-foreground">Waiting for analysis results…</div>}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {results.map((item) => (
           <div key={`${item.method}-${item.aiModel}`} className="overflow-hidden">
-            {progress[item.method] !== undefined && progress[item.method] < 100 && (
-              <div className="mb-1 h-[3px] w-full overflow-hidden bg-muted"><div className="h-full bg-foreground/60 transition-all" style={{ width: `${progress[item.method]}%` }} /></div>
-            )}
-            <DeepAnalysisCard method={item.method} aiModel={item.aiModel} query={item.query} answer={item.answer} retrievedChunks={item.retrievedChunks} evaluationMetrics={item.evaluation} />
+            <DeepAnalysisCard method={item.method} aiModel={item.aiModel} query={item.query} answer={item.answer} error={item.error} errorCode={item.error_code} retrievedChunks={item.retrievedChunks} evaluationMetrics={item.evaluation} onShowFlow={() => {
+              setFlowVariant(variantKey(item.method, item.aiModel));
+              const flow = document.getElementById("analysis-flow");
+              if (flow) flow.closest("main")?.scrollTo({ top: flow.offsetTop - 16 });
+              document.getElementById("flow-variant")?.focus({ preventScroll: true });
+            }} />
           </div>
         ))}
       </div>

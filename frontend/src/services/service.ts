@@ -90,10 +90,12 @@ const generateChat = async (
 };
 
 const openChat = async (
-    username: string
+    username: string,
+    retry = false
 ) => {
     const response = await apiClient.post("/open-chat/", {
         USER: username,
+        retry,
     });
     return response.data;
 };
@@ -107,10 +109,12 @@ const getJobStatus = async (
 
 const startDeepAnalysis = async (
     conversation_id: string,
-    config?: Partial<DeepAnalysisConfig>
+    config?: Partial<DeepAnalysisConfig>,
+    requestId: string = crypto.randomUUID()
 ): Promise<StartAnalysisResponse> => {
     const response = await apiClient.post("/start-analysis/", {
         conversation_id,
+        request_id: requestId,
         // Omitted entirely when unset so the backend applies its own defaults
         // (the full method × model matrix) rather than an empty selection.
         ...(config ? { config } : {}),
@@ -123,8 +127,10 @@ const getAnalysisConfig = async (): Promise<AnalysisConfigOptions> => {
     return response.data;
 }
 
-const getAnalysisStatus = async (jobId: string): Promise<AnalysisStatusResponse> => {
-    const response = await apiClient.get(`/analysis-status/${jobId}/`, jsonConfig);
+const getAnalysisStatus = async (jobId: string, conversationId?: string): Promise<AnalysisStatusResponse> => {
+    const response = await apiClient.get(`/analysis-status/${jobId}/`, {
+        ...jsonConfig, params: conversationId ? { conversation_id: conversationId } : undefined,
+    });
     return response.data;
 };
 

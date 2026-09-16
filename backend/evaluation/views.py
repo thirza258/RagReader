@@ -253,6 +253,7 @@ class CandidatePoolView(APIView):
             pooled = pooler.pool(
                 query=conversation.query,
                 username=self._resolve_username(conversation),
+                document=conversation.document,
             )
         except Exception as e:
             logger.error(f"Candidate pooling failed for conversation {conversation_id}: {e}", exc_info=True)
@@ -426,12 +427,13 @@ class GroundTruthResponseEvaluationView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            scores = evaluate_response(response_text, ground_truth.response)
+            report = evaluate_response(response_text, ground_truth.response, question=conversation.query)
 
             return Response(
                 {
                     "conversation_id": conversation.id,
-                    "scores": scores,
+                    "scores": report["scores"],
+                    "evaluation": report["details"],
                 },
                 status=status.HTTP_200_OK
             )

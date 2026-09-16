@@ -24,10 +24,10 @@ MODULE_COMPATIBILITY = {
     "all_modules_supported": True,
     "summary": "All 13 modules can be enabled in one run. They execute in ordered stages and share evidence.",
     "stages": [
-        {"label": "Routing", "modules": ["adaptive_rag"]},
-        {"label": "Queries & retrieval", "modules": ["rewrite_retrieve_read", "step_back", "rag_fusion", "memo_rag", "rrf_hybrid", "hyde"]},
-        {"label": "Evidence", "modules": ["raptor", "long_rag", "crag", "self_route"]},
-        {"label": "Answer", "modules": ["flare", "contextual_learning"]},
+        {"id": "routing", "label": "Routing", "modules": ["adaptive_rag"]},
+        {"id": "retrieval", "label": "Queries & retrieval", "modules": ["rewrite_retrieve_read", "step_back", "rag_fusion", "memo_rag", "rrf_hybrid", "hyde"]},
+        {"id": "evidence", "label": "Evidence", "modules": ["raptor", "long_rag", "crag", "self_route"]},
+        {"id": "answer", "label": "Answer", "modules": ["flare", "contextual_learning"]},
     ],
     "rules": [
         {

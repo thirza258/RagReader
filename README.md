@@ -121,7 +121,7 @@ When accuracy is paramount, click the answer to trigger a comprehensive analysis
     *   **Anthropic Claude Haiku 4.5**
     *   **Google Gemini 3 Flash**
 
-Results are streamed live via WebSocket, so you can compare answers, context, and evaluation scores in real time.
+Results are streamed via WebSocket. The **Analysis flow** panel shows Question → Search → Refine evidence → Write answer → Evaluate. Select a method/model and a stage to inspect its recorded module outcomes, search inputs, source count, and metric explanations. Planned flows stay marked as planned until a result arrives.
 
 #### Configuring the run
 
@@ -179,11 +179,14 @@ Both strategies write to the same place, so everything downstream is identical:
 *   **Recall@K** — fraction of relevant chunks that were retrieved.
 *   **F1@K** — harmonic mean of Precision@K and Recall@K.
 
-**Response Quality** — how good the generated answer is:
-*   **ROUGE-L** (Precision, Recall, F1) — measures textual overlap with the ground-truth answer using longest common subsequence.
-*   **Faithfulness** (1–5) — LLM-judged: is the answer factually grounded in the retrieved chunks, or does it hallucinate?
-*   **Answer Relevance** (1–5) — LLM-judged: how well does the answer address the retrieved context?
-*   **Answer Coverage** (1–5) — LLM-judged: does the answer cover all the important points from the retrieved chunks?
+Job IDs, retries, embedding validation, and the database migration are documented in [Job reliability](docs/jobs.md).
+
+**Response Quality** — [Ragas evaluation](docs/evaluation.md) through the OpenAI SDK with OpenRouter's API URL:
+*   **Faithfulness** — fraction of answer claims supported by the retrieved source passages.
+*   **Response relevance** — semantic similarity between the original question and questions generated from the answer, using remote embeddings.
+*   **Factual correctness (F1)** — balance of correct and complete claims compared with the reference answer.
+
+Scores are reported as percentages. Missing inputs and failed metrics are marked unavailable with a reason; successful scores remain saved. Evaluation runs without local Torch, Transformers, BERTScore, or ROUGE packages. Historical results retain their original metrics.
 
 These metrics are calculated for every combination of retrieval method × LLM model, giving you a comprehensive view of which pipeline performs best for your documents.
     
@@ -192,10 +195,10 @@ These metrics are calculated for every combination of retrieval method × LLM mo
 ## Tech Stack
 
 *   **LLM Orchestration:** OpenAI GPT-4o-mini, Anthropic Claude Haiku 4.5, Google Gemini 3 Flash.
-*   **Evaluation LLM:** Mistral Nemo (via OpenRouter) for faithfulness/relevance/coverage scoring.
+*   **Evaluation LLM:** Ragas with the selected OpenRouter judge (Mistral Nemo by default).
 *   **Embedding Models:** OpenAI Embeddings and Mini LM.
 *   **Retrieval:** Dense (vector), Sparse (BM25), Hybrid (semantic + keyword + reranker).
-*   **Evaluation Metrics:** Precision@K, Recall@K, F1@K, ROUGE-L, Faithfulness, Answer Relevance, Answer Coverage.
+*   **Evaluation Metrics:** Precision@K, Recall@K, F1@K, Ragas Faithfulness, Response Relevance, Factual Correctness.
 *   **Framework:** LangChain, Django, Celery, Redis, Django Channels (WebSocket).
 *   **Frontend:** React, Vite, Tailwind.
 
@@ -211,10 +214,10 @@ These metrics are calculated for every combination of retrieval method × LLM mo
         retrieval method votes. You see the fused ranking, each chunk's RRF score,
         and which pipelines found it, before committing.
 
-    Either way, write the expected answer (used for ROUGE-L), then **Start Analysis**.
+    Either way, write the expected answer (used for Ragas factual correctness), then **Start Analysis**.
 5.  **Deep Dive:** Watch your query run through the selected pipelines.
     *   See each retrieval, reranking, and evaluation performed by the system and every AI model.
-    *   Observe Precision@K, Recall@K, F1@K, ROUGE-L, Faithfulness, Answer Relevance, and Answer Coverage calculated for each variant.
+    *   Observe Precision@K, Recall@K, F1@K, Ragas Faithfulness, Response Relevance, and Factual Correctness calculated for each variant.
     *   Compare answers across models and methods to find the most accurate response.
 6.  **Re-run with a different config:** Adjust methods, models, Top-K, or the
     ground-truth strategy in the Deep Analysis sidebar and press

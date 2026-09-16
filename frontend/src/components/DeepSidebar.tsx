@@ -26,6 +26,7 @@ interface DeepSidebarProps {
   modulesAvailable: boolean;
   selectedModules: string[];
   onModulesChange: (modules: string[]) => void;
+  onOptionsLoaded: (options: AnalysisConfigOptions) => void;
   onBack: () => void;
   onAnalyze: (config: DeepAnalysisConfig) => void;
   onStop: () => void;
@@ -135,6 +136,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
   modulesAvailable,
   selectedModules,
   onModulesChange,
+  onOptionsLoaded,
   onBack,
   onAnalyze,
   onStop,
@@ -169,6 +171,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
       .then((config) => {
         if (cancelled) return;
         setOptions(config);
+        onOptionsLoaded(config);
         setMethods(config.defaults.methods);
         setModels(config.defaults.models);
         setTopK(config.defaults.top_k);
@@ -185,7 +188,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onOptionsLoaded]);
 
   const toggle = (list: string[], value: string) =>
     list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -259,7 +262,7 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
   };
 
   return (
-    <aside className="z-20 flex h-full w-1/3 min-w-[320px] max-w-[380px] flex-col border-r border-border bg-muted">
+    <aside className="z-20 flex h-full w-full min-w-0 flex-col border-r border-border bg-muted">
       {/* --- HEADER --- */}
       <div className="flex items-center gap-3 border-b border-border px-5 py-4">
         <button
@@ -621,9 +624,9 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
                   className="w-full border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary"
                 />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Any OpenRouter id. Scores faithfulness, answer relevance and
-                  answer coverage — three of the nine metrics come from this one
-                  model.
+                  OpenRouter model used by Ragas for faithfulness, response relevance,
+                  and factual correctness. The judge must support JSON output.
+                  Response relevance also uses remote embeddings.
                 </p>
               </div>
             </div>

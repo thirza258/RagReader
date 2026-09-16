@@ -1,9 +1,22 @@
-import json
-import re
-from rouge_score import rouge_scorer
+"""Retrieval overlap and Ragas evaluation through OpenRouter's remote APIs."""
+import asyncio
+import logging
+import math
+import os
 
-from ai_handler.llm import MistralLLM
-from common.constant import DEFAULT_JUDGE_MODEL
+from asgiref.sync import async_to_sync
+from django.conf import settings
+from openai import AsyncOpenAI
+
+from ai_handler.llm import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
+from common.constant import DEFAULT_EMBEDDING_MODEL, DEFAULT_JUDGE_MODEL
+from common.analysis_progress import report_progress
+
+# Evaluation does not need Ragas usage telemetry.
+os.environ.setdefault("RAGAS_DO_NOT_TRACK", "true")
+logger = logging.getLogger(__name__)
+METRIC_TIMEOUT_SECONDS = 120
+METRICS = ("faithfulness", "answer_relevancy", "factual_correctness")
 
 def calculate_recall_K(chunks, ground_truth_chunks):
     """
@@ -106,155 +119,105 @@ def evaluate_chunks(chunks, ground_truth_chunks):
             "recall_k": 0.0,
             "f1_k": 0.0
         }
-    
-def _parse_llm_score(raw_response: str, key: str) -> float:
+
+
+def evaluate_response(response, ground_truth_response=None, chunks=None, judge_model=None, *, question=""):
+    """Return JSON-safe scores and per-metric status; unavailable is never zero.
+
+    Ragas receives the original question, the generated answer, the exact source
+    passages used by the reader, and (when available) the reference answer.
+    Clients are created and closed inside the async call, so Django workers do
+    not reuse HTTP clients across event loops. No local model is loaded.
     """
-    Parse the LLM's JSON response and extract the numeric score, normalized to 0–1.
+    model = judge_model or DEFAULT_JUDGE_MODEL
+    report = {
+        "scores": {name: None for name in METRICS},
+        "details": {
+            "framework": "ragas", "version": "0.4.3", "provider": "openrouter",
+            "judge_model": model, "embedding_model": DEFAULT_EMBEDDING_MODEL,
+            "metrics": {},
+        },
+    }
+    contexts = [text for text in (chunks or []) if isinstance(text, str) and text.strip()]
+    inputs = {
+        "faithfulness": {"user_input": question, "response": response, "retrieved_contexts": contexts},
+        "answer_relevancy": {"user_input": question, "response": response},
+        "factual_correctness": {"response": response, "reference": ground_truth_response},
+    }
+    missing = {
+        "faithfulness": "Requires a question, answer, and retrieved evidence.",
+        "answer_relevancy": "Requires a question and answer.",
+        "factual_correctness": "Requires an answer and a reference answer.",
+    }
+    ready = {}
+    for name, values in inputs.items():
+        if all(value.strip() if isinstance(value, str) else value for value in values.values()):
+            ready[name] = values
+        else:
+            report["details"]["metrics"][name] = {"status": "skipped", "reason": missing[name]}
+            report_progress("metric", name, "skipped", missing[name])
 
-    The LLM is prompted to return JSON like {"faithfulness": 4, "justification": "..."}
-    with scores on a 1–5 scale. This function extracts the score and divides by 5
-    so it is consistent with the 0–1 range used by ROUGE-L and retrieval metrics.
-    """
-    if not raw_response or not isinstance(raw_response, str):
-        return 0.0
-
-    score = None
-
-    # The model may wrap the JSON in markdown fences or prose — parse the
-    # first {...} block rather than the raw string.
-    match = re.search(r"\{.*\}", raw_response, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            score = float(data.get(key, 0))
-        except (json.JSONDecodeError, ValueError, TypeError):
-            score = None
-
-    if score is None:
-        # Fallback: first number in the raw text
-        numbers = re.findall(r"\d+(?:\.\d+)?", raw_response)
-        if numbers:
-            try:
-                score = float(numbers[0])
-            except (ValueError, TypeError):
-                score = None
-
-    # Scores are on a 1–5 scale; anything outside [0, 5] is parser garbage
-    # (e.g. an HTTP status code in an error message), not a rating.
-    if score is None or not 0.0 <= score <= 5.0:
-        return 0.0
-
-    return score / 5.0
-
-
-def evaluate_response(response, ground_truth_response, chunks=None, judge_model=None):
-    """
-    Evaluasi jawaban dengan menghitung ROUGE-L Score, Faithfulness,
-    Answer Relevance, dan Answer Coverage.
-
-    Args:
-        response (str): Jawaban dari AI.
-        ground_truth_response (str): Jawaban yang benar (ground truth).
-        chunks (list, optional): List teks chunk yang diretrieve.
-        judge_model (str, optional): OpenRouter id of the judging model.
-            Defaults to DEFAULT_JUDGE_MODEL. Three of the six answer metrics
-            come from this one model, so which model it is belongs in the run
-            configuration rather than hardcoded here.
-
-    Returns:
-        dict: Dictionary berisi skor ROUGE-L Precision, Recall, F1,
-              faithfulness, answer_relevance, dan answer_coverage (semua 0–1).
-    """
+    if not ready:
+        return report
+    if not settings.OPENROUTER_API_KEY:
+        for name in ready:
+            report["details"]["metrics"][name] = {"status": "unavailable", "reason": "OpenRouter API key is not configured."}
+            report_progress("metric", name, "unavailable", "OpenRouter API key is not configured.")
+        return report
+    for name in ready:
+        report_progress("metric", name, "running", "Evaluating with Ragas through OpenRouter.")
     try:
-        scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
-        scores = scorer.score(ground_truth_response, response)
-        faithfulness_prompt = build_faithfulness_prompt(response, "\n".join(chunks) if chunks else "")
-        relevance_prompt = build_relevance_prompt(response, "\n".join(chunks) if chunks else "")
-        coverage_prompt = build_coverage_prompt(response, "\n".join(chunks) if chunks else "")
+        async_to_sync(_score_ragas)(ready, report, model)
+    except Exception as exc:
+        # A setup/client failure must not discard the generated answer or any
+        # metric that already completed. Do not expose raw provider errors.
+        logger.warning("Ragas evaluation setup failed (%s)", type(exc).__name__)
+        for name in ready:
+            report["details"]["metrics"].setdefault(name, {
+                "status": "unavailable", "reason": "Could not start the Ragas evaluator. Check the evaluation provider configuration.",
+            })
+            state = report["details"]["metrics"][name]
+            report_progress("metric", name, state["status"], state.get("reason", "Evaluation finished."), score=report["scores"][name])
+    return report
 
-        mistral = MistralLLM(model=judge_model or DEFAULT_JUDGE_MODEL)
 
-        def _llm_score(prompt: str, key: str) -> float:
+async def _score_ragas(inputs, report, model):
+    # Lazy imports keep ordinary chat and server startup independent of Ragas.
+    from ragas.embeddings import embedding_factory
+    from ragas.llms import llm_factory
+    from ragas.metrics.collections import AnswerRelevancy, FactualCorrectness, Faithfulness
+
+    async with AsyncOpenAI(
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url=OPENROUTER_BASE_URL,
+        default_headers=OPENROUTER_HEADERS,
+        timeout=45.0,
+        max_retries=1,
+    ) as client:
+        llm = llm_factory(model, client=client, temperature=0, max_retries=2)
+        factories = {
+            "faithfulness": lambda: Faithfulness(llm=llm),
+            "answer_relevancy": lambda: AnswerRelevancy(
+                llm=llm,
+                embeddings=embedding_factory("openai", model=DEFAULT_EMBEDDING_MODEL, client=client),
+            ),
+            "factual_correctness": lambda: FactualCorrectness(llm=llm, mode="f1"),
+        }
+
+        async def score_one(name, values):
             try:
-                return _parse_llm_score(mistral._call_api(prompt), key)
-            except Exception as e:
-                print(f"LLM-judged metric '{key}' failed: {e}")
-                return 0.0
+                metric = factories[name]()
+                result = await asyncio.wait_for(metric.ascore(**values), timeout=METRIC_TIMEOUT_SECONDS)
+                value = float(result.value)
+                if not math.isfinite(value) or not 0 <= value <= 1:
+                    raise ValueError("Metric returned a non-finite or out-of-range score.")
+                report["scores"][name] = value
+                report["details"]["metrics"][name] = {"status": "completed"}
+            except Exception as exc:
+                logger.warning("Ragas metric %s unavailable (%s)", name, type(exc).__name__)
+                reason = "Evaluation timed out." if isinstance(exc, TimeoutError) else "The evaluator could not produce a valid score. Check the judge or embedding provider and retry."
+                report["details"]["metrics"][name] = {"status": "unavailable", "reason": reason}
+            state = report["details"]["metrics"][name]
+            report_progress("metric", name, state["status"], state.get("reason", "Evaluation finished."), score=report["scores"][name])
 
-        faithfulness_score = _llm_score(faithfulness_prompt, "faithfulness")
-        relevance_score = _llm_score(relevance_prompt, "relevance")
-        coverage_score = _llm_score(coverage_prompt, "coverage")
-
-        return {
-            "rougeL_precision": scores['rougeL'].precision,
-            "rougeL_recall": scores['rougeL'].recall,
-            "rougeL_f1": scores['rougeL'].fmeasure,
-            "faithfulness": faithfulness_score,
-            "answer_relevance": relevance_score,
-            "answer_coverage": coverage_score
-        }
-    except Exception as e:
-        print(f"Error in evaluate_response: {e}")
-        return {
-            "rougeL_precision": 0.0,
-            "rougeL_recall": 0.0,
-            "rougeL_f1": 0.0,
-            "faithfulness": 0.0,
-            "answer_relevance": 0.0,
-            "answer_coverage": 0.0
-        }
-
-def build_relevance_prompt(response: str, chunks_text: str) -> str:
-    return f"""You are an expert RAG evaluator. Score ONLY the Relevance dimension.
-
-            Relevance: How relevant the RESPONSE is to the retrieved CHUNKS.
-
-            RESPONSE:
-            {response}
-
-            CANDIDATE CHUNKS:
-            {chunks_text}
-
-            Scoring Guide (1–5):
-            1 = Very poor  2 = Poor  3 = Acceptable  4 = Good  5 = Excellent
-
-            Output strict JSON only:
-            {{"relevance": <score>, "justification": "<reason>"}}"""
-
-
-def build_faithfulness_prompt(response: str, chunks_text: str) -> str:
-    return f"""You are an expert RAG evaluator. Score ONLY the Faithfulness dimension.
-
-            Faithfulness: Whether the RESPONSE is factually supported by the CHUNKS.
-            Penalise any claim not grounded in the chunks (hallucination).
-
-            RESPONSE:
-            {response}
-
-            CANDIDATE CHUNKS:
-            {chunks_text}
-
-            Scoring Guide (1–5):
-            1 = Very poor  2 = Poor  3 = Acceptable  4 = Good  5 = Excellent
-
-            Output strict JSON only:
-            {{"faithfulness": <score>, "justification": "<reason>"}}"""
-
-
-def build_coverage_prompt(response: str, chunks_text: str) -> str:
-    return f"""You are an expert RAG evaluator. Score ONLY the Coverage dimension.
-
-            Coverage: How well the RESPONSE covers the important information in the CHUNKS.
-            Penalise if key information from the chunks is missing.
-
-            RESPONSE:
-            {response}
-
-            CANDIDATE CHUNKS:
-            {chunks_text}
-
-            Scoring Guide (1–5):
-            1 = Very poor  2 = Poor  3 = Acceptable  4 = Good  5 = Excellent
-
-            Output strict JSON only:
-            {{"coverage": <score>, "justification": "<reason>"}}"""
+        await asyncio.gather(*(score_one(name, values) for name, values in inputs.items()))

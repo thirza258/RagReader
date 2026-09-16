@@ -87,7 +87,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Module compatibility tests
+      - name: Analysis flow and module tests
         run: npm run test:modules
 
       # `npm run build` is `tsc -b && vite build`, so this is the type-check

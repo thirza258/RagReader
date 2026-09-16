@@ -108,16 +108,17 @@ def _vector_for(text: str):
     fact about the retrieval code rather than about a random vector.
     """
     lowered = text.lower()
-    return [
+    vector = [
         1.0 if "alpha" in lowered else 0.0,
         1.0 if "beta" in lowered else 0.0,
         1.0 if "gamma" in lowered else 0.0,
     ]
+    return vector if any(vector) else [1.0, 1.0, 1.0]
 
 
 def fake_embeddings_create(input, model=None, **kwargs):  # noqa: A002 - openai kwarg name
     texts = [input] if isinstance(input, str) else list(input)
-    return mock.Mock(data=[mock.Mock(embedding=_vector_for(t)) for t in texts])
+    return mock.Mock(data=[mock.Mock(index=i, embedding=_vector_for(t)) for i, t in enumerate(texts)])
 
 
 def simple_tokenize(text):
@@ -445,15 +446,14 @@ class DensePipelineIndexTests(PipelineTestCase):
         )
         self.assertFalse(other._load_state(path))
 
-    def test_an_index_predating_the_stamp_is_still_trusted(self):
-        # Indexes written before the stamp existed carry no model; refusing
-        # them would re-embed every existing document on deploy.
+    def test_an_index_predating_the_stamp_requires_rebuilding(self):
+        # Unknown embedding models cannot safely be mixed with new query vectors.
         path = os.path.join(self.vector_store_path, "legacy.pkl")
         with open(path, "wb") as handle:
             pickle.dump(
                 {"documents": ["a"], "vectors": [[1.0]], "metadata": [{}]}, handle
             )
-        self.assertTrue(self.pipeline._load_state(path))
+        self.assertFalse(self.pipeline._load_state(path))
 
     def test_load_state_returns_false_for_a_missing_or_corrupt_file(self):
         self.assertFalse(
@@ -628,7 +628,7 @@ class DensePipelineAnalysisTests(PipelineTestCase):
         # evaluation/tests.py, so here only the wiring matters.
         judge_patch = mock.patch(
             "pipeline.dense_rag_pipeline.evaluate_response",
-            return_value={"rougeL_f1": 0.5, "faithfulness": 0.8},
+            return_value={"scores": {"factual_correctness": 0.5, "faithfulness": 0.8}, "details": {"framework": "ragas"}},
         )
         self.judge = judge_patch.start()
         self.addCleanup(judge_patch.stop)
@@ -662,14 +662,15 @@ class DensePipelineAnalysisTests(PipelineTestCase):
         self.assertEqual(result["evaluation"]["chunk_evaluation"]["recall_k"], 0.0)
         self.assertEqual(result["evaluation"]["chunk_evaluation"]["f1_k"], 0.0)
 
-    def test_answer_metrics_run_only_with_an_expected_answer(self):
+    def test_answer_metrics_receive_original_question_with_and_without_reference(self):
         GroundTruthChunk.objects.create(
             conversation=self.conversation, chunk=self._alpha_chunk()
         )
 
         without = self.pipeline.run_analysis(self.document.pk, self.conversation.pk)
-        self.assertEqual(without["evaluation"]["response_evaluation"], {})
-        self.judge.assert_not_called()
+        self.assertEqual(without["evaluation"]["response_evaluation"]["faithfulness"], 0.8)
+        self.assertIsNone(self.judge.call_args[0][1])
+        self.assertEqual(self.judge.call_args.kwargs["question"], self.conversation.query)
 
         GroundTruthResponse.objects.create(
             conversation=self.conversation, response="Alpha is about embeddings."
@@ -684,7 +685,9 @@ class DensePipelineAnalysisTests(PipelineTestCase):
         answer, expected = self.judge.call_args[0]
         self.assertEqual(answer, "generated answer")
         self.assertEqual(expected, "Alpha is about embeddings.")
-        self.assertTrue(self.judge.call_args[1]["chunks"])
+        self.assertEqual(self.judge.call_args.kwargs["chunks"], [chunk["text"] for chunk in with_expected["context"]])
+        self.assertEqual(self.judge.call_args.kwargs["question"], self.conversation.query)
+        self.assertEqual(with_expected["evaluation"]["response_evaluation_details"], {"framework": "ragas"})
 
     def test_no_ground_truth_at_all_still_returns_scored_zeroes(self):
         result = self.pipeline.run_analysis(self.document.pk, self.conversation.pk)
@@ -693,15 +696,16 @@ class DensePipelineAnalysisTests(PipelineTestCase):
             result["evaluation"]["chunk_evaluation"],
             {"precision_k": 0.0, "recall_k": 0.0, "f1_k": 0.0},
         )
-        self.assertEqual(result["evaluation"]["response_evaluation"], {})
+        self.assertIn("faithfulness", result["evaluation"]["response_evaluation"])
 
-    def test_empty_retrieval_skips_evaluation_entirely(self):
+    def test_empty_retrieval_passes_empty_evidence_to_evaluator(self):
         with mock.patch.object(self.pipeline.rag, "retrieve", return_value=[]):
             result = self.pipeline.run_analysis(
                 self.document.pk, self.conversation.pk
             )
 
-        self.assertEqual(result["evaluation"], {})
+        self.assertEqual(self.judge.call_args.kwargs["chunks"], [])
+        self.assertIn("response_evaluation_details", result["evaluation"])
         self.assertNotIn("retrieved_docs", result)
 
 
@@ -779,12 +783,12 @@ class SparsePipelineTests(PipelineTestCase):
 
         with mock.patch(
             "pipeline.sparse_rag_pipeline.evaluate_response",
-            return_value={"rougeL_f1": 0.25},
+            return_value={"scores": {"faithfulness": 0.25}, "details": {"framework": "ragas"}},
         ):
             result = self.pipeline.run_analysis(self.document.pk, conversation.pk)
 
         self.assertEqual(result["evaluation"]["chunk_evaluation"]["recall_k"], 1.0)
-        self.assertEqual(result["evaluation"]["response_evaluation"], {})
+        self.assertIn("faithfulness", result["evaluation"]["response_evaluation"])
 
     def test_init_job_reports_progress(self):
         job = Job.objects.create(user=self.user, document=self.document)
@@ -893,7 +897,7 @@ class HybridPipelineTests(PipelineTestCase):
 
         with mock.patch(
             "pipeline.hybrid_rag_pipeline.evaluate_response",
-            return_value={"rougeL_f1": 0.3, "faithfulness": 0.6},
+            return_value={"scores": {"factual_correctness": 0.3, "faithfulness": 0.6}, "details": {"framework": "ragas"}},
         ):
             result = self.pipeline.run_analysis(self.document.pk, conversation.pk)
 
@@ -1182,3 +1186,26 @@ class DataLoaderLoadTests(TestCase):
     def test_load_rejects_an_unsupported_extension(self):
         with self.assertRaises(ValueError):
             DataLoader().load("documents/user_alice/notes.docx")
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, OPENROUTER_API_KEY="")
+class BaselineProgressTests(PipelineTestCase):
+    def test_each_baseline_pipeline_reports_stages_and_real_metric_outcomes(self):
+        from common.analysis_progress import progress_scope, progress_stage
+        user = make_user()
+        document = make_document(user)
+        conversation = Conversation.objects.create(user=user, document=document, query="alpha", response="", context="")
+        for cls in (DenseRAGPipeline, SparseRAGPipeline, HybridRAGPipeline):
+            with self.subTest(pipeline=cls.__name__):
+                pipeline = self.make_pipeline(cls)
+                pipeline._build_index(user.username, document)
+                events = []
+                with progress_scope(events.append):
+                    progress_stage("question", "Preparing the document.")
+                    result = pipeline.run_analysis(document.pk, conversation.pk)
+                self.assertEqual([event["id"] for event in events if event["kind"] == "stage" and event["status"] == "completed"], ["question", "search", "evidence", "answer", "evaluate"])
+                metrics = {event["id"]: event for event in events if event["kind"] == "metric"}
+                self.assertEqual(metrics["precision_k"]["score"], result["evaluation"]["chunk_evaluation"]["precision_k"])
+                self.assertEqual(metrics["factual_correctness"]["status"], "skipped")
+                self.assertEqual(metrics["answer_relevancy"]["status"], "unavailable")
+                self.assertTrue(result["answer"])

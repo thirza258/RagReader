@@ -107,16 +107,33 @@ class Job(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, null=True, blank=True) 
     vectorstore = models.ForeignKey(VectorStore, on_delete=models.CASCADE, null=True, blank=True)
     error_message = models.TextField(blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    retryable = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.id} - {self.status}"
 
-    def mark_failed(self, message: str):
+    def mark_failed(self, message: str, code="initialization_failed", retryable=True):
         self.status = self.Status.FAILED
         self.error_message = message
-        self.save(update_fields=["status", "error_message", "updated_at"])
+        self.error_code = code
+        self.retryable = retryable
+        self.save(update_fields=["status", "error_message", "error_code", "retryable", "updated_at"])
+
+    def expire_if_stalled(self):
+        """Recover jobs abandoned by a lost queue message or terminated worker."""
+        from datetime import timedelta
+        from django.utils import timezone
+        cutoff = timezone.now() - timedelta(minutes=35)
+        if self.status in (self.Status.PENDING, self.Status.PROCESSING) and self.updated_at < cutoff:
+            type(self).objects.filter(pk=self.pk, status=self.status, updated_at=self.updated_at).update(
+                status=self.Status.FAILED, error_code="initialization_timeout", retryable=True,
+                error_message="Initialization stopped making progress. Retry initialization to create a new job.",
+                updated_at=timezone.now(),
+            )
+            self.refresh_from_db()
 
 class Metadata(models.Model):
     llm_model = models.CharField(max_length=100, default="gpt-4o", help_text="LLM for answer generation")
@@ -134,13 +151,15 @@ class Metadata(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-class AnalysisBatch(models.Model):  
+class AnalysisBatch(models.Model):
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, default=None, null=True, blank=True)
     query = models.TextField()
     job_id = models.UUIDField(default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     total_variants = models.IntegerField(default=0)
+    execution_token = models.UUIDField(null=True, blank=True)
+    execution_updated_at = models.DateTimeField(null=True, blank=True)
     config = models.JSONField(
         default=dict,
         blank=True,
@@ -160,7 +179,11 @@ class AnalysisResult(models.Model):
     answer = models.TextField()
     retrieved_chunks = models.JSONField(default=list, null=True, blank=True) 
     evaluation_metrics = models.JSONField(default=list, null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    retryable = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['created_at']
+        constraints = [models.UniqueConstraint(fields=["batch", "method", "ai_model"], name="unique_analysis_variant")]

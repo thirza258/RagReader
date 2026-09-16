@@ -22,6 +22,7 @@ from common.constant import (
     is_valid_model_id,
 )
 from common.prompt_builder import vote_prompt, rag_prompt, prompt_generator
+from common.errors import PipelineError, provider_error
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -78,31 +79,36 @@ class OpenRouterLLM(BaseLLM):
                 "expected the form 'provider/model', e.g. 'openai/gpt-4o-mini'."
             )
         super().__init__(model, temperature, api_key)
+        if not self.api_key:
+            raise PipelineError("missing_provider_key", "OpenRouter API key is not configured. Set OPENROUTER_API_KEY before running analysis.", http_status=503)
         self.client = OpenAI(
             base_url=OPENROUTER_BASE_URL,
             api_key=self.api_key,
             default_headers=OPENROUTER_HEADERS,
+            timeout=45.0,
+            max_retries=1,
         )
 
     def _call_api(self, prompt: str) -> str:
         try:
             if not self.api_key:
-                raise ValueError("OpenRouter API key is missing or not configured.")
+                raise PipelineError("missing_provider_key", "OpenRouter API key is not configured.", http_status=503)
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
             )
-            if not response or getattr(response, "choices", None) is None:
-                raise ValueError(f"OpenRouter response missing choices: {response}")
-            if len(response.choices) == 0:
-                raise ValueError("OpenRouter returned empty choices list.")
+            if not response or not getattr(response, "choices", None):
+                raise PipelineError("empty_model_response", f"OpenRouter returned no answer for {self.model}. Try again.", retryable=True, http_status=502)
             choice = response.choices[0]
-            if getattr(choice, "message", None) is None or choice.message.content is None:
-                return ""
-            return (choice.message.content or "").strip()
+            answer = getattr(getattr(choice, "message", None), "content", None)
+            if not isinstance(answer, str) or not answer.strip():
+                raise PipelineError("empty_model_response", f"OpenRouter returned an empty answer for {self.model}. Try again.", retryable=True, http_status=502)
+            return answer.strip()
+        except PipelineError:
+            raise
         except Exception as e:
-            raise RuntimeError(f"OpenRouter call failed ({self.model}): {e}") from e
+            raise provider_error(e, "Answer generation", self.model) from e
 
 
 # ── Named defaults ───────────────────────────────────────────────────────────

@@ -332,7 +332,7 @@ class ModuleRunBoundaryTests(TestCase):
         self.assertEqual(self.start([]).json()["config"]["modules"], [])
 
     def test_all_off_uses_original_pipeline_without_loading_auxiliary_data(self):
-        pipeline = SimpleNamespace(config={"modules": []}, _run_core=mock.Mock(return_value={"answer": "baseline"}))
+        pipeline = SimpleNamespace(prepare_document=mock.Mock(), config={"modules": []}, _run_core=mock.Mock(return_value={"answer": "baseline"}))
         with self.assertNumQueries(0):
             result = BasePipeline._run_analysis_core(pipeline, self.document, self.conversation)
         self.assertEqual(result["answer"], "baseline")
@@ -342,10 +342,10 @@ class ModuleRunBoundaryTests(TestCase):
         target = GroundTruthResponse.objects.create(conversation=self.conversation, response="TARGET SECRET")
         other = Conversation.objects.create(user=self.user, document=self.document, query="storage", response="", context="")
         GroundTruthResponse.objects.create(conversation=other, response="Batteries")
-        pipeline = SimpleNamespace(config={"modules": ["contextual_learning"]}, method="dense", _build_index=mock.Mock())
+        pipeline = SimpleNamespace(config={"modules": ["contextual_learning"]}, method="dense", prepare_document=mock.Mock())
         with mock.patch("pipeline.analysis_modules.AnalysisModules") as runner:
             BasePipeline._run_analysis_core(pipeline, self.document, self.conversation)
-        pipeline._build_index.assert_called_once_with(self.user.username, self.document)
+        pipeline.prepare_document.assert_called_once_with(self.document)
         examples = runner.call_args.kwargs["examples"]
         self.assertEqual(examples, [{"question": "storage", "answer": "Batteries"}])
         self.assertNotIn(target.response, json.dumps(examples))

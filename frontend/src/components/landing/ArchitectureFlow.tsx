@@ -15,7 +15,7 @@ const STEPS = [
   },
   {
     title: "Retrieval and fusion",
-    desc: "Cross-encoder reranking (ms-marco-MiniLM-L6-v2) for hybrid; Reciprocal Rank Fusion for the candidate pool.",
+    desc: "Remote Ollama reranking for hybrid; Reciprocal Rank Fusion for the candidate pool or the optional RRF Hybrid module.",
   },
   {
     title: "Multi-model execution",
@@ -23,7 +23,7 @@ const STEPS = [
   },
   {
     title: "Scoring",
-    desc: "Precision@K, Recall@K, F1@K, ROUGE-L, and three judged answer metrics from Mistral Nemo.",
+    desc: "Precision@K, Recall@K, F1@K, and Ragas faithfulness, response relevance, and factual correctness through OpenRouter.",
   },
 ];
 

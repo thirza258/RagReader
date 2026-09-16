@@ -1,5 +1,5 @@
 import type { AnalysisRunState } from "../components/DeepSidebar";
-import type { DeepAnalysisConfig } from "../interface";
+import type { AnalysisConfigOptions, DeepAnalysisConfig } from "../interface";
 
 export type UserRole = "me" | "bot";
 
@@ -45,6 +45,8 @@ export type DeepResultContextType = {
   /** Incremented each time the user presses Stop. */
   stopSignal: number;
   setRunState: (state: AnalysisRunState) => void;
+  runState: AnalysisRunState;
+  analysisOptions: AnalysisConfigOptions | null;
   setModulesAvailable: (available: boolean) => void;
   setSelectedModules: (modules: string[]) => void;
 };

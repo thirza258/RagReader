@@ -19,6 +19,9 @@ import json
 import logging
 import os
 from collections import OrderedDict
+from contextlib import contextmanager
+from threading import RLock
+from weakref import WeakKeyDictionary
 from typing import Any, Dict, Optional
 
 from pipeline.dense_rag_pipeline import DenseRAGPipeline
@@ -34,6 +37,17 @@ from common.constant import (
 )
 
 logger = logging.getLogger(__name__)
+_execution_locks = WeakKeyDictionary()
+_execution_guard = RLock()
+
+
+@contextmanager
+def engine_execution(engine):
+    """A cached engine's document and retrieval settings change as one unit."""
+    with _execution_guard:
+        lock = _execution_locks.setdefault(engine, RLock())
+    with lock:
+        yield engine
 
 # Retrieval methods stay a closed set: each one needs a pipeline class.
 PIPELINE_CLASSES = {
@@ -129,9 +143,14 @@ class RAGRegistry:
         # Insertion-ordered so the oldest entry is the one evicted.
         self.engines: "OrderedDict[tuple, Any]" = OrderedDict()
         self.max_size = _cache_size()
+        self._cache_lock = RLock()
         self._initialized = True
 
     def get_engine(self, method: str, llm_model: str, config: Optional[dict] = None):
+        with self._cache_lock:
+            return self._get_engine(method, llm_model, config)
+
+    def _get_engine(self, method: str, llm_model: str, config: Optional[dict] = None):
         """Return the pipeline for this method, model and run configuration.
 
         Usage: registry.get_engine("Dense Retrieval", "openai/gpt-4o-mini")

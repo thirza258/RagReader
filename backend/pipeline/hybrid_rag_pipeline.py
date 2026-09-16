@@ -1,3 +1,7 @@
+from django.db import transaction
+from common.analysis_progress import progress_stage, report_progress
+from common.embeddings import validate_vectors
+import copy
 import os
 import pickle
 import logging
@@ -45,7 +49,8 @@ class HybridRAGPipeline(BasePipeline):
             strategy=config.get("chunk_strategy", DEFAULT_CHUNK_STRATEGY),
             chunk_size=config.get("chunk_size", DEFAULT_CHUNK_SIZE),
             overlap=config.get("overlap", DEFAULT_CHUNK_OVERLAP),
-            embedding_client=embedding_client
+            embedding_client=embedding_client,
+            embedding_model=self.rag.dense_engine.model,
         )
         self.loader = DataLoader()
 
@@ -69,6 +74,7 @@ class HybridRAGPipeline(BasePipeline):
             # See DenseRAGPipeline._embeddings_still_match: the dense half of
             # this index is only meaningful against the model that built it.
             "embedding_model": self._embedding_model(),
+            "chunk_config": self._get_chunk_config(),
             "sparse": {
                 "documents": sparse_docs,
                 "bm25": getattr(self.rag.sparse_engine, "bm25", None),
@@ -101,12 +107,11 @@ class HybridRAGPipeline(BasePipeline):
     def _embeddings_still_match(self, stored_model: str | None) -> bool:
         """False when the dense half was built by a different embedding model.
 
-        Indexes written before this stamp existed carry no model and are
-        trusted; a recorded mismatch routes into the same discard-and-rebuild
-        path as a corrupt file.
+        Indexes without a model stamp cannot safely be mixed with new query
+        vectors. A missing stamp or model mismatch requires re-embedding.
         """
         current = self._embedding_model()
-        if not stored_model or not current or stored_model == current:
+        if stored_model and stored_model == current:
             return True
         logger.warning(
             f"Index was embedded with '{stored_model}' but this pipeline uses "
@@ -125,33 +130,40 @@ class HybridRAGPipeline(BasePipeline):
             if not self._embeddings_still_match(data.get("embedding_model")):
                 return False
 
+            if data.get("chunk_config") and data["chunk_config"] != self._get_chunk_config():
+                return False
+            if not isinstance(data.get("sparse"), dict) or not isinstance(data.get("dense"), dict):
+                return False
+            sparse_candidate = copy.copy(self.rag.sparse_engine)
+            dense_candidate = copy.copy(self.rag.dense_engine)
+
             if "sparse" in data:
-                self.rag.sparse_engine.documents = data["sparse"].get("documents") or []
-                self.rag.sparse_engine.tokenized_corpus = data["sparse"].get("tokenized_corpus") or []
-                self.rag.sparse_engine.document_metadata = data["sparse"].get("metadata") or []
+                sparse_candidate.documents = data["sparse"].get("documents") or []
+                sparse_candidate.tokenized_corpus = data["sparse"].get("tokenized_corpus") or []
+                sparse_candidate.document_metadata = data["sparse"].get("metadata") or []
                 bm25 = data["sparse"].get("bm25")
                 if bm25 is not None:
-                    self.rag.sparse_engine.bm25 = bm25
+                    sparse_candidate.bm25 = bm25
                 else:
                     logger.warning("BM25 not in pickle, rebuilding from tokenized_corpus...")
-                    corpus = getattr(self.rag.sparse_engine, "tokenized_corpus", [])
+                    corpus = getattr(sparse_candidate, "tokenized_corpus", [])
                     if corpus:
                         from rank_bm25 import BM25Okapi
-                        self.rag.sparse_engine.bm25 = BM25Okapi(corpus)
+                        sparse_candidate.bm25 = BM25Okapi(corpus)
                     else:
                         logger.error("Cannot rebuild BM25 — tokenized_corpus is also empty.")
                         return False
 
             if "dense" in data:
                 # Use `or []` to safely handle None values from old corrupt pickles
-                self.rag.dense_engine.documents = data["dense"].get("documents") or []
-                self.rag.dense_engine.document_vectors = data["dense"].get("vectors") or []
-                self.rag.dense_engine.document_metadata = data["dense"].get("metadata") or []
+                dense_candidate.documents = data["dense"].get("documents") or []
+                dense_candidate.document_vectors = data["dense"].get("vectors") or []
+                dense_candidate.document_metadata = data["dense"].get("metadata") or []
 
-            sparse_ok = len(getattr(self.rag.sparse_engine, "documents", []) or []) > 0
-            dense_ok = len(getattr(self.rag.dense_engine, "documents", []) or []) > 0
-            bm25_ok = getattr(self.rag.sparse_engine, "bm25", None) is not None
-            vectors_ok = len(getattr(self.rag.dense_engine, "document_vectors", []) or []) > 0
+            sparse_ok = len(getattr(sparse_candidate, "documents", []) or []) > 0
+            dense_ok = len(getattr(dense_candidate, "documents", []) or []) > 0
+            bm25_ok = getattr(sparse_candidate, "bm25", None) is not None
+            vectors_ok = len(getattr(dense_candidate, "document_vectors", []) or []) > 0
 
             if not all([sparse_ok, dense_ok, bm25_ok, vectors_ok]):
                 logger.error(
@@ -163,15 +175,26 @@ class HybridRAGPipeline(BasePipeline):
 
             logger.info(
                 f"State loaded — "
-                f"{len(self.rag.sparse_engine.documents)} sparse docs, "
-                f"{len(self.rag.dense_engine.documents)} dense docs"
+                f"{len(sparse_candidate.documents)} sparse docs, "
+                f"{len(dense_candidate.documents)} dense docs"
             )
+            dense_candidate.document_vectors = validate_vectors(dense_candidate.document_vectors, len(dense_candidate.documents))
+            if len(dense_candidate.document_metadata) != len(dense_candidate.documents) or len(sparse_candidate.document_metadata) != len(sparse_candidate.documents):
+                return False
+            if dense_candidate.documents != sparse_candidate.documents or dense_candidate.document_metadata != sparse_candidate.document_metadata:
+                return False
+            if any(meta.get("chunk_id") is None for meta in dense_candidate.document_metadata):
+                return False
+            self.rag.sparse_engine, self.rag.dense_engine = sparse_candidate, dense_candidate
+            self.rag._documents = [{"text": text, **metadata} for text, metadata in zip(dense_candidate.documents, dense_candidate.document_metadata)]
+            self.rag.document_metadata = dense_candidate.document_metadata
             return True
 
         except Exception as e:
             logger.error(f"Error loading state from {path}: {e}")
             return False
 
+    @transaction.atomic
     def _build_index(self, username: str, document) -> str:
         """
         Internal function that builds the Hybrid index.
@@ -273,6 +296,7 @@ class HybridRAGPipeline(BasePipeline):
             if not self.rag.dense_engine.documents or len(self.rag.dense_engine.documents) == 0:
                 raise RuntimeError("State loaded from disk, but memory is still empty.")
 
+        progress_stage("search", "Optimizing the question and searching the document.")
         optimized_query = self.optimize_query(query)
         logger.info(f"Optimized Query: {optimized_query}")
 
@@ -281,8 +305,13 @@ class HybridRAGPipeline(BasePipeline):
         if not retrieved_docs:
             retrieved_docs = self.rag.retrieve(query)
 
+        report_progress("activity", "retrieval", "completed", f"Retrieved {len(retrieved_docs)} source passages.", queries=[optimized_query])
+        progress_stage("evidence", f"Preparing {len(retrieved_docs)} source passages for the answer.")
+
         if not retrieved_docs:
             logger.warning(f"No relevant documents found for query: {query}")
+            progress_stage("evidence", "No document evidence was retrieved.", status="skipped")
+            progress_stage("answer", "Writing an answer without retrieved evidence.")
             answer = self.llm.rag_generate(query, context="")
             return {
                 "answer": answer,
@@ -292,6 +321,7 @@ class HybridRAGPipeline(BasePipeline):
             }
 
         context_str = "\n\n".join(doc["text"] for doc in retrieved_docs)
+        progress_stage("answer", "Writing the answer using the retrieved evidence.")
         answer = self.llm.rag_generate(optimized_query, context_str)
 
         return {
@@ -309,16 +339,17 @@ class HybridRAGPipeline(BasePipeline):
         }
 
 
-    def run(self, username: str, query: str) -> Dict[str, Any]:
+    def run(self, username: str, query: str, document_id=None) -> Dict[str, Any]:
         """
         Retrieves relevant documents and generates an answer using Hybrid RAG.
         """
         logger.info(f"Running Hybrid Chat for {username}...")
 
-        document = self.get_document(username)
+        document = Document.objects.get(pk=document_id, user__username=username) if document_id is not None else self.get_document(username)
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
+        self.prepare_document(document)
         result = self._run_core(document, query)
         result.pop("retrieved_docs", None)
         return result
@@ -335,11 +366,8 @@ class HybridRAGPipeline(BasePipeline):
 
         result = self._run_analysis_core(document, conversation)
 
-        retrieved_docs = result.pop("retrieved_docs", [])
-
-        if not retrieved_docs and not self.config.get("modules"):
-            result["evaluation"] = {}
-            return result
+        progress_stage("evaluate", "Comparing retrieved chunks and evaluating the answer with Ragas.")
+        result.pop("retrieved_docs", None)
 
         retrieved_ids = set(result["chunk_ids"])
 
@@ -353,23 +381,23 @@ class HybridRAGPipeline(BasePipeline):
         )
         
         evaluation_chunks_results = evaluate_chunks(retrieved_ids, ground_truth_ids)
+        for name, score in evaluation_chunks_results.items():
+            report_progress("metric", name, "completed", "Compared retrieved and reference chunk IDs.", score=score)
 
         ground_truth_response = GroundTruthResponse.objects.filter(conversation=conversation).first()
-        if ground_truth_response:
-            evaluation_response_result = evaluate_response(
-                result["answer"],
-                ground_truth_response.response,
-                chunks=[doc["text"] for doc in result.get("context", [])],
-                judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
-            )
-            
-        else:
-            logger.warning(f"No ground truth response for conversation {conversation_id}")
-
+        report = evaluate_response(
+            result["answer"],
+            ground_truth_response.response if ground_truth_response else None,
+            chunks=[doc["text"] for doc in result.get("context", [])],
+            judge_model=self.config.get("judge_model", DEFAULT_JUDGE_MODEL),
+            question=conversation.query,
+        )
         result["evaluation"] = {
             "chunk_evaluation": evaluation_chunks_results,
-            "response_evaluation": evaluation_response_result if ground_truth_response else {}
+            "response_evaluation": report["scores"],
+            "response_evaluation_details": report["details"],
         }
+        progress_stage("evaluate", "Evaluation finished. Saving the result.", status="completed")
         return result
     
     def init_job(self, username: str, job=None) -> bool:
@@ -381,9 +409,9 @@ class HybridRAGPipeline(BasePipeline):
 
         if job:
             job.progress = 10
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
-        document = self.get_document(username)
+        document = job.document if job is not None else self.get_document(username)
         if not document:
             raise ValueError(f"No document found for user: {username}")
 
@@ -398,7 +426,7 @@ class HybridRAGPipeline(BasePipeline):
 
             if job:
                 job.progress = 80
-                job.save()
+                job.save(update_fields=["progress", "updated_at"])
 
             logger.info(f"Loading state from {doc_vector.vectorstore_location}")
 
@@ -416,13 +444,13 @@ class HybridRAGPipeline(BasePipeline):
 
         if job:
             job.progress = 20
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
         self._build_index(username, document)
 
         if job:
             job.progress = 90
-            job.save()
+            job.save(update_fields=["progress", "updated_at"])
 
         logger.info("Hybrid Initialization Complete.")
         return True

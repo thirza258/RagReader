@@ -16,6 +16,7 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics.pairwise import cosine_similarity
 
 from common.analysis_modules import RAG_MODULES, normalize_modules
+from common.analysis_progress import progress_stage, report_progress
 from dense_rag.dense_rag import DenseRAG
 from sparse_rag.sparse_rag import SparseRAG
 
@@ -82,6 +83,7 @@ class AnalysisModules:
         self.document_id = str(document_id)
         self.examples = examples or []
         self.trace = []
+        self._active_modules = set()
         self._dense_engine = getattr(pipeline.rag, "dense_engine", None)
         self._sparse_engine = getattr(pipeline.rag, "sparse_engine", None)
         if pipeline.method == "dense":
@@ -107,8 +109,13 @@ class AnalysisModules:
 
     def _record(self, module, status, detail, **extra):
         self.trace.append({"module": module, "label": MODULE_LABELS[module], "status": status, "detail": detail, **extra})
+        live_status = "running" if module in self._active_modules and status == "completed" else status
+        report_progress("module", module, live_status, detail, label=MODULE_LABELS[module], **extra)
 
     def _step(self, module, action, fallback):
+        self._active_modules.add(module)
+        start = len(self.trace)
+        report_progress("module", module, "running", f"Running {MODULE_LABELS[module]}.", label=MODULE_LABELS[module])
         try:
             return action()
         except Exception as exc:
@@ -116,6 +123,12 @@ class AnalysisModules:
             if isinstance(fallback, list) and fallback and isinstance(fallback[0], dict) and "chunk_id" in fallback[0]:
                 return self._without_rejected(fallback)
             return fallback
+        finally:
+            self._active_modules.discard(module)
+            steps = [step for step in self.trace[start:] if step["module"] == module]
+            if steps:
+                step = {key: value for key, value in steps[-1].items() if key != "module"}
+                report_progress("module", module, **step)
 
     def _prompt(self, module, instruction, data):
         response = self.llm.generate(
@@ -172,6 +185,7 @@ class AnalysisModules:
 
     def _retrieve(self, query, dense_only=False):
         self.query_log.append(query)
+        report_progress("activity", "retrieval", "running", "Searching the document for supporting passages.", queries=[query])
         if dense_only:
             return self._retrieve_with(self._dense(), query)
         if "rrf_hybrid" in self.modules:
@@ -358,11 +372,14 @@ class AnalysisModules:
         self._record("flare", "completed", f"Checked {len(sentences)} upcoming sentences using model-reported uncertainty and retrieved where needed.")
         return evidence
 
-    def _result(self, answer, evidence, route):
+    def _skip_remaining(self, route):
         recorded = {step["module"] for step in self.trace}
         for module in self.modules:
             if module not in recorded:
                 self._record(module, "skipped", f"Not needed on the {route} route.")
+
+    def _result(self, answer, evidence, route):
+        self._skip_remaining(route)
         return {
             "answer": answer, "context": evidence,
             "chunk_ids": [doc["chunk_id"] for doc in evidence], "retrieved_docs": evidence,
@@ -370,6 +387,7 @@ class AnalysisModules:
         }
 
     def run(self, query):
+        progress_stage("search", "Choosing a retrieval route and preparing search questions.")
         route = "single"
         if "adaptive_rag" in self.modules:
             def choose_route():
@@ -380,10 +398,19 @@ class AnalysisModules:
                 self._record("adaptive_rag", "completed", f"Selected {chosen} retrieval using a prompt-based complexity classifier.")
                 return chosen
             route = self._step("adaptive_rag", choose_route, "single")
+        report_progress("route", route, "completed", f"Selected the {route} route.")
         if route == "direct":
+            progress_stage("search", "Adaptive RAG selected a direct answer; document retrieval is skipped.", status="skipped")
+            progress_stage("evidence", "The direct route does not use document evidence.", status="skipped")
+            self._skip_remaining(route)
+            progress_stage("answer", "Writing a direct answer.")
             answer = self._prompt("adaptive_rag", "Respond to this conversational request. You have no document evidence; do not invent facts about the document.", {"question": query})
             return self._result(answer, [], route)
         if not self.corpus:
+            progress_stage("search", "No indexed passages are available to search.", status="skipped")
+            progress_stage("evidence", "No document evidence is available.", status="skipped")
+            self._skip_remaining(route)
+            progress_stage("answer", "Writing an answer without retrieved evidence.")
             return self._result(self.llm.rag_generate(query, ""), [], route)
 
         searches = [query]
@@ -396,6 +423,8 @@ class AnalysisModules:
         if "memo_rag" in self.modules:
             searches += self._step("memo_rag", lambda: self._memory(query), [])
 
+        if "rrf_hybrid" in self.modules:
+            report_progress("module", "rrf_hybrid", "running", "Combining semantic and keyword search rankings.", label=MODULE_LABELS["rrf_hybrid"])
         rankings = [self._retrieve(q) for q in dict.fromkeys(searches)]
         if "rrf_hybrid" in self.modules:
             self._record("rrf_hybrid", "completed", f"Fused dense and BM25 rankings with RRF k={self.rrf_k}; no reranker used.")
@@ -416,11 +445,13 @@ class AnalysisModules:
                     combined = fuse_rankings([combined, self._retrieve(questions[0])], self.depth, self.rrf_k)
                 return combined[:self.top_k]
             evidence = self._step("adaptive_rag", multi_step, evidence)
+        progress_stage("evidence", f"Refining {len(evidence)} retrieved source passages.")
         for module, action in (("raptor", self._raptor), ("long_rag", self._long_rag), ("crag", self._correct), ("self_route", self._self_route)):
             if module in self.modules:
                 evidence = self._step(module, lambda action=action: action(query, evidence), evidence)
         budget = LONG_CONTEXT_CHARS if {"long_rag", "self_route"}.intersection(self.modules) else CONTEXT_CHARS
         evidence = pack_context(self._without_rejected(evidence), budget)
+        progress_stage("answer", "Preparing the final evidence and writing the answer.")
         if "flare" in self.modules:
             evidence = self._step("flare", lambda: self._flare(query, evidence), evidence)
         evidence = pack_context(self._without_rejected(evidence), budget)

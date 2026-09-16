@@ -9,6 +9,7 @@ import glob
 import hashlib
 import json
 from evaluation.models import Chunk
+from common.errors import PipelineError
 
 logger = logging.getLogger(__name__)
 
@@ -123,20 +124,14 @@ class BasePipeline(ABC):
 
     def _run_analysis_core(self, document, conversation):
         """Optional stages are entered only by analysis, never by normal chat."""
+        if conversation.document_id != document.pk or conversation.user_id != document.user_id:
+            raise PipelineError("document_mismatch", "The requested document does not match the analysis conversation.", http_status=400)
+        self.prepare_document(document)
         if not self.config.get("modules"):
             return self._run_core(document, conversation.query)
 
         from pipeline.analysis_modules import AnalysisModules
-        from router.models import DocumentVector
         from evaluation.models import GroundTruthResponse
-
-        # A cached engine may hold another user's document or a newer upload.
-        # Load the conversation's exact index on every module run.
-        index = DocumentVector.objects.filter(
-            document=document, status="ready", method=self.method,
-        ).last()
-        if not index or not self._load_state(index.vectorstore_location):
-            self._build_index(document.user.username, document)
 
         examples = []
         if "contextual_learning" in self.config["modules"]:
@@ -149,6 +144,17 @@ class BasePipeline(ABC):
                 ).select_related("conversation").order_by("-pk")[:3]
             ]
         return AnalysisModules(self, document.pk, examples=examples).run(conversation.query)
+
+    def prepare_document(self, document):
+        """Reuse an index for this exact document and embedding configuration."""
+        from router.models import DocumentVector
+        if not document:
+            raise PipelineError("missing_document", "Upload a document before initializing retrieval.", http_status=400)
+        for index in DocumentVector.objects.filter(document=document, status="ready", method=self.method).order_by("-created_at"):
+            if self._load_state(index.vectorstore_location):
+                return True
+        self._build_index(document.user.username, document)
+        return True
 
     
     def is_initialized(self, username):

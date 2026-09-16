@@ -1,4 +1,5 @@
-import { AnalysisResult, RetrievedChunk, WebSocketMessage, DeepAnalysisServiceOptions } from "../interface";
+import type { AnalysisResult, DeepAnalysisServiceOptions } from "../interface";
+import { processRawFrame } from "./analysisFrames";
 
 export function getWsBaseUrl(): string {
   const envWs = import.meta.env.VITE_WS_URL;
@@ -26,165 +27,10 @@ export function buildWebSocketUrl(batchId: string): string {
   return `${base}/ws/analysis/${batchId}/`;
 }
 
-/**
- * Parses a raw WebSocket message string into a structured object.
- */
-export function parseWebSocketMessage(raw: string): WebSocketMessage | null {
-  try {
-    const trimmed = raw.trim();
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      return JSON.parse(trimmed);
-    }
-    const jsonStr = raw
-      .split("\n")
-      .filter((line) => {
-        const t = line.trim();
-        return t.startsWith("{") || t.startsWith("[");
-      })
-      .join("\n");
-
-    if (!jsonStr) return null;
-    return JSON.parse(jsonStr);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Transforms a parsed WebSocket message into an AnalysisResult.
- * Returns null for INITIALIZING, CONFIG, REPLAYING, or COMPLETE status messages.
- */
-export function transformToAnalysisResult(
-  msg: WebSocketMessage,
-  query?: string
-): AnalysisResult | null {
-  if (
-    msg.status === "INITIALIZING" ||
-    msg.status === "COMPLETE" ||
-    msg.status === "CONFIG" ||
-    msg.status === "REPLAYING"
-  ) {
-    return null;
-  }
-
-  if (msg.error && msg.method) {
-    return {
-      batch_id: msg.batch_id ?? "Unknown",
-      method: msg.method ?? "Unknown",
-      aiModel: msg.aiModel ?? "Unknown",
-      query: msg.query ?? query ?? "Unknown",
-      answer: `Error: ${msg.error}`,
-      retrievedChunks: [],
-      evaluation: {
-        chunk_evaluation: {},
-        response_evaluation: {},
-        retrieval_score: [],
-      },
-      progress: msg.progress ?? 0,
-      error: msg.error,
-    };
-  }
-
-  if (!msg.answer) return null;
-
-  const rawChunks = msg.context ?? (msg as { retrievedChunks?: unknown[] }).retrievedChunks ?? [];
-  // Chunks arrive from the server under either spelling of the id.
-  type RawChunk = {
-    chunk_id?: string | number;
-    id?: string | number;
-    text?: string;
-    score?: number;
-  };
-  const chunks: RetrievedChunk[] = (Array.isArray(rawChunks) ? rawChunks : []).map(
-    (chunk) => {
-      const raw = (chunk ?? {}) as RawChunk;
-      return {
-        id: raw.chunk_id ?? raw.id ?? "NULL",
-        text: (raw.text ?? "").trim(),
-        score: raw.score,
-      };
-    }
-  );
-
-  return {
-    batch_id: msg.batch_id ?? "Unknown",
-    method: msg.method ?? "Unknown",
-    aiModel: msg.aiModel ?? "Unknown",
-    query: msg.query ?? query ?? "Unknown",
-    answer: msg.answer,
-    retrievedChunks: chunks,
-    evaluation: {
-      chunk_evaluation: msg.evaluation?.chunk_evaluation ?? {},
-      response_evaluation: msg.evaluation?.response_evaluation ?? {},
-      retrieval_score: msg.evaluation?.retrieval_score ?? [],
-      module_trace: msg.evaluation?.module_trace,
-    },
-    progress: msg.progress ?? 0,
-  };
-}
-
+export { parseWebSocketMessage, transformToAnalysisResult } from "./analysisFrames";
 export type OnResultCallback = (result: AnalysisResult) => void;
 export type OnProgressCallback = (method: string, progress: number) => void;
 export type OnErrorCallback = (error: Event) => void;
-
-function processRawFrame(
-  raw: string,
-  query: string | undefined,
-  onResult: OnResultCallback,
-  onProgress?: OnProgressCallback,
-  onComplete?: () => void
-) {
-  // Try direct parse first
-  try {
-    const msg: WebSocketMessage = JSON.parse(raw.trim());
-    if (msg.status === "COMPLETE") {
-      onComplete?.();
-      return;
-    }
-    if (msg.progress !== undefined && msg.method && onProgress) {
-      onProgress(msg.method, msg.progress);
-    }
-    const result = transformToAnalysisResult(msg, query);
-    if (result) {
-      onResult(result);
-    }
-    return;
-  } catch {
-    // If not single JSON, try splitting lines
-  }
-
-  const lines = raw.split("\n");
-  let buffer = "";
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) continue;
-
-    buffer += trimmed;
-
-    try {
-      const msg: WebSocketMessage = JSON.parse(buffer);
-      buffer = "";
-
-      if (msg.status === "COMPLETE") {
-        onComplete?.();
-        return;
-      }
-
-      if (msg.progress !== undefined && msg.method && onProgress) {
-        onProgress(msg.method, msg.progress);
-      }
-
-      const result = transformToAnalysisResult(msg, query);
-      if (result) {
-        onResult(result);
-      }
-    } catch {
-      // Continue buffering
-    }
-  }
-}
 
 /**
  * Opens a WebSocket connection for deep analysis results.
@@ -193,7 +39,7 @@ function processRawFrame(
 export function connectDeepAnalysisWebSocket(
   options: DeepAnalysisServiceOptions
 ): () => void {
-  const { url, query, onOpen, onResult, onProgress, onError, onClose } = options;
+  const { url, onOpen, onError, onClose, onReconnecting } = options;
 
   let ws: WebSocket | null = null;
   let isManuallyClosed = false;
@@ -210,29 +56,22 @@ export function connectDeepAnalysisWebSocket(
     } catch (err) {
       if (!isManuallyClosed) {
         onError?.(err instanceof Event ? err : new Event("error"));
+        onClose?.();
       }
       return;
     }
 
     ws.onopen = () => {
-      retryCount = 0;
       if (!isManuallyClosed) {
         onOpen?.();
       }
     };
 
     ws.onmessage = (event: MessageEvent) => {
-      if (isManuallyClosed) return;
+      if (isManuallyClosed || isCompleted) return;
       const raw: string = typeof event.data === "string" ? event.data : String(event.data);
       processRawFrame(
-        raw,
-        query,
-        (res) => {
-          if (!isManuallyClosed) onResult(res);
-        },
-        (method, progress) => {
-          if (!isManuallyClosed) onProgress?.(method, progress);
-        },
+        raw, options,
         () => {
           isCompleted = true;
           if (ws) {
@@ -257,6 +96,7 @@ export function connectDeepAnalysisWebSocket(
         return;
       }
 
+      onReconnecting?.();
       // Retry connecting if unexpectedly dropped
       if (retryCount < maxRetries) {
         retryCount++;

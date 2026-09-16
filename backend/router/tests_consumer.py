@@ -17,6 +17,7 @@ so the fixtures have to be committed to be visible.
 """
 import json
 import os
+import threading
 from unittest import mock
 
 os.environ.setdefault("RAG_DISABLE_ENGINE_INIT", "1")
@@ -26,6 +27,8 @@ from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 from django.core.cache import cache
 from django.test import TransactionTestCase, override_settings
+from common.analysis_progress import progress_stage, report_progress
+from common.errors import PipelineError
 
 import router.consumers as consumers
 import router.urls
@@ -53,7 +56,7 @@ ANALYSIS_RESPONSE = {
     "context": [{"text": "chunk text", "chunk_id": 7, "score": 0.83}],
     "evaluation": {
         "chunk_evaluation": {"precision_k": 0.5, "recall_k": 1.0, "f1_k": 0.667},
-        "response_evaluation": {"rougeL_f1": 0.4, "faithfulness": 0.8},
+        "response_evaluation": {"factual_correctness": 0.4, "faithfulness": 0.8},
     },
 }
 
@@ -111,7 +114,7 @@ class AnalysisConsumerTests(TransactionTestCase):
         )
         return batch
 
-    def collect(self, job_id, max_frames=25):
+    def collect(self, job_id, max_frames=200):
         """Drive the socket and return every frame it sent."""
 
         async def run():
@@ -157,6 +160,83 @@ class AnalysisConsumerTests(TransactionTestCase):
 
     # ── failure to even start ────────────────────────────────────────────────
 
+    def test_malformed_id_is_a_terminal_error_frame(self):
+        frames = self.collect("invalid-id")
+        self.assertEqual(frames[0]["error_code"], "invalid_job_id")
+        self.assertTrue(frames[0]["terminal"])
+
+    def test_canonical_id_and_database_binding_override_stale_cache(self):
+        batch = self.make_batch()
+        cache.set(f"job_input_{batch.job_id}", {"username": "wrong", "document_id": "999", "conversation_id": "999"})
+        engine = make_engine()
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=engine):
+            frames = self.collect(batch.job_id.hex.upper())
+        engine.run_analysis.assert_called_once_with(str(self.document.pk), str(self.conversation.pk))
+        self.assertTrue(all(frame["batch_id"] == str(batch.job_id) for frame in frames))
+
+    def test_embedding_failure_is_persisted_and_replayed_without_retry(self):
+        batch = self.make_batch()
+        engine = make_engine()
+        engine.run_analysis.side_effect = PipelineError("provider_timeout", "Embedding timed out. Try again.", retryable=True)
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=engine):
+            first = self.collect(batch.job_id)
+            replay = self.collect(batch.job_id)
+        engine.run_analysis.assert_called_once()
+        self.assertEqual(first[-1]["outcome"], "failed")
+        self.assertEqual(replay[0]["status"], "REPLAYING")
+        error = next(frame for frame in replay if "error" in frame)
+        self.assertEqual(error["error_code"], "provider_timeout")
+        self.assertTrue(error["retryable"])
+        self.assertEqual(AnalysisResult.objects.get(batch=batch).error_message, error["error"])
+
+    def test_reconnect_waits_for_inflight_work_then_resumes_same_batch_once(self):
+        batch = self.make_batch(models=(GPT, GEMINI))
+        release = threading.Event()
+        engine = make_engine()
+        def analyze(*args):
+            progress_stage("search", "Embedding the question.")
+            if not release.wait(timeout=10):
+                raise TimeoutError("Follower never attached")
+            return ANALYSIS_RESPONSE
+        engine.run_analysis.side_effect = analyze
+
+        async def run():
+            app = URLRouter(router.urls.websocket_urlpatterns)
+            first = WebsocketCommunicator(app, f"/ws/analysis/{batch.job_id}/")
+            second = WebsocketCommunicator(app, f"/ws/analysis/{batch.job_id}/")
+            await first.connect()
+            try:
+                while True:
+                    frame = await first.receive_json_from(timeout=5)
+                    if frame.get("event", {}).get("id") == "search":
+                        break
+                await second.connect()
+                while True:
+                    frame = await second.receive_json_from(timeout=5)
+                    if frame.get("status") == "WAITING":
+                        break
+                self.assertEqual(engine.run_analysis.call_count, 1)
+                await first.disconnect()
+                release.set()
+                frames = []
+                while True:
+                    frame = await second.receive_json_from(timeout=5)
+                    frames.append(frame)
+                    if frame.get("status") in ("ERROR", "COMPLETE"):
+                        break
+                self.assertEqual(frames[-1]["status"], "COMPLETE")
+                self.assertEqual(frames[-1]["completed"], 2)
+            finally:
+                release.set()
+                await second.disconnect()
+
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=engine):
+            async_to_sync(run)()
+        self.assertEqual(engine.run_analysis.call_count, 2)
+        self.assertEqual(AnalysisResult.objects.filter(batch=batch).count(), 2)
+        batch.refresh_from_db()
+        self.assertIsNone(batch.execution_token)
+
     def test_an_expired_job_cache_falls_back_to_db_and_runs(self):
         batch = self.make_batch()
         cache.delete(f"job_input_{batch.job_id}")
@@ -179,11 +259,13 @@ class AnalysisConsumerTests(TransactionTestCase):
 
         frames = self.collect("11111111-1111-1111-1111-111111111111")
 
-        self.assertEqual(frames[0]["error"], "Batch record not found in DB")
+        self.assertEqual(frames[0]["error_code"], "job_not_found")
+        self.assertTrue(frames[0]["terminal"])
 
     def test_unknown_batch_and_no_cache_reports_error(self):
         frames = self.collect("22222222-2222-2222-2222-222222222222")
-        self.assertEqual(frames[0]["error"], "Batch record not found in DB")
+        self.assertEqual(frames[0]["error_code"], "job_not_found")
+        self.assertTrue(frames[0]["terminal"])
 
     # ── the normal run ───────────────────────────────────────────────────────
 
@@ -200,7 +282,7 @@ class AnalysisConsumerTests(TransactionTestCase):
         self.assertEqual(frames[0]["expected_count"], 1)
         self.assertEqual(frames[0]["config"]["top_k"], 3)
 
-        result = frames[1]
+        result = self.results_in(frames)[0]
         self.assertEqual(result["method"], DENSE)
         self.assertEqual(result["aiModel"], GPT)
         self.assertEqual(result["answer"], "generated answer")
@@ -212,7 +294,9 @@ class AnalysisConsumerTests(TransactionTestCase):
             result["evaluation"]["retrieval_score"], [{"chunk_id": 7, "score": 0.83}]
         )
 
-        self.assertEqual(frames[-1], {"status": "COMPLETE", "progress": 100})
+        self.assertEqual(frames[-1]["status"], "COMPLETE")
+        self.assertEqual(frames[-1]["outcome"], "completed")
+        self.assertEqual(frames[-1]["failed"], 0)
 
         engine.run_analysis.assert_called_once_with(
             str(self.document.pk), str(self.conversation.pk)
@@ -250,6 +334,20 @@ class AnalysisConsumerTests(TransactionTestCase):
         replay = self.collect(batch.job_id)
         self.assertEqual(self.results_in(replay)[0]["evaluation"]["module_trace"], trace)
 
+    def test_ragas_details_and_null_scores_survive_stream_storage_and_rest(self):
+        batch = self.make_batch()
+        details = {"framework": "ragas", "provider": "openrouter", "judge_model": GPT, "metrics": {"faithfulness": {"status": "unavailable", "reason": "Evaluation timed out."}}}
+        response = {**ANALYSIS_RESPONSE, "evaluation": {**ANALYSIS_RESPONSE["evaluation"], "response_evaluation": {"faithfulness": None, "factual_correctness": 0.8}, "response_evaluation_details": details}}
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=make_engine(response=response)):
+            frames = self.collect(batch.job_id)
+        streamed = self.results_in(frames)[0]["evaluation"]
+        replayed = self.results_in(self.collect(batch.job_id))[0]["evaluation"]
+        restored = self.client.get(f"/api/v1/analysis-status/{batch.job_id}/").json()["results"][0]["evaluation"]
+        for evaluation in (streamed, replayed, restored):
+            self.assertEqual(evaluation["response_evaluation_details"], details)
+            self.assertIsNone(evaluation["response_evaluation"]["faithfulness"])
+            self.assertEqual(evaluation["response_evaluation"]["factual_correctness"], 0.8)
+
     def test_retrieval_depth_is_reapplied_for_every_variant(self):
         # Engines are process-wide singletons; skipping this per variant is how
         # one run's Top-K leaks into the next.
@@ -277,7 +375,7 @@ class AnalysisConsumerTests(TransactionTestCase):
 
         self.assertEqual([f["progress"] for f in self.results_in(frames)], [50, 100])
 
-    def test_an_engine_that_is_not_ready_is_initialized_first(self):
+    def test_preparation_is_owned_by_analysis_for_the_bound_document(self):
         batch = self.make_batch()
         engine = make_engine(is_initialized=False)
 
@@ -286,9 +384,8 @@ class AnalysisConsumerTests(TransactionTestCase):
         ), mock.patch.object(consumers, "apply_retrieval_depth"):
             frames = self.collect(batch.job_id)
 
-        statuses = [f.get("status") for f in frames]
-        self.assertIn("INITIALIZING", statuses)
-        engine.init.assert_called_once_with("alice")
+        engine.init.assert_not_called()
+        engine.run_analysis.assert_called_once_with(str(batch.conversation.document_id), str(batch.conversation_id))
         self.assertEqual(len(self.results_in(frames)), 1)
 
     def test_one_failing_variant_does_not_sink_the_others(self):
@@ -307,10 +404,12 @@ class AnalysisConsumerTests(TransactionTestCase):
 
         errors = [f for f in frames if "error" in f]
         self.assertEqual(len(errors), 1)
-        self.assertIn("Engine not found", errors[0]["error"])
+        self.assertEqual(errors[0]["error_code"], "analysis_failed")
+        self.assertNotIn("Engine not found", errors[0]["error"])
         self.assertEqual(len(self.results_in(frames)), 1)
         self.assertEqual(frames[-1]["status"], "COMPLETE")
-        self.assertEqual(AnalysisResult.objects.filter(batch=batch).count(), 1)
+        self.assertEqual(AnalysisResult.objects.filter(batch=batch).count(), 2)
+        self.assertEqual(frames[-1]["outcome"], "partial_failure")
 
     def test_a_variant_whose_analysis_raises_is_reported_and_skipped(self):
         batch = self.make_batch()
@@ -322,11 +421,66 @@ class AnalysisConsumerTests(TransactionTestCase):
         ), mock.patch.object(consumers, "apply_retrieval_depth"):
             frames = self.collect(batch.job_id)
 
-        self.assertIn("OpenRouter down", frames[1]["error"])
+        self.assertEqual(next(frame["error_code"] for frame in frames if "error" in frame), "analysis_failed")
+        self.assertTrue(any(frame.get("event", {}).get("status") == "failed" for frame in frames))
         self.assertEqual(frames[-1]["status"], "COMPLETE")
-        self.assertFalse(AnalysisResult.objects.filter(batch=batch).exists())
+        self.assertTrue(AnalysisResult.objects.filter(batch=batch, error_code="analysis_failed").exists())
+        self.assertEqual(frames[-1]["outcome"], "failed")
 
     # ── reconnecting to a finished batch ─────────────────────────────────────
+
+    def test_live_events_arrive_before_result_and_identify_each_shared_engine_attempt(self):
+        batch = self.make_batch(models=(GPT, GEMINI))
+        release = threading.Event()
+        engine = make_engine()
+
+        def analyze(*args):
+            progress_stage("search", "Searching the document.")
+            report_progress("module", "hyde", "running", "Preparing a hypothesis.")
+            if not release.wait(timeout=5):
+                raise TimeoutError("The consumer did not stream the live event before the result.")
+            report_progress("module", "hyde", "completed", "Retrieved source evidence.")
+            progress_stage("answer", "Writing the answer.")
+            progress_stage("evaluate", "Scoring the answer.")
+            progress_stage("evaluate", "Evaluation finished.", status="completed")
+            return ANALYSIS_RESPONSE
+
+        engine.run_analysis.side_effect = analyze
+
+        async def run():
+            communicator = WebsocketCommunicator(URLRouter(router.urls.websocket_urlpatterns), f"/ws/analysis/{batch.job_id}/")
+            await communicator.connect()
+            frames = []
+            try:
+                for _ in range(100):
+                    frame = await communicator.receive_json_from(timeout=5)
+                    frames.append(frame)
+                    if frame.get("event", {}).get("id") == "hyde" and not release.is_set():
+                        self.assertFalse(self.results_in(frames))
+                        self.assertEqual(frame["event"]["status"], "running")
+                        release.set()
+                    if frame.get("status") == "COMPLETE":
+                        break
+                self.assertEqual(frames[-1]["status"], "COMPLETE")
+            finally:
+                release.set()
+                await communicator.disconnect()
+            return frames
+
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=engine), mock.patch.object(consumers, "apply_retrieval_depth"):
+            frames = async_to_sync(run)()
+        attempts = []
+        for model in (GPT, GEMINI):
+            updates = [frame for frame in frames if frame.get("status") == "STAGE_PROGRESS" and frame["aiModel"] == model]
+            self.assertTrue(updates)
+            self.assertTrue(all(frame["batch_id"] == str(batch.job_id) and frame["method"] == DENSE for frame in updates))
+            self.assertEqual([frame["sequence"] for frame in updates], list(range(1, len(updates) + 1)))
+            self.assertEqual(len({frame["attempt_id"] for frame in updates}), 1)
+            attempts.append(updates[0]["attempt_id"])
+            result_index = next(index for index, frame in enumerate(frames) if frame.get("aiModel") == model and "answer" in frame)
+            self.assertLess(frames.index(updates[-1]), result_index)
+        self.assertEqual(len(set(attempts)), 2)
+        self.assertEqual(AnalysisResult.objects.filter(batch=batch).count(), 2)
 
     def test_a_finished_batch_is_replayed_instead_of_recomputed(self):
         batch = self.make_batch()

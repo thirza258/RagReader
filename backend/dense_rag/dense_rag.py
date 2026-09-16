@@ -5,6 +5,8 @@ from openai import OpenAI
 from sklearn.metrics.pairwise import cosine_similarity
 from rag.base_rag import BaseRAG
 from common.constant import DEFAULT_EMBEDDING_MODEL
+from common.embeddings import embed_texts, validate_vectors, EMBEDDING_TIMEOUT_SECONDS
+from common.errors import PipelineError
 
 class DenseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):
@@ -21,11 +23,13 @@ class DenseRAG(BaseRAG):
         
         api_key = settings.OPENROUTER_API_KEY
         if not api_key:
-            raise ValueError("OPENROUTER_API_KEY not found in settings.")
+            raise PipelineError("missing_provider_key", "OpenRouter API key is not configured. Set OPENROUTER_API_KEY before indexing.", http_status=503)
         
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=api_key
+            api_key=api_key,
+            timeout=EMBEDDING_TIMEOUT_SECONDS,
+            max_retries=1,
         )
         
         self.top_k = config.get("top_k", 3)
@@ -46,16 +50,7 @@ class DenseRAG(BaseRAG):
         """
         Helper to call OpenAI API. Handles batching automatically if list is small,
         """
-        cleaned_texts = [text.replace("\n", " ") for text in texts]
-
-        try:
-            response = self.client.embeddings.create(
-                input=cleaned_texts,
-                model=self.model
-            )
-            return [data.embedding for data in response.data]
-        except Exception as e:
-            raise RuntimeError(f"Embeddings API call failed ({self.model}): {e}") from e
+        return embed_texts(self.client, texts, self.model)
 
     def index_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
@@ -64,17 +59,13 @@ class DenseRAG(BaseRAG):
         """
         texts = [doc["text"] for doc in documents] 
         
-        self.document_metadata = [{"chunk_id": doc.get("chunk_id")} for doc in documents]
+        metadata = [{"chunk_id": doc.get("chunk_id")} for doc in documents]
         print(f"Embedding {len(documents)} documents using {self.model}...")
         
-        self.documents = texts
-        
         embeddings = self._get_embeddings(texts)
-        
-        if not embeddings:
-            raise RuntimeError("Indexing failed: no embeddings returned.")
-
-        self.document_vectors = np.array(embeddings)
+        vectors = validate_vectors(embeddings, len(texts))
+        # Commit all three fields together only after every batch validates.
+        self.documents, self.document_metadata, self.document_vectors = texts, metadata, vectors
         print("Indexing complete. Vectors stored in memory.")
             
 
@@ -90,10 +81,8 @@ class DenseRAG(BaseRAG):
 
         query_embeddings = self._get_embeddings([query])
 
-        if not query_embeddings:
-            return []
-
-        query_vector = np.array(query_embeddings[0]).reshape(1, -1)
+        stored = validate_vectors(self.document_vectors, len(self.documents))
+        query_vector = validate_vectors(query_embeddings, 1, stored.shape[1])
 
         similarities = cosine_similarity(query_vector, self.document_vectors).flatten()
 
@@ -126,14 +115,12 @@ class DenseRAG(BaseRAG):
 
         query_embedding_list = self._get_embeddings([query])
         
-        if not query_embedding_list:
-            return {"scores": []}
-            
-        query_vector = np.array(query_embedding_list)
+        stored = validate_vectors(self.document_vectors, len(self.documents))
+        query_vector = validate_vectors(query_embedding_list, 1, stored.shape[1])
 
         similarities = cosine_similarity(query_vector, self.document_vectors).flatten()
 
         average_score = np.mean(similarities) if len(similarities) > 0 else 0.0
         
         return {"scores": average_score}
-    
+

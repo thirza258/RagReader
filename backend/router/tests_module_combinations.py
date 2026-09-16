@@ -87,7 +87,7 @@ class ModuleCombinationTests(SimpleTestCase):
         clear_cross_encoder_cache()
         client = mock.Mock()
         client.embeddings.create.side_effect = lambda input, **kwargs: SimpleNamespace(
-            data=[SimpleNamespace(embedding=vector(text)) for text in input],
+            data=[SimpleNamespace(index=i, embedding=vector(text)) for i, text in enumerate(input)],
         )
         ollama = mock.Mock()
         ollama.embed.side_effect = lambda input, **kwargs: {"embeddings": [vector(t) for t in ([input] if isinstance(input, str) else input)]}

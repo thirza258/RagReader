@@ -193,20 +193,19 @@ class CandidatePooler:
         pipeline: Any,
         query: str,
         username: str | None = None,
+        document: Any = None,
     ) -> PipelineResult:
         """Retrieve for one pipeline, bypassing LLM generation entirely."""
-        from rag.rag_service import apply_retrieval_depth
+        from rag.rag_service import apply_retrieval_depth, engine_execution
 
         try:
-            if username:
-                self._ensure_ready(name, pipeline, username)
-
-            # Engines are process-wide singletons whose depth the analysis
-            # sidebar also sets. Pin it here so a previous run's Top-K can't
-            # decide how deep the pool goes.
-            apply_retrieval_depth(pipeline, self.depth)
-
-            ranked = pipeline.rag.retrieve(query) or []
+            with engine_execution(pipeline):
+                if document is not None:
+                    pipeline.prepare_document(document)
+                elif username:
+                    self._ensure_ready(name, pipeline, username)
+                apply_retrieval_depth(pipeline, self.depth)
+                ranked = pipeline.rag.retrieve(query) or []
             logger.info(f"[{name}] retrieved {len(ranked)} chunks.")
             return PipelineResult(pipeline_name=name, ranked_chunks=ranked)
 
@@ -238,6 +237,7 @@ class CandidatePooler:
         username: str | None = None,
         optimize: bool = True,
         top_n: int | None = None,
+        document: Any = None,
     ) -> PooledResult:
         """
         Retrieve from all registered pipelines and fuse results with RRF.
@@ -264,14 +264,14 @@ class CandidatePooler:
 
         for name, pipeline in self._pipelines.items():
             result = self._retrieve_from_pipeline(
-                name, pipeline, optimized_query, username
+                name, pipeline, optimized_query, username, document
             )
 
             # A rewritten query can miss where the literal one hits — notably
             # BM25, which drops every chunk scoring 0.
             if not result.ranked_chunks and not result.error and optimized_query != query:
                 logger.info(f"[{name}] empty on optimized query — retrying original.")
-                result = self._retrieve_from_pipeline(name, pipeline, query, username)
+                result = self._retrieve_from_pipeline(name, pipeline, query, username, document)
 
             per_pipeline[name] = result
 

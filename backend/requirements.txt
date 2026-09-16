@@ -4,12 +4,9 @@
 # whatever was newest — the reason a rebuilt image could stop matching the
 # code. Bump deliberately: change a pin, rebuild, run the suite.
 #
-# Nothing here pulls torch any more. Reranking moved to Ollama, which serves
-# the model out of process, so sentence-transformers and bert-score are gone
-# and the Dockerfile no longer needs its separate CPU-torch layer.
-#
-# Also removed as unused (nothing outside tests imported them): langchain and
-# its three companion packages, faiss-cpu, pandas, tiktoken, ujson and tzlocal.
+# Ragas uses remote OpenRouter generation and embeddings. Install its base
+# package only: the optional [all] extras pull local Transformer/Torch models.
+# Hybrid reranking stays in the separate Ollama service.
 
 # ── Django and the API ──────────────────────────────────────────────────────
 Django==6.1.1
@@ -31,7 +28,7 @@ django-redis==7.0.0
 redis==8.1.0
 
 # ── Retrieval ───────────────────────────────────────────────────────────────
-openai==3.8.0                 # OpenRouter speaks the OpenAI API
+openai==2.54.0                # compatible with Ragas/Instructor's jiter range
 numpy==2.5.2
 scikit-learn==1.9.0           # cosine similarity for dense retrieval
 rank-bm25==0.2.2              # sparse retrieval
@@ -39,7 +36,9 @@ nltk==3.10.3                  # tokenization and stopwords for BM25
 ollama==0.6.2                 # embeds and reranks hybrid's fused candidates
 
 # ── Evaluation ──────────────────────────────────────────────────────────────
-rouge-score==0.1.2
+ragas==0.4.3
+instructor==1.17.0            # Ragas structured JSON output adapter
+langchain-community==0.3.31   # Ragas 0.4.3 imports the legacy VertexAI module
 
 # ── Ingest ──────────────────────────────────────────────────────────────────
 PyPDF2==3.0.1

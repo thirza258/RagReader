@@ -6,6 +6,8 @@ import numpy as np
 from rag.base_rag import BaseRAG
 from sparse_rag.sparse_rag import SparseRAG
 from dense_rag.dense_rag import DenseRAG
+from common.embeddings import validate_vectors, EMBEDDING_TIMEOUT_SECONDS
+from common.errors import PipelineError
 
 from common.constant import (
     DEFAULT_CHILD_TOP_K,
@@ -17,13 +19,16 @@ from common.constant import (
 logger = logging.getLogger(__name__)
 
 
-class RerankUnavailable(RuntimeError):
+class RerankUnavailable(PipelineError):
     """Ollama could not score the candidates.
 
     Raised rather than returning a neutral score array: uniform scores are
     indistinguishable from a genuine result, so the caller would rank on them
     and report retrieval metrics for a rerank that never happened.
     """
+
+    def __init__(self, message):
+        super().__init__("reranker_unavailable", message, retryable=True, http_status=502)
 
 
 class OllamaCrossEncoder:
@@ -38,7 +43,7 @@ class OllamaCrossEncoder:
     def client(self):
         if self._client is None:
             import ollama
-            self._client = ollama.Client(host=self.host) if self.host else ollama.Client()
+            self._client = ollama.Client(host=self.host, timeout=EMBEDDING_TIMEOUT_SECONDS)
         return self._client
 
     def predict(self, pairs: List[tuple[str, str] | List[str]]) -> np.ndarray:
@@ -58,11 +63,11 @@ class OllamaCrossEncoder:
             query_embs = {}
             for q in unique_queries:
                 res = self.client.embed(model=self.model_name, input=f"search_query: {q}")
-                query_embs[q] = np.array(res["embeddings"][0], dtype=np.float32)
+                query_embs[q] = validate_vectors(res["embeddings"], 1)[0]
 
             doc_inputs = [f"search_document: {d}" for d in docs]
             res_docs = self.client.embed(model=self.model_name, input=doc_inputs)
-            doc_embs = np.array(res_docs["embeddings"], dtype=np.float32)
+            doc_embs = validate_vectors(res_docs["embeddings"], len(docs), len(next(iter(query_embs.values()))))
 
             scores = []
             for i, (q, _) in enumerate(pairs):
@@ -79,9 +84,8 @@ class OllamaCrossEncoder:
             return np.array(scores, dtype=np.float32)
         except Exception as e:
             raise RerankUnavailable(
-                f"Ollama reranker '{self.model_name}' failed: {e}. "
-                f"Is Ollama reachable, and has the model been pulled "
-                f"(`ollama pull {self.model_name}`)?"
+                f"Ollama reranker '{self.model_name}' could not return valid scores. "
+                f"Check that Ollama is reachable and the model is installed, then try again."
             ) from e
 
 
@@ -154,8 +158,11 @@ class HybridRAG(BaseRAG):
         self.document_metadata = []
 
     def index_documents(self, documents: List[str]) -> None:
-        self.sparse_engine.index_documents(documents)
-        self.dense_engine.index_documents(documents)
+        from copy import copy
+        sparse, dense = copy(self.sparse_engine), copy(self.dense_engine)
+        sparse.index_documents(documents)
+        dense.index_documents(documents)
+        self.sparse_engine, self.dense_engine = sparse, dense
         self._documents = documents
         self.document_metadata = [{"chunk_id": doc.get("chunk_id")} for doc in documents]
 

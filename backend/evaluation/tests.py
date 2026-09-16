@@ -1,5 +1,5 @@
 """
-Tests for the evaluation app: retrieval metrics, LLM score parsing, and the
+Tests for the evaluation app: retrieval metrics and the
 ground-truth evaluation endpoints.
 
 Hermetic: no Redis, no network, no LLM keys. RAG_DISABLE_ENGINE_INIT is set
@@ -26,8 +26,6 @@ from evaluation.eval import (
     calculate_recall_K,
     calculate_f1_K,
     evaluate_chunks,
-    evaluate_response,
-    _parse_llm_score,
 )
 from evaluation.models import Chunk, GroundTruthChunk, GroundTruthResponse
 from router.models import GuestUser, Document, Conversation, AnalysisBatch, AnalysisResult
@@ -64,60 +62,6 @@ class RetrievalMetricTests(TestCase):
         self.assertEqual(scores["precision_k"], 0.0)
         self.assertEqual(scores["recall_k"], 0.0)
         self.assertEqual(scores["f1_k"], 0.0)
-
-
-# ── LLM score parsing ────────────────────────────────────────────────────────
-
-class ParseLlmScoreTests(TestCase):
-    def test_clean_json(self):
-        raw = '{"faithfulness": 4, "justification": "grounded"}'
-        self.assertAlmostEqual(_parse_llm_score(raw, "faithfulness"), 0.8)
-
-    def test_json_wrapped_in_markdown_fences(self):
-        raw = '```json\n{"relevance": 5, "justification": "spot on"}\n```'
-        self.assertAlmostEqual(_parse_llm_score(raw, "relevance"), 1.0)
-
-    def test_prose_fallback(self):
-        self.assertAlmostEqual(_parse_llm_score("Score: 3 out of 5", "coverage"), 0.6)
-
-    def test_error_text_never_becomes_a_score(self):
-        # Regression: an API error string containing "401" used to parse as a
-        # "score" of 401/5 = 80.4.
-        raw = "OpenRouter Error (mistralai/mistral-nemo): Error code: 401 - Unauthorized"
-        self.assertEqual(_parse_llm_score(raw, "faithfulness"), 0.0)
-
-    def test_out_of_range_score_rejected(self):
-        self.assertEqual(_parse_llm_score('{"coverage": 42}', "coverage"), 0.0)
-
-    def test_empty_and_none(self):
-        self.assertEqual(_parse_llm_score("", "coverage"), 0.0)
-        self.assertEqual(_parse_llm_score(None, "coverage"), 0.0)
-
-
-class EvaluateResponseTests(TestCase):
-    def test_scores_with_mocked_judge(self):
-        judge = mock.Mock()
-        judge._call_api.return_value = (
-            '{"faithfulness": 4, "relevance": 4, "coverage": 4}'
-        )
-        with mock.patch("evaluation.eval.MistralLLM", return_value=judge):
-            scores = evaluate_response(
-                "the sky is blue", "the sky is blue", chunks=["the sky is blue"]
-            )
-        self.assertGreater(scores["rougeL_f1"], 0.9)
-        self.assertAlmostEqual(scores["faithfulness"], 0.8)
-        self.assertAlmostEqual(scores["answer_relevance"], 0.8)
-        self.assertAlmostEqual(scores["answer_coverage"], 0.8)
-
-    def test_llm_failure_keeps_rouge_scores(self):
-        # Regression: one failed judge call used to zero out the already
-        # computed ROUGE scores as well.
-        judge = mock.Mock()
-        judge._call_api.side_effect = RuntimeError("OpenRouter down")
-        with mock.patch("evaluation.eval.MistralLLM", return_value=judge):
-            scores = evaluate_response("identical text", "identical text")
-        self.assertGreater(scores["rougeL_f1"], 0.9)
-        self.assertEqual(scores["faithfulness"], 0.0)
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -306,15 +250,12 @@ class GroundTruthResponseEvaluationTests(TestCase):
             conversation=self.conversation, response="the truth"
         )
         fake_scores = {
-            "rougeL_precision": 1.0,
-            "rougeL_recall": 1.0,
-            "rougeL_f1": 1.0,
-            "faithfulness": 0.8,
-            "answer_relevance": 0.8,
-            "answer_coverage": 0.8,
+            "faithfulness": None,
+            "answer_relevancy": 0.8,
+            "factual_correctness": 0.8,
         }
         with mock.patch(
-            "evaluation.views.evaluate_response", return_value=fake_scores
+            "evaluation.views.evaluate_response", return_value={"scores": fake_scores, "details": {"framework": "ragas"}}
         ) as evaluator:
             resp = self.client.post(
                 "/api/v1/evaluate/ground-truth-response/",
@@ -323,7 +264,8 @@ class GroundTruthResponseEvaluationTests(TestCase):
             )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["scores"], fake_scores)
-        evaluator.assert_called_once_with("the truth", "the truth")
+        evaluator.assert_called_once_with("the truth", "the truth", question="q")
+        self.assertEqual(resp.json()["evaluation"]["framework"], "ragas")
 
 
 # ── Candidate pooling (RRF) ──────────────────────────────────────────────────
@@ -362,6 +304,9 @@ class ReciprocalRankFusionTests(TestCase):
 
 
 class FakePipeline:
+    def prepare_document(self, document):
+        self.document = document
+
     """Minimal stand-in for a RAG pipeline: retrieves, never calls an LLM."""
 
     def __init__(self, ranked, fail=False):

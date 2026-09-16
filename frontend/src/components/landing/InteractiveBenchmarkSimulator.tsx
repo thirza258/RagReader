@@ -425,8 +425,8 @@ export const InteractiveBenchmarkSimulator: React.FC = () => {
           </dl>
 
           <p className="mt-4 text-xs text-muted-foreground">
-            Recorded results, normalized to 0–100%. A live run also reports ROUGE-L
-            precision and recall, for nine metrics in total.
+            Historical results from the earlier evaluator, shown as percentages.
+            New analyses use Ragas; these saved values have not been recalculated.
           </p>
         </div>
       </div>
