@@ -172,6 +172,57 @@ class ModuleBehaviorTests(SimpleTestCase):
             result = runner.run("solar")
             self.assertEqual(len(result["context"]), expected)
 
+    def test_self_route_cannot_reintroduce_crag_rejections(self):
+        runner = make_runner(["crag", "self_route"])
+        result = runner.run("solar")
+        self.assertTrue(result["context"])
+        self.assertTrue(set(result["chunk_ids"]).issubset({1, 2}))
+        self.assertTrue(set(result["chunk_ids"]).isdisjoint(runner.rejected_ids))
+        self.assertIn("CRAG graded", result["module_trace"]["steps"][-1]["detail"])
+
+    def test_crag_partial_failure_retains_rejections(self):
+        def respond(prompt):
+            if "queries" in prompt:
+                raise RuntimeError("corrective query unavailable")
+            return '{"relevant_ids": []}'
+        runner = make_runner(["crag"], {"crag": respond})
+        result = runner.run("solar")
+        self.assertEqual(result["context"], [])
+        self.assertEqual(result["module_trace"]["steps"][-1]["status"], "fallback")
+
+    def test_flare_cannot_restore_a_previously_rejected_chunk(self):
+        grades = []
+        def grade(prompt):
+            data = json.loads(prompt.rsplit("\n", 1)[-1])
+            grades.append([doc["chunk_id"] for doc in data["chunks"]])
+            return json.dumps({"relevant_ids": [1] if len(grades) == 1 else grades[-1]})
+        def flare(prompt):
+            if "Rewrite this proposed sentence" in prompt:
+                return "Solar panels generate electricity."
+            return '{"sentence": "cats sleep", "needs_retrieval": true, "done": true}'
+        runner = make_runner(["crag", "flare"], {"crag": grade, "flare": flare})
+        result = runner.run("solar cats")
+        self.assertIn(4, grades[0])
+        self.assertNotIn(4, grades[1])
+        self.assertNotIn(4, result["chunk_ids"])
+
+    def test_crag_never_accepts_ids_for_unseen_passages(self):
+        runner = make_runner(["crag"], {"crag": mock.Mock(side_effect=[
+            '{"relevant_ids": [2]}', '{"relevant_ids": []}',
+        ])})
+        evidence = [{"chunk_id": 1, "text": "a" * 30000}, {"chunk_id": 2, "text": "second"}]
+        self.assertEqual(runner._grade("q", evidence), [])
+        self.assertEqual(runner.llm.generate.call_count, 2)
+
+    def test_long_context_keeps_retrieved_evidence_from_document_end(self):
+        corpus = [{"chunk_id": 10, "text": "prefix " * 8000}, {"chunk_id": 99, "text": "The important battery fact is at the end."}]
+        for module in ("self_route", "long_rag"):
+            with self.subTest(module=module):
+                runner = make_runner([module], corpus=corpus)
+                result = runner.run("battery")
+                self.assertIn(99, result["chunk_ids"])
+                self.assertLessEqual(len(context_text(result["context"])), 48000)
+
     def test_contextual_learning_uses_saved_examples_without_current_answer(self):
         examples = [
             {"question": "solar", "answer": "TARGET SECRET"},

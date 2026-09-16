@@ -25,7 +25,7 @@ from router.serializers import (
     QuerySerializer 
 )
 from ai_handler.model_catalog import fetch_catalog
-from common.analysis_modules import RAG_MODULES
+from common.analysis_modules import MODULE_COMPATIBILITY, RAG_MODULES
 from router.analysis import has_completed_analysis
 from common.constant import (
     CHILD_TOP_K_MAX,
@@ -352,6 +352,7 @@ class AnalysisConfigView(APIView):
         return Response({
             "retrieval_methods": RETRIEVAL_METHODS,
             "modules": RAG_MODULES,
+            "module_compatibility": MODULE_COMPATIBILITY,
             "models": catalog["models"],
             "default_models": MODEL_IDS,
             "model_catalog": {

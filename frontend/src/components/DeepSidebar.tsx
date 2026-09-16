@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Search } from "lucide-react";
 import service from "../services/service";
+import ModuleCompatibilityPanel from "./ModuleCompatibilityPanel";
 import {
   AnalysisConfigOptions,
   CatalogModel,
@@ -339,6 +340,12 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
               ? "Choose modules, then click Run Deep Analysis again. They work together on each selected method and model. Extra stages may take longer."
               : "Modules unlock after the first deep analysis completes. Enable them for your next run."}
           </p>
+          <ModuleCompatibilityPanel
+            compatibility={options.module_compatibility}
+            modules={options.modules}
+            selectedModules={selectedModules}
+            methods={methods}
+          />
           <fieldset disabled={!modulesAvailable || runState.isRunning || isLoadingOptions} aria-describedby="rag-modules-help" className="space-y-2 disabled:opacity-60">
             <legend className="sr-only">Optional RAG modules</legend>
             {options.modules.map((module) => (

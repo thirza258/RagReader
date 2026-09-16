@@ -17,6 +17,95 @@ RAG_MODULES = [
 ]
 RAG_MODULE_IDS = [module["id"] for module in RAG_MODULES]
 
+# Served with the catalogue so the sidebar can explain the current selection
+# without another request. There are no forbidden pairs in this implementation;
+# conditional routing, evidence filtering, and work budgets still apply.
+MODULE_COMPATIBILITY = {
+    "all_modules_supported": True,
+    "summary": "All 13 modules can be enabled in one run. They execute in ordered stages and share evidence.",
+    "stages": [
+        {"label": "Routing", "modules": ["adaptive_rag"]},
+        {"label": "Queries & retrieval", "modules": ["rewrite_retrieve_read", "step_back", "rag_fusion", "memo_rag", "rrf_hybrid", "hyde"]},
+        {"label": "Evidence", "modules": ["raptor", "long_rag", "crag", "self_route"]},
+        {"label": "Answer", "modules": ["flare", "contextual_learning"]},
+    ],
+    "rules": [
+        {
+            "id": "adaptive_route", "kind": "conditional",
+            "modules": ["adaptive_rag"], "min_selected": 1,
+            "title": "Adaptive RAG can skip other modules",
+            "description": "A direct-answer decision skips all later stages. Single-pass and multi-step decisions continue through your selection; multi-step adds two follow-up searches.",
+        },
+        {
+            "id": "self_route_context", "kind": "conditional",
+            "modules": ["self_route"], "min_selected": 1,
+            "title": "Self Route can broaden the context",
+            "description": "It checks the retrieved evidence first. If more is needed, it adds document passages while prioritizing earlier hits within the context limit.",
+        },
+        {
+            "id": "crag_self_route", "kind": "compatible",
+            "modules": ["crag", "self_route"], "min_selected": 2,
+            "title": "CRAG + Self Route preserve filtering",
+            "description": "CRAG grades the expanded context too. Previously rejected chunks stay excluded, including when a later stage fails.",
+        },
+        {
+            "id": "crag_flare", "kind": "compatible",
+            "modules": ["crag", "flare"], "min_selected": 2,
+            "title": "CRAG checks FLARE’s new evidence",
+            "description": "FLARE’s extra retrieval passes through the same relevance filter before reaching the answer. Rejected chunks cannot return.",
+        },
+        {
+            "id": "fusion_rrf", "kind": "compatible",
+            "modules": ["rag_fusion", "rrf_hybrid"], "min_selected": 2,
+            "title": "RAG Fusion + RRF Hybrid work together",
+            "description": "RRF Hybrid combines dense and keyword results for each search. RAG Fusion then combines the rankings from the different questions.",
+        },
+        {
+            "id": "hyde_rrf", "kind": "compatible",
+            "modules": ["hyde", "rrf_hybrid"], "min_selected": 2,
+            "title": "HyDE keeps its dense search",
+            "description": "The hypothetical passage uses dense retrieval. Its source hits are combined with the hybrid results from the original and expanded questions.",
+        },
+        {
+            "id": "rrf_method", "kind": "conditional",
+            "modules": ["rrf_hybrid"], "min_selected": 1,
+            "title": "RRF Hybrid changes the retrieval method",
+            "description": "Every selected base method uses dense + BM25 fusion while this is on. The normal Hybrid reranker is bypassed, so its reranker setting has no effect.",
+        },
+        {
+            "id": "query_work", "kind": "cost",
+            "modules": ["rewrite_retrieve_read", "step_back", "hyde", "rag_fusion", "memo_rag"], "min_selected": 2,
+            "title": "Query modules add work",
+            "description": "Multiple query modules add generation and retrieval calls. Repeated search questions are deduplicated; enabling more modules does not guarantee a better answer.",
+        },
+        {
+            "id": "raptor_long", "kind": "cost",
+            "modules": ["raptor", "long_rag"], "min_selected": 2,
+            "title": "RAPTOR + LongRAG build separate indexes",
+            "description": "RAPTOR searches a summary tree; LongRAG searches groups of adjacent passages. Their evidence is combined, with earlier hits prioritized within the context limit.",
+        },
+        {
+            "id": "sparse_embeddings", "kind": "requirement",
+            "modules": ["hyde", "rrf_hybrid", "raptor", "long_rag"], "min_selected": 1,
+            "methods": ["Sparse Retrieval"],
+            "title": "These modules need embeddings for Sparse runs",
+            "description": "HyDE, RRF Hybrid, RAPTOR, and LongRAG use dense embeddings, even with Sparse retrieval selected. They need the configured embedding provider as well as the answer model.",
+        },
+        {
+            "id": "flare_budget", "kind": "conditional",
+            "modules": ["flare"], "min_selected": 1,
+            "title": "FLARE shares the context limit",
+            "description": "When the context is full, new evidence can replace lower-priority earlier passages. FLARE makes at most three sentence checks.",
+        },
+        {
+            "id": "examples", "kind": "compatible",
+            "modules": ["contextual_learning"], "min_selected": 1,
+            "title": "Q&A examples are added last",
+            "description": "Contextual Learning uses the final evidence after retrieval and refinement. It is skipped when there is no evidence; the target reference answer is never an example.",
+        },
+    ],
+}
+
 
 def normalize_modules(raw):
     """Unknown/malformed selections are off; an empty selection stays empty."""

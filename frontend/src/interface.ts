@@ -176,9 +176,27 @@ export interface NumericRange {
   default: number;
 }
 
+export interface ModuleCompatibilityRule {
+  id: string;
+  kind: "compatible" | "conditional" | "cost" | "requirement";
+  modules: string[];
+  min_selected: number;
+  methods?: string[];
+  title: string;
+  description: string;
+}
+
+export interface ModuleCompatibility {
+  all_modules_supported: boolean;
+  summary: string;
+  stages: { label: string; modules: string[] }[];
+  rules: ModuleCompatibilityRule[];
+}
+
 /** Served by GET /analysis-config/ — never hardcode these in the UI. */
 export interface AnalysisConfigOptions {
   modules: (AnalysisOption & { stage: string })[];
+  module_compatibility?: ModuleCompatibility;
   retrieval_methods: AnalysisOption[];
   models: CatalogModel[];
   /** The ids pre-selected when nothing else is chosen. */

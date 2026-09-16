@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:modules": "node --experimental-strip-types --test tests/module-compatibility.test.mjs",
     "preview": "vite preview",
     "icons:pwa": "node scripts/generate-pwa-icons.mjs"
   },

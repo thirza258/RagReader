@@ -84,6 +84,9 @@ Route, Rewrite Retrieve Read, RAPTOR, Contextual Learning (example Q&A pairs),
 LongRAG, FLARE, CRAG, and Adaptive RAG.
 
 See [module behavior, composition, and limits](docs/rag-modules.md).
+The sidebar's **Module compatibility** panel explains the execution order and
+how the selected modules interact. All 13 can be combined; routing may skip
+later stages, and CRAG filtering remains active through context expansion.
 
 ### Running the tests
 

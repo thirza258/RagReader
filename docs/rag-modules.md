@@ -34,6 +34,29 @@ services; their adaptations here are described below.
 
 ## Composition and limits
 
+**All 13 modules can be enabled together in this implementation.** They form
+an ordered pipeline. There are no mutually exclusive module pairs, but a
+routing decision can skip work and context limits can change which passages
+reach the reader. Enabling everything does not guarantee a better answer.
+
+The sidebar's **Module compatibility** panel shows the selected execution
+order and updates its interaction notes whenever a module or retrieval method
+changes. Open **Combination guide** with no modules selected to read all notes.
+
+| Combination | Behavior |
+| --- | --- |
+| Adaptive RAG + any others | A direct-answer route skips the others. Single-pass and multi-step routes continue through the selected stages. |
+| RAG Fusion + RRF Hybrid | Dense and keyword results are fused for each question, then the different questions' rankings are fused. |
+| HyDE + RRF Hybrid | The hypothetical passage retains dense retrieval; its source hits join the hybrid query results. |
+| RRF Hybrid + any base method | Dense, Sparse, and Hybrid variants all use dense + BM25 RRF while enabled. The usual Hybrid reranker setting has no effect. |
+| RAPTOR + LongRAG | Both temporary indexes run. Earlier hits are retained ahead of the additional grouped passages within the context limit. |
+| CRAG + Self Route | Expanded context is graded too. Rejected chunks cannot return through expansion or a later stage's fallback. |
+| CRAG + FLARE | Newly retrieved evidence is graded, and rejected chunks remain excluded from the final context. |
+| LongRAG + Self Route + FLARE | They share the longer context budget. FLARE prioritizes new hits, which can replace earlier passages if the budget is full. |
+| Contextual Learning + retrieval/refinement | Demonstrations are added after the final evidence is chosen. No evidence means no demonstrations; a direct Adaptive route skips them too. |
+| Several query modules | Their searches are combined and duplicate questions are removed. Additional LLM and retrieval calls still increase work. |
+| Sparse + HyDE/RRF Hybrid/RAPTOR/LongRAG | These stages also require the configured embedding provider. Selecting Sparse does not remove that dependency. |
+
 Routing runs first. Query transformations add searches; RRF Hybrid controls
 how each search combines dense and sparse hits. RAPTOR and LongRAG augment
 evidence, followed by CRAG and Self Route. FLARE can retrieve more evidence;
@@ -75,6 +98,17 @@ the stored batch configuration too.
 
 `router.tests_modules` checks retrieval behavior, work limits, example
 isolation, context provenance, configuration caching, and rerun eligibility.
+`router.tests_module_combinations` runs all 13 modules individually and all 78
+pairs over Dense, Sparse, and Hybrid retrieval, plus all modules together on
+single-pass, multi-step, and direct routes: 282 execution cases. These use real
+similarity search, BM25, reranking, fusion, clustering, and stage composition
+with deterministic provider responses. They verify execution and evidence
+handling; live provider availability and answer quality are separate concerns.
+
+Frontend compatibility tests cover pair matching, removing stale notes,
+Sparse-specific embedding requirements, duplicate selections, and all-enabled
+selections (`cd frontend && npm run test:modules`).
+
 The complete backend suite runs without network access:
 
 ```sh

@@ -87,6 +87,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Module compatibility tests
+        run: npm run test:modules
+
       # `npm run build` is `tsc -b && vite build`, so this is the type-check
       # gate as well as the build.
       - name: Type-check and build

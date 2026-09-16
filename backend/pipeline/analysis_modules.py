@@ -98,6 +98,12 @@ class AnalysisModules:
                 seen.add(chunk_id)
         self.by_id = {doc["chunk_id"]: doc for doc in self.corpus}
         self.query_log = []
+        # Once CRAG rejects a source chunk, later context expansion must not
+        # put it back, even if a subsequent optional stage fails.
+        self.rejected_ids = set()
+
+    def _without_rejected(self, evidence):
+        return [doc for doc in evidence if doc["chunk_id"] not in self.rejected_ids]
 
     def _record(self, module, status, detail, **extra):
         self.trace.append({"module": module, "label": MODULE_LABELS[module], "status": status, "detail": detail, **extra})
@@ -106,7 +112,9 @@ class AnalysisModules:
         try:
             return action()
         except Exception as exc:
-            self._record(module, "fallback", f"Stage unavailable; kept the previous evidence. {str(exc)[:240]}")
+            self._record(module, "fallback", f"Stage unavailable; retained available evidence. {str(exc)[:240]}")
+            if isinstance(fallback, list) and fallback and isinstance(fallback[0], dict) and "chunk_id" in fallback[0]:
+                return self._without_rejected(fallback)
             return fallback
 
     def _prompt(self, module, instruction, data):
@@ -256,17 +264,28 @@ class AnalysisModules:
             units = [units[i] for i in dict.fromkeys(important + sampled)][:MAX_LONG_UNITS]
         ranked = self._expand_units(self._unit_ranking(query, units)) if units else []
         self._record("long_rag", "completed", f"Searched {len(units)} of {total} groups of adjacent chunks; expanded matching groups for the reader.")
-        return pack_context(ranked + evidence, LONG_CONTEXT_CHARS)
+        return pack_context(evidence + ranked, LONG_CONTEXT_CHARS)
 
     def _grade(self, query, evidence):
-        if not evidence:
-            return []
-        grades = self._json("crag", 'Select only chunks that contain useful evidence for the question. Return {"relevant_ids": [chunk IDs]}.', {"question": query, "chunks": pack_context(evidence)})
-        ids = grades.get("relevant_ids") if isinstance(grades, dict) else None
-        if not isinstance(ids, list):
-            raise ValueError("Expected relevant_ids from the evidence grader.")
-        kept = {str(chunk_id) for chunk_id in ids if isinstance(chunk_id, (int, str))}
-        return [doc for doc in evidence if str(doc["chunk_id"]) in kept]
+        remaining = self._without_rejected(evidence)
+        approved = set()
+        # LongRAG/Self Route can supply twice the normal context budget. Grade
+        # each batch rather than accepting IDs for passages never shown.
+        while remaining:
+            presented = pack_context(remaining)
+            if not presented:
+                break
+            grades = self._json("crag", 'Select only chunks that contain useful evidence for the question. Return {"relevant_ids": [chunk IDs]}.', {"question": query, "chunks": presented})
+            ids = grades.get("relevant_ids") if isinstance(grades, dict) else None
+            if not isinstance(ids, list) or any(type(i) not in (int, str) for i in ids):
+                raise ValueError("Expected relevant_ids from the evidence grader.")
+            kept = {str(chunk_id) for chunk_id in ids}
+            seen = {doc["chunk_id"] for doc in presented}
+            accepted = {chunk_id for chunk_id in seen if str(chunk_id) in kept}
+            approved.update(accepted)
+            self.rejected_ids.update(seen - accepted)
+            remaining = [doc for doc in remaining if doc["chunk_id"] not in seen]
+        return [doc for doc in evidence if doc["chunk_id"] in approved]
 
     def _correct(self, query, evidence):
         relevant = self._grade(query, evidence)
@@ -280,14 +299,19 @@ class AnalysisModules:
         return relevant
 
     def _self_route(self, query, evidence):
-        result = self._json("self_route", 'Can the question be fully answered using only these passages? Return {"sufficient": true} or {"sufficient": false}.', {"question": query, "evidence": context_text(pack_context(evidence))})
+        result = self._json("self_route", 'Can the question be fully answered using only these passages? Return {"sufficient": true} or {"sufficient": false}.', {"question": query, "evidence": context_text(pack_context(evidence, LONG_CONTEXT_CHARS))})
         if not isinstance(result, dict) or type(result.get("sufficient")) is not bool:
             raise ValueError("Expected a boolean sufficiency decision.")
         if result["sufficient"]:
             self._record("self_route", "completed", "Selected retrieval context: the evidence was sufficient.")
             return evidence
-        context = pack_context(self.corpus, LONG_CONTEXT_CHARS)
-        self._record("self_route", "completed", f"Selected long context: {len(context)} of {len(self.corpus)} document chunks within 48,000 characters.")
+        context = pack_context(self._without_rejected(evidence + self.corpus), LONG_CONTEXT_CHARS)
+        if "crag" in self.modules:
+            context = self._grade(query, context)
+        detail = f"Expanded context to {len(context)} of {len(self.corpus)} document chunks within 48,000 characters, prioritizing earlier hits."
+        if "crag" in self.modules:
+            detail += " CRAG graded the expanded context; rejected chunks remain excluded."
+        self._record("self_route", "completed", detail)
         return context
 
     def _demonstrations(self, query, evidence):
@@ -322,9 +346,9 @@ class AnalysisModules:
                 extra = self._retrieve(sentence)
                 if "crag" in self.modules:
                     extra = self._grade(query, extra)
-                # Preserve existing evidence; late retrieval must not silently
-                # undo LongRAG or Self Route's decision to use longer context.
-                evidence = pack_context(extra + evidence, LONG_CONTEXT_CHARS if {"long_rag", "self_route"}.intersection(self.modules) else CONTEXT_CHARS)
+                # New hits have priority within the shared context budget.
+                # A fresh CRAG rejection also removes any older copy.
+                evidence = pack_context(self._without_rejected(extra + evidence), LONG_CONTEXT_CHARS if {"long_rag", "self_route"}.intersection(self.modules) else CONTEXT_CHARS)
                 sentence = self._prompt("flare", "Rewrite this proposed sentence using only the evidence. State uncertainty when unsupported.", {"question": query, "sentence": sentence, "evidence": context_text(evidence)})[:1000]
             if sentence:
                 sentences.append(sentence)
@@ -396,9 +420,10 @@ class AnalysisModules:
             if module in self.modules:
                 evidence = self._step(module, lambda action=action: action(query, evidence), evidence)
         budget = LONG_CONTEXT_CHARS if {"long_rag", "self_route"}.intersection(self.modules) else CONTEXT_CHARS
-        evidence = pack_context(evidence, budget)
+        evidence = pack_context(self._without_rejected(evidence), budget)
         if "flare" in self.modules:
             evidence = self._step("flare", lambda: self._flare(query, evidence), evidence)
+        evidence = pack_context(self._without_rejected(evidence), budget)
         examples = []
         if "contextual_learning" in self.modules and evidence:
             examples = self._step("contextual_learning", lambda: self._demonstrations(query, evidence), [])

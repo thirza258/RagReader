@@ -1065,6 +1065,19 @@ class AnalysisConfigEndpointTests(TestCase):
         self.assertEqual(body["max_variants"], MAX_VARIANTS)
         self.assertGreaterEqual(MAX_VARIANTS, len(CONFIG_VARIANTS))
 
+    def test_config_endpoint_serves_module_compatibility_guidance(self):
+        body = self._get_config()
+        compatibility = body["module_compatibility"]
+        self.assertTrue(compatibility["all_modules_supported"])
+        self.assertEqual(len(body["modules"]), 13)
+        self.assertCountEqual(
+            [module for stage in compatibility["stages"] for module in stage["modules"]],
+            [module["id"] for module in body["modules"]],
+        )
+        guard = next(rule for rule in compatibility["rules"] if rule["id"] == "crag_self_route")
+        self.assertEqual(guard["min_selected"], 2)
+        self.assertEqual(guard["modules"], ["crag", "self_route"])
+
     def test_config_endpoint_serves_the_whole_per_run_option_set(self):
         # The sidebar renders from this payload; a missing range means a
         # control silently falls back to a hardcoded guess in the browser.
