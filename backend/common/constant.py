@@ -140,7 +140,7 @@ if DEFAULT_OLLAMA_EMBED_MODEL not in RERANKER_MODEL_IDS:
 
 DEFAULT_RERANKER_MODEL = DEFAULT_OLLAMA_EMBED_MODEL
 
-# The model that scores faithfulness, answer relevance and answer coverage.
+# The Ragas judge for faithfulness, response relevance, and factual correctness.
 # Any OpenRouter id works; it is a normal chat completion under the hood.
 DEFAULT_JUDGE_MODEL = os.getenv("RAG_JUDGE_MODEL", "mistralai/mistral-nemo")
 

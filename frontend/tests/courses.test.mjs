@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { courses, lessonEntries, lessonHref, searchLessons } from "../src/data/courses/index.ts";
 import { parseCourseProgress, setLessonComplete, nextIncompleteLesson } from "../src/lib/courseProgress.ts";
 
 const ids = lessonEntries.map(({ lesson }) => lesson.id);
+
+test("downloadable materials do not shadow the courses route in nginx", () => {
+  // nginx tries public directories before falling back to the SPA's index.
+  assert.equal(existsSync(new URL("../public/courses", import.meta.url)), false);
+  for (const name of ["northstar-handbook.txt", "experiment-worksheet.md"]) {
+    assert.ok(readFileSync(new URL(`../public/course-materials/${name}`, import.meta.url), "utf8").length > 0);
+  }
+});
 
 test("every backend RAG module has exactly one dedicated lesson", () => {
   const backend = readFileSync(new URL("../../backend/common/analysis_modules.py", import.meta.url), "utf8");

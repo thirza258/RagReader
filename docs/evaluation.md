@@ -21,8 +21,8 @@ will not start additional variants after disconnecting. Reload to check saved
 results. Reconnection can retry unfinished work; events from an earlier attempt
 never fill in a new attempt's stages. Live updates are temporary; completed
 results retain their full module trace and evaluation details for replay and
-REST reloads. Older runs keep their original metrics and are labelled when
-evaluator details were not recorded.
+REST reloads. Results without recorded Ragas evaluation show unavailable answer
+metrics with guidance to run deep analysis again.
 
 The existing analysis WebSocket sends `STAGE_PROGRESS` frames before each result.
 Each carries `batch_id`, `method`, `aiModel`, `attempt_id`, an increasing
@@ -43,6 +43,13 @@ worker threads and concurrent Ragas calls; shared engines hold no listeners.
 
 Retrieval Precision@K, Recall@K, and F1@K continue to compare retrieved chunk
 IDs with the configured reference chunk set. Their calculation needs no model.
+Result labels substitute the saved run's Top-K value, such as Precision@8,
+Recall@8, and F1@8. Each REST/WebSocket result carries `top_k` from its batch
+configuration, so editing the next run's settings does not relabel saved results.
+
+Only answer scores with recorded Ragas provenance are exposed. Older answer
+metrics are omitted rather than relabeled as Ragas scores. The three supported
+answer metrics remain unavailable until the question is evaluated with Ragas.
 
 Ragas scores are displayed as percentages. Missing inputs skip only affected
 metrics: no reference answer skips factual correctness; no retrieved evidence
@@ -77,10 +84,9 @@ extras. OpenAI 2.54.0 and Instructor 1.17.0 share a compatible `jiter` dependenc
 `langchain-community` stays at 0.3.31 because Ragas imports a module removed in
 newer versions. The rest of the app also uses the pinned OpenAI SDK.
 
-The dependency test rejects installed `torch`, `transformers`,
-`sentence_transformers`, `bert_score`, and `rouge_score`. Reranking stays in the
-separate Ollama service. Existing recorded ROUGE values are display-only; no new
-run calculates them.
+The dependency test rejects local neural and overlap evaluator packages.
+Answer evaluation runs through Ragas with remote clients. Reranking stays in
+the separate Ollama service.
 
 Backend tests exercise real Ragas, Instructor, and OpenAI client code using an
 HTTP mock for OpenRouter, covering scoring, routing, incomplete inputs, and

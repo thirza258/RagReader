@@ -203,7 +203,12 @@ Job IDs, retries, embedding validation, and the database migration are documente
 *   **Response relevance** — semantic similarity between the original question and questions generated from the answer, using remote embeddings.
 *   **Factual correctness (F1)** — balance of correct and complete claims compared with the reference answer.
 
-Scores are reported as percentages. Missing inputs and failed metrics are marked unavailable with a reason; successful scores remain saved. Evaluation runs without local Torch, Transformers, BERTScore, or ROUGE packages. Historical results retain their original metrics.
+Scores are reported as percentages. Answer evaluation uses only the three Ragas
+metrics above. Missing inputs and failed metrics are marked unavailable with a
+reason; successful scores remain saved. Results without recorded Ragas evaluation
+show unavailable answer metrics and can be evaluated by running deep analysis again.
+Retrieval metric labels use the saved run's selected K: for example, Precision@8,
+Recall@8, and F1@8 when Top-K is 8.
 
 These metrics are calculated for every combination of retrieval method × LLM model, giving you a comprehensive view of which pipeline performs best for your documents.
     

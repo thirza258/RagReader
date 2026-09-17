@@ -48,6 +48,7 @@ export function transformToAnalysisResult(
   if (msg.error && msg.method) {
     return {
       batch_id: msg.batch_id ?? "Unknown",
+      top_k: msg.top_k,
       method: msg.method ?? "Unknown",
       aiModel: msg.aiModel ?? "Unknown",
       query: msg.query ?? query ?? "Unknown",
@@ -88,6 +89,7 @@ export function transformToAnalysisResult(
 
   return {
     batch_id: msg.batch_id ?? "Unknown",
+    top_k: msg.top_k,
     method: msg.method ?? "Unknown",
     aiModel: msg.aiModel ?? "Unknown",
     query: msg.query ?? query ?? "Unknown",

@@ -1,6 +1,6 @@
 import React from "react";
 import { NormalizedChunk, EvaluationMetric } from "../interface";
-import { formatMetricValue, METRIC_INFO, metricLabel } from "../lib/evaluation";
+import { evaluationMetricEntries, formatMetricValue, hasRagasEvaluation, METRIC_INFO, metricLabel, RAGAS_NOT_RECORDED } from "../lib/evaluation";
 
 interface DeepAnalysisCardProps {
   method: string;
@@ -11,13 +11,14 @@ interface DeepAnalysisCardProps {
   errorCode?: string;
   retrievedChunks: NormalizedChunk[];
   evaluationMetrics?: EvaluationMetric;
+  topK?: number;
   className?: string;
   onShowFlow?: () => void;
 }
 
 const SECTION_LABEL_MAP: Record<string, string> = {
   chunk_evaluation: "Retrieval",
-  response_evaluation: "Answer",
+  response_evaluation: "Answer · Ragas",
 };
 
 const getMetricLabel = (name: string): string =>
@@ -32,6 +33,7 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
   errorCode,
   retrievedChunks,
   evaluationMetrics,
+  topK,
   className = "",
   onShowFlow,
 }) => (
@@ -106,12 +108,11 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
       </div>
     </dl>
 
-    {evaluationMetrics && (
+    {evaluationMetrics && !error && (
       <div className="border-t border-border">
-        {evaluationMetrics.response_evaluation_details && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">Ragas · OpenRouter · <span className="break-all">{evaluationMetrics.response_evaluation_details.judge_model}</span></p>}
+        <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{hasRagasEvaluation(evaluationMetrics) ? <>Ragas · OpenRouter · <span className="break-all">{evaluationMetrics.response_evaluation_details?.judge_model}</span></> : RAGAS_NOT_RECORDED}</p>
         {(["chunk_evaluation", "response_evaluation"] as const).map((section) => {
-          const sectionData = evaluationMetrics[section];
-          if (!sectionData || Object.keys(sectionData).length === 0) return null;
+          const entries = evaluationMetricEntries(evaluationMetrics, section);
 
           return (
             <table key={section} className="w-full border-b border-border text-sm last:border-b-0">
@@ -126,13 +127,13 @@ const DeepAnalysisCard: React.FC<DeepAnalysisCardProps> = ({
                   </th>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-x-6 gap-y-1.5">
-                      {Object.entries(sectionData).map(([key, value]) => (
+                      {entries.map(([key, value]) => (
                         <span key={key} className="text-muted-foreground" title={METRIC_INFO[key]?.description}>
-                          {metricLabel(key)}{" "}
+                          {metricLabel(key, topK)}{" "}
                           <span className="font-mono text-foreground tabular">
                             {formatMetricValue(value)}
                           </span>
-                          {evaluationMetrics.response_evaluation_details?.metrics[key]?.reason && <span className="mt-1 block text-xs text-status-warning">{evaluationMetrics.response_evaluation_details.metrics[key].reason}</span>}
+                          {hasRagasEvaluation(evaluationMetrics) && evaluationMetrics.response_evaluation_details?.metrics[key]?.reason && <span className="mt-1 block text-xs text-status-warning">{evaluationMetrics.response_evaluation_details.metrics[key].reason}</span>}
                         </span>
                       ))}
                     </div>

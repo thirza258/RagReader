@@ -156,7 +156,7 @@ Ragas uses the selected OpenRouter evaluation judge and remote embeddings. Faith
 
 Missing inputs or failed evaluations are shown as **unavailable with a reason**. They are not fabricated zero scores. A failure in one metric does not discard successful metrics or the generated answer. Results retain evaluator details and module traces.
 
-Historical runs may contain older metrics; do not mix them into a new Ragas comparison as though the measurement method were unchanged.
+Results without recorded Ragas evaluation show unavailable answer metrics. Run deep analysis again to calculate the three Ragas metrics; older scores are not substituted or relabeled.
 
 ## Judge limitations
 

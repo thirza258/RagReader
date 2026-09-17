@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { formatMetricValue, metricLabel, RAGAS_ANSWER_METRICS } from "../../lib/evaluation";
 
 const SAMPLE_DOCS = [
   {
@@ -11,10 +12,6 @@ const SAMPLE_DOCS = [
           precision: 0.6,
           recall: 0.75,
           f1: 0.667,
-          rougeL: 0.412,
-          faithfulness: 0.8,
-          relevance: 0.8,
-          coverage: 0.75,
           answer:
             "The Battle of Surabaya in November 1945 began after tensions escalated following the murder of Brigadier A. W. S. Mallaby. Indonesian militias fought British-led troops, resulting in heavy casualties. It is commemorated annually as Heroes' Day (Hari Pahlawan).",
           chunks: [
@@ -39,10 +36,6 @@ const SAMPLE_DOCS = [
           precision: 0.6,
           recall: 0.75,
           f1: 0.667,
-          rougeL: 0.435,
-          faithfulness: 0.85,
-          relevance: 0.82,
-          coverage: 0.8,
           answer:
             "Indonesian independence forces confronted Allied forces in Surabaya after Brigadier Mallaby's death in late 1945. The intense resistance turned into a turning point for national sovereignty, honored every November 10th as Heroes' Day.",
           chunks: [
@@ -67,10 +60,6 @@ const SAMPLE_DOCS = [
           precision: 0.6,
           recall: 0.75,
           f1: 0.667,
-          rougeL: 0.448,
-          faithfulness: 0.88,
-          relevance: 0.85,
-          coverage: 0.82,
           answer:
             "The battle erupted in November 1945 following the assassination of Brigadier Mallaby. Indonesian militias fought Allied forces fiercely, making Surabaya a landmark event now honored as National Heroes' Day.",
           chunks: [
@@ -97,10 +86,6 @@ const SAMPLE_DOCS = [
           precision: 0.4,
           recall: 0.5,
           f1: 0.444,
-          rougeL: 0.38,
-          faithfulness: 0.75,
-          relevance: 0.7,
-          coverage: 0.65,
           answer:
             "BM25 keyword matching found chunks referencing 'Surabaya', 'Brigadier Mallaby', and 'November 10'. The clash led to significant battle casualties and Heroes' Day commemoration.",
           chunks: [
@@ -120,10 +105,6 @@ const SAMPLE_DOCS = [
           precision: 0.4,
           recall: 0.5,
           f1: 0.444,
-          rougeL: 0.395,
-          faithfulness: 0.78,
-          relevance: 0.72,
-          coverage: 0.68,
           answer:
             "Keyword search matched exact terms for Mallaby and Surabaya. The fighting in November 1945 is commemorated as Heroes' Day across Indonesia.",
           chunks: [
@@ -143,10 +124,6 @@ const SAMPLE_DOCS = [
           precision: 0.4,
           recall: 0.5,
           f1: 0.444,
-          rougeL: 0.405,
-          faithfulness: 0.8,
-          relevance: 0.75,
-          coverage: 0.7,
           answer:
             "Sparse BM25 retrieval retrieved historical entries containing exact names. Brigadier Mallaby's death triggered the conflict, now remembered as Heroes' Day on November 10.",
           chunks: [
@@ -168,10 +145,6 @@ const SAMPLE_DOCS = [
           precision: 0.8,
           recall: 1.0,
           f1: 0.889,
-          rougeL: 0.512,
-          faithfulness: 0.95,
-          relevance: 0.94,
-          coverage: 0.92,
           answer:
             "Hybrid retrieval combined vector semantic similarity with BM25 keyword matching, reranked by the cross-encoder. It pinpointed Brigadier A. W. S. Mallaby's death as the key trigger of the November 1945 battle and highlighted Heroes' Day (Hari Pahlawan) on November 10.",
           chunks: [
@@ -196,10 +169,6 @@ const SAMPLE_DOCS = [
           precision: 0.8,
           recall: 1.0,
           f1: 0.889,
-          rougeL: 0.53,
-          faithfulness: 0.96,
-          relevance: 0.95,
-          coverage: 0.94,
           answer:
             "Cross-encoder reranking fused dense vectors and BM25 keywords, giving Gemini full context. The clash erupted over Brigadier Mallaby's assassination in Surabaya, sparking intense urban resistance that is celebrated every November 10 as Heroes' Day.",
           chunks: [
@@ -224,10 +193,6 @@ const SAMPLE_DOCS = [
           precision: 0.8,
           recall: 1.0,
           f1: 0.889,
-          rougeL: 0.545,
-          faithfulness: 0.98,
-          relevance: 0.96,
-          coverage: 0.95,
           answer:
             "With MS-MARCO cross-encoder reranking, Claude Haiku 4.5 received all key ground-truth chunks. The battle was ignited by Brigadier Mallaby's death, turning into a defining moment of national independence celebrated as Heroes' Day.",
           chunks: [
@@ -287,12 +252,7 @@ export const InteractiveBenchmarkSimulator: React.FC = () => {
     { label: "F1@K", value: result.f1 },
   ];
 
-  const answerMetrics = [
-    { label: "ROUGE-L F1", value: result.rougeL },
-    { label: "Faithfulness", value: result.faithfulness },
-    { label: "Answer relevance", value: result.relevance },
-    { label: "Answer coverage", value: result.coverage },
-  ];
+  const answerMetrics = RAGAS_ANSWER_METRICS.map((name) => ({ label: metricLabel(name), value: null }));
 
   const choice = (active: boolean) =>
     `border px-3 py-2 text-left text-sm transition-colors ${
@@ -409,24 +369,23 @@ export const InteractiveBenchmarkSimulator: React.FC = () => {
             ))}
           </dl>
 
-          <p className="mt-6 text-xs text-muted-foreground">Answer</p>
+          <p className="mt-6 text-xs text-muted-foreground">Answer · Ragas</p>
           <dl className="mt-1 border-t border-border">
             {answerMetrics.map((metric) => (
               <div key={metric.label} className="border-b border-border py-2.5">
                 <div className="flex items-baseline justify-between text-sm">
                   <dt className="text-muted-foreground">{metric.label}</dt>
                   <dd className="font-mono tabular">
-                    {Math.round(metric.value * 100)}%
+                    {formatMetricValue(metric.value)}
                   </dd>
                 </div>
-                <Bar value={metric.value} />
               </div>
             ))}
           </dl>
 
           <p className="mt-4 text-xs text-muted-foreground">
-            Historical results from the earlier evaluator, shown as percentages.
-            New analyses use Ragas; these saved values have not been recalculated.
+            Ragas answer scores were not recorded for this sample. Run deep
+            analysis on your own document to calculate them.
           </p>
         </div>
       </div>

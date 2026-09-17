@@ -11,12 +11,13 @@ from openai import AsyncOpenAI
 from ai_handler.llm import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
 from common.constant import DEFAULT_EMBEDDING_MODEL, DEFAULT_JUDGE_MODEL
 from common.analysis_progress import report_progress
+from evaluation.contracts import RAGAS_ANSWER_METRICS
 
 # Evaluation does not need Ragas usage telemetry.
 os.environ.setdefault("RAGAS_DO_NOT_TRACK", "true")
 logger = logging.getLogger(__name__)
 METRIC_TIMEOUT_SECONDS = 120
-METRICS = ("faithfulness", "answer_relevancy", "factual_correctness")
+METRICS = RAGAS_ANSWER_METRICS
 
 def calculate_recall_K(chunks, ground_truth_chunks):
     """

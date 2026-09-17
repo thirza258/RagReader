@@ -55,7 +55,7 @@ test("old results and failed variants do not invent module outcomes", () => {
 });
 
 test("evaluation failures are shown while retaining successful stages", () => {
-  const stages = flow([], { response_evaluation: { faithfulness: 0.8, answer_relevancy: null }, response_evaluation_details: { metrics: { faithfulness: { status: "completed" }, answer_relevancy: { status: "unavailable" } } } });
+  const stages = flow([], { response_evaluation: { faithfulness: 0.8, answer_relevancy: null }, response_evaluation_details: { framework: "ragas", metrics: { faithfulness: { status: "completed" }, answer_relevancy: { status: "unavailable" } } } });
   assert.equal(stages.find((stage) => stage.id === "evaluate").status, "unavailable");
   assert.equal(stages.find((stage) => stage.id === "answer").status, "completed");
 });
@@ -69,4 +69,16 @@ test("missing metric values never render as a zero score", () => {
   for (const value of [null, undefined, "", NaN, Infinity, "error 401"]) assert.equal(formatMetricValue(value), "Unavailable");
   assert.equal(formatMetricValue(0), "0.0%");
   assert.equal(formatMetricValue(0.8), "80.0%");
+});
+
+test("the flow uses the result's recorded K rather than a different configuration", () => {
+  const stages = buildAnalysisFlow({ ...config, top_k: 20 }, options, "Dense Retrieval", { ...result, top_k: 8 });
+  assert.match(stages.find((stage) => stage.id === "search").description, /up to 8 passages/);
+  assert.doesNotMatch(stages.find((stage) => stage.id === "search").description, /20 passages/);
+});
+
+test("earlier answer scores are not treated as completed Ragas evaluation", () => {
+  const stages = flow([], { chunk_evaluation: { precision_k: 1 }, response_evaluation: { faithfulness: 0.8, rougeL_f1: 0.7 } });
+  assert.equal(stages.find((stage) => stage.id === "evaluate").status, "unrecorded");
+  assert.match(stages.find((stage) => stage.id === "evaluate").description, /Run deep analysis again/);
 });

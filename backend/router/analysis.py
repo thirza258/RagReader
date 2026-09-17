@@ -8,6 +8,7 @@ from django.db import close_old_connections, transaction
 from django.db.models import Prefetch, Q
 from django.utils import timezone
 from router.models import AnalysisBatch, AnalysisResult
+from evaluation.contracts import ragas_only_evaluation
 
 
 def has_completed_analysis(conversation_id):
@@ -70,19 +71,20 @@ def keep_batch_lease(batch_id, token):
 
 def format_metrics(metrics):
     if isinstance(metrics, dict):
-        return metrics
+        return ragas_only_evaluation(metrics)
     result = {}
     for metric in metrics or []:
         if isinstance(metric, dict) and "name" in metric and "value" in metric:
             result[metric["name"]] = metric["value"]
         elif isinstance(metric, dict):
             result.update(metric)
-    return result
+    return ragas_only_evaluation(result)
 
 
 def result_frame(batch, result):
     frame = {"batch_id": str(batch.job_id), "method": result.method,
-             "aiModel": result.ai_model, "query": result.query, "progress": 100}
+             "aiModel": result.ai_model, "query": result.query, "progress": 100,
+             "top_k": normalize_analysis_config(batch.config)["top_k"]}
     if result.error_message:
         return {**frame, "error": result.error_message, "error_code": result.error_code, "retryable": result.retryable}
     chunks = [{"id": doc.get("id", doc.get("chunk_id")), "chunk_id": doc.get("id", doc.get("chunk_id")),

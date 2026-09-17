@@ -3,7 +3,7 @@ import { ArrowRight, Check, GitBranch, LoaderCircle } from "lucide-react";
 import type { AnalysisConfigOptions, AnalysisResult, DeepAnalysisConfig } from "../interface";
 import type { AnalysisRunState } from "./DeepSidebar";
 import { analysisVariants, buildAnalysisFlow, variantKey } from "../lib/analysisFlow";
-import { formatMetricValue, METRIC_INFO, metricLabel } from "../lib/evaluation";
+import { evaluationMetricEntries, formatMetricValue, hasRagasEvaluation, METRIC_INFO, metricLabel, RAGAS_NOT_RECORDED } from "../lib/evaluation";
 import type { LiveAnalysisProgress } from "../lib/liveAnalysis";
 
 interface Props {
@@ -37,7 +37,12 @@ export default function AnalysisFlow({ config, options, results, runState, liveP
   const stage = stages.find((item) => inspectingStage && item.id === selectedStage?.stage) ?? activeStage ?? stages[1];
   const trace = result?.evaluation?.module_trace;
   const evaluation = result?.evaluation;
-  const details = evaluation?.response_evaluation_details;
+  const details = hasRagasEvaluation(evaluation) ? evaluation?.response_evaluation_details : undefined;
+  const topK = result?.top_k ?? config.top_k;
+  const metricEntries = [
+    ...evaluationMetricEntries(evaluation, "chunk_evaluation"),
+    ...evaluationMetricEntries(evaluation, "response_evaluation"),
+  ];
   const completed = results.filter((item) => !item.error).length;
   const failed = results.filter((item) => item.error).length;
   const route = trace?.route ?? live?.route;
@@ -46,7 +51,7 @@ export default function AnalysisFlow({ config, options, results, runState, liveP
   const queries = trace?.queries ?? live?.queries ?? [];
   const receiving = streaming && !live?.interrupted;
   const activity = live?.activity;
-  const activityDetail = activity?.kind === "metric" ? `${metricLabel(activity.id)}: ${activity.detail}` : activity?.detail;
+  const activityDetail = activity?.kind === "metric" ? `${metricLabel(activity.id, topK)}: ${activity.detail}` : activity?.detail;
 
   return (
     <section id="analysis-flow" aria-labelledby="analysis-flow-heading" className="scroll-mt-4 border border-border bg-card">
@@ -116,16 +121,16 @@ export default function AnalysisFlow({ config, options, results, runState, liveP
           {stage.id === "answer" && result && <p className="mt-3 text-sm">Answer model: <span className="break-all font-mono text-xs">{result.aiModel}</span>. Read the answer and its source passages in the result card below.</p>}
           {stage.id === "evaluate" && (
             <div className="mt-4 space-y-3">
-              <p className="text-xs font-medium">{details ? `Ragas ${details.version} · OpenRouter · ${details.judge_model}` : result ? "Saved evaluation · evaluator details were not recorded" : `Ragas · OpenRouter · ${config.judge_model}`}</p>
+              <p className="text-xs font-medium">{details ? `Ragas ${details.version} · OpenRouter · ${details.judge_model}` : result ? RAGAS_NOT_RECORDED : `Ragas · OpenRouter · ${config.judge_model}`}</p>
               {details && <p className="break-words text-xs text-muted-foreground">Response relevance embeddings: {details.embedding_model}</p>}
               <dl className="grid gap-3 md:grid-cols-2">
-                {Object.entries(result && !result.error ? { ...evaluation?.chunk_evaluation, ...evaluation?.response_evaluation } : Object.fromEntries(["precision_k", "recall_k", "f1_k", "faithfulness", "answer_relevancy", "factual_correctness"].map((name) => [name, null]))).map(([name, value]) => {
+                {metricEntries.map(([name, value]) => {
                   const metric = live?.metrics[name];
                   const metricState = metric?.status === "running" && !receiving ? "paused" : metric?.status;
                   const reason = details?.metrics[name]?.reason ?? (metric && metric.status !== "completed" ? metric.detail : undefined);
                   const display = result && !result.error ? formatMetricValue(value) : metricState === "completed" ? formatMetricValue(metric?.score) : metricState === "unavailable" ? "Unavailable" : metricState ? STATUS_LABELS[metricState] : "Pending";
                   return <div key={name} className="border-t border-border pt-2">
-                    <dt className="flex flex-wrap justify-between gap-2 text-sm font-medium"><span>{metricLabel(name)}</span><span className="font-mono text-xs">{display}</span></dt>
+                    <dt className="flex flex-wrap justify-between gap-2 text-sm font-medium"><span>{metricLabel(name, topK)}</span><span className="font-mono text-xs">{display}</span></dt>
                     <dd className="mt-1 text-xs leading-relaxed text-muted-foreground">{METRIC_INFO[name]?.description}{reason && <span className="mt-1 block text-muted-foreground">{reason}</span>}</dd>
                   </div>
                 })}

@@ -57,6 +57,7 @@ ANALYSIS_RESPONSE = {
     "evaluation": {
         "chunk_evaluation": {"precision_k": 0.5, "recall_k": 1.0, "f1_k": 0.667},
         "response_evaluation": {"factual_correctness": 0.4, "faithfulness": 0.8},
+        "response_evaluation_details": {"framework": "ragas", "metrics": {}},
     },
 }
 
@@ -157,6 +158,20 @@ class AnalysisConsumerTests(TransactionTestCase):
     @staticmethod
     def results_in(frames):
         return [f for f in frames if "answer" in f]
+
+    def test_selected_k_and_ragas_metrics_survive_live_results_and_replay(self):
+        batch = self.make_batch(top_k=8)
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=make_engine()):
+            live = self.results_in(self.collect(batch.job_id))
+        replay = self.results_in(self.collect(batch.job_id))
+        for frame in live + replay:
+            self.assertEqual(frame["top_k"], 8)
+            self.assertEqual(set(frame["evaluation"]["response_evaluation"]), {
+                "faithfulness", "answer_relevancy", "factual_correctness",
+            })
+            self.assertEqual(frame["evaluation"]["response_evaluation"]["faithfulness"], 0.8)
+        self.assertEqual(len(live), 1)
+        self.assertEqual(len(replay), 1)
 
     # ── failure to even start ────────────────────────────────────────────────
 

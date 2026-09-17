@@ -1,5 +1,6 @@
 import type { AnalysisConfigOptions, AnalysisResult, DeepAnalysisConfig, ModuleTrace } from "../interface";
 import type { LiveVariantProgress } from "./liveAnalysis";
+import { hasRagasEvaluation, RAGAS_ANSWER_METRICS, RAGAS_NOT_RECORDED } from "./evaluation.ts";
 
 export type FlowStatus = "planned" | "running" | "completed" | "skipped" | "fallback" | "unavailable" | "unrecorded" | "failed" | "paused";
 export interface FlowStage {
@@ -35,6 +36,7 @@ export function buildAnalysisFlow(config: DeepAnalysisConfig, options: AnalysisC
   const evidenceIds = groups?.find((group) => group.id === "evidence" || group.label === "Evidence")?.modules ?? catalog.filter((module) => module.stage === "Refinement").map((module) => module.id);
   const answerIds = groups?.find((group) => group.id === "answer" || group.label === "Answer")?.modules ?? catalog.filter((module) => module.stage === "Generation").map((module) => module.id);
   const direct = (trace?.route ?? live?.route) === "direct";
+  const topK = result?.top_k ?? config.top_k;
   const retrieval = enabled.has("rrf_hybrid")
     ? "Combine semantic and keyword search using reciprocal rank fusion. The usual Hybrid reranker is bypassed."
     : method === "Sparse Retrieval"
@@ -44,10 +46,10 @@ export function buildAnalysisFlow(config: DeepAnalysisConfig, options: AnalysisC
         : "Find passages with similar meaning using document and question embeddings.";
   const definitions = [
     { id: "question", label: "Question", description: "Start with your question and the document attached to this conversation. Each method/model combination gets its own answer and evaluation.", ids: [] as string[] },
-    { id: "search", label: "Search", description: direct ? "Adaptive RAG chose a direct answer. Document retrieval and the remaining search modules were skipped." : `${enabled.size ? "Apply the selected routing and query modules, then search the document. " : "Optimize the search question, falling back to the original question if needed. "}${retrieval} Start with up to ${config.top_k} passages.`, ids: searchIds },
+    { id: "search", label: "Search", description: direct ? "Adaptive RAG chose a direct answer. Document retrieval and the remaining search modules were skipped." : `${enabled.size ? "Apply the selected routing and query modules, then search the document. " : "Optimize the search question, falling back to the original question if needed. "}${retrieval} Start with up to ${topK} passages.`, ids: searchIds },
     { id: "evidence", label: "Refine evidence", description: direct ? "The direct route supplied no document evidence to the answer model." : "Combine and refine the source passages. Enabled modules can expand context, remove irrelevant chunks, or search again. Only the final source text becomes evidence.", ids: evidenceIds },
     { id: "answer", label: "Write answer", description: direct ? "Respond directly without making claims about the document." : `Generate the answer from the final evidence.${enabled.has("flare") ? " FLARE can loop back to search for uncertain claims." : ""}${enabled.has("contextual_learning") ? " Contextual Learning adds example Q&A pairs to the prompt." : ""}`, ids: answerIds },
-    { id: "evaluate", label: "Evaluate", description: result && !result.evaluation?.response_evaluation_details ? "Review the metrics saved with this result. The evaluator details were not recorded; legacy scores retain their original names and values." : "Compare retrieved chunk IDs with your reference set. Ragas uses the original question, answer, source passages, and reference answer to score answer quality through OpenRouter. Missing inputs or failed metrics remain unavailable.", ids: [] as string[] },
+    { id: "evaluate", label: "Evaluate", description: result && !hasRagasEvaluation(result.evaluation) ? `Review the saved retrieval metrics. ${RAGAS_NOT_RECORDED}` : "Compare retrieved chunk IDs with your reference set. Ragas uses the original question, answer, source passages, and reference answer to score answer quality through OpenRouter. Missing inputs or failed metrics remain unavailable.", ids: [] as string[] },
   ];
   return definitions.map(({ ids, ...stage }) => {
     const modules = ids.filter((id) => enabled.has(id)).map((id) => catalog.find((module) => module.id === id) ?? { id, label: id.replace(/_/g, " ") });
@@ -70,9 +72,9 @@ export function buildAnalysisFlow(config: DeepAnalysisConfig, options: AnalysisC
       if (direct && ["search", "evidence"].includes(stage.id)) status = "skipped";
       else if (stage.id === "evaluate") {
         const evaluation = result.evaluation;
-        const metricStates = Object.values(evaluation?.response_evaluation_details?.metrics ?? {});
-        if (metricStates.some((metric) => metric.status === "unavailable")) status = "unavailable";
-        else if (!Object.keys(evaluation?.response_evaluation ?? {}).length && !Object.keys(evaluation?.chunk_evaluation ?? {}).length) status = "unrecorded";
+        const metricStates = RAGAS_ANSWER_METRICS.map((name) => evaluation?.response_evaluation_details?.metrics?.[name]);
+        if (!hasRagasEvaluation(evaluation)) status = "unrecorded";
+        else if (metricStates.some((metric) => metric?.status === "unavailable")) status = "unavailable";
       } else if (modules.length) {
         if (steps.some((step) => step.status === "fallback")) status = "fallback";
         else if (!steps.length || modules.some((module) => !steps.some((step) => step.module === module.id))) status = "unrecorded";

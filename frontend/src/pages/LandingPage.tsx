@@ -20,7 +20,7 @@ const SUMMARY = [
   { term: "Retrieval methods", def: "Dense, sparse (BM25), hybrid with cross-encoder reranking" },
   { term: "Language models", def: "Any model OpenRouter serves; GPT-4o mini, Gemini 3 Flash and Claude Haiku 4.5 are the defaults" },
   { term: "Pipelines per run", def: "Every selected method × every selected model, up to a fixed cap" },
-  { term: "Metrics per pipeline", def: "Three retrieval, six answer" },
+  { term: "Metrics per pipeline", def: "Three retrieval, three Ragas answer metrics" },
   { term: "Results transport", def: "Streamed over a WebSocket as each pipeline finishes" },
   { term: "Licence", def: "MIT, self-hostable with Docker Compose" },
 ];
@@ -50,9 +50,9 @@ const SAMPLE_METRICS: { group: string; rows: [string, string][] }[] = [
   {
     group: "Answer",
     rows: [
-      ["ROUGE-L F1 (legacy sample)", "41.2%"],
-      ["Faithfulness", "80.0%"],
-      ["Answer relevance", "80.0%"],
+      ["Faithfulness", "Unavailable"],
+      ["Response relevance", "Unavailable"],
+      ["Factual correctness (F1)", "Unavailable"],
     ],
   },
 ];
@@ -311,7 +311,7 @@ const LandingPage: React.FC = () => {
             RAGReader answers your question straight away with dense retrieval.
             Then, on one click, it re-runs the <em>same</em> question through every
             retrieval method and model you picked — nine pipelines by default,
-            three retrieval methods across three LLMs — and reports nine scores for
+            three retrieval methods across three LLMs — and reports six scores for
             each, so the comparison rests on measurement rather than intuition.
           </p>
 
@@ -444,8 +444,8 @@ const LandingPage: React.FC = () => {
               </table>
             </div>
             <figcaption className="mt-3 text-sm text-muted-foreground">
-              Figure 1. A historical result from the earlier evaluator. New deep-analysis
-              runs report three retrieval metrics and three Ragas answer metrics.
+              Figure 1. Sample retrieval output. Ragas answer scores have not been
+              recorded for this example; run deep analysis to calculate them.
             </figcaption>
           </figure>
         </section>
@@ -658,7 +658,7 @@ const LandingPage: React.FC = () => {
           id="benchmark"
           number={7}
           title="Worked example"
-          lede="Historical results for one sample document, saved before Ragas evaluation. Switch methods or models to explore the older scores; new analyses use the metrics described above."
+          lede="Inspect sample retrieval results and answer text for each method and model. Run your own analysis to calculate the three Ragas answer metrics."
         >
           <InteractiveBenchmarkSimulator />
         </Section>

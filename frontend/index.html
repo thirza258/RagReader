@@ -19,7 +19,7 @@
     />
     <meta
       name="keywords"
-      content="RAG pipeline comparison, Dense retrieval, Sparse retrieval, Hybrid retrieval, RAG evaluation, Precision@K, Recall@K, ROUGE-L, Reciprocal Rank Fusion, LLM benchmark"
+      content="RAG pipeline comparison, Dense retrieval, Sparse retrieval, Hybrid retrieval, Ragas answer evaluation, Precision@K, Recall@K, Factual correctness, Reciprocal Rank Fusion, LLM benchmark"
     />
     <link rel="canonical" href="https://rag.nevatal.tech/" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
@@ -69,7 +69,7 @@
         "name": "RAGReader",
         "url": "https://rag.nevatal.tech/",
         "image": "https://rag.nevatal.tech/og-image.jpg",
-        "description": "Document question answering platform that benchmarks Dense, Sparse, and Hybrid retrieval across three LLMs, evaluating retrieval and response accuracy with Precision@K, Recall@K, F1@K, ROUGE-L, Faithfulness, Relevance, and Coverage.",
+        "description": "Document question answering platform that benchmarks Dense, Sparse, and Hybrid retrieval across three LLMs, evaluating retrieval with Precision@K, Recall@K, and F1@K, and answers with Ragas faithfulness, response relevance, and factual correctness.",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Any",
         "browserRequirements": "Requires JavaScript and WebSocket support",
@@ -123,7 +123,7 @@
             "name": "Which evaluation metrics are reported?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Retrieval quality: Precision@K, Recall@K, F1@K. Answer quality: ROUGE-L (precision, recall, F1), plus Faithfulness, Answer Relevance, and Answer Coverage judged by Mistral Nemo."
+              "text": "Retrieval quality: Precision@K, Recall@K, F1@K, with K matching the saved run's retrieval depth. Answer quality uses only Ragas faithfulness, response relevance, and factual correctness (F1) through the selected OpenRouter judge."
             }
           },
           {
@@ -203,8 +203,8 @@
         pasted text using Dense (vector) retrieval, then re-runs the same question
         through Dense, Sparse and Hybrid retrieval against GPT-4o mini, Gemini 3 Flash
         and Claude Haiku 4.5 — up to nine pipelines — and scores every one with
-        Precision@K, Recall@K, F1@K, ROUGE-L and LLM-judged faithfulness, answer
-        relevance and answer coverage.
+        Precision@K, Recall@K, F1@K and Ragas faithfulness, response
+        relevance and factual correctness.
       </p>
       <p>
         The project is open source (MIT):

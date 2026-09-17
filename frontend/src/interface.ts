@@ -44,6 +44,7 @@ export interface ModuleTrace {
 
 export interface AnalysisResult {
   batch_id: string;
+  top_k?: number;
   method: string;
   aiModel: string;
   query: string;
@@ -58,6 +59,7 @@ export interface AnalysisResult {
 
 export interface WebSocketMessage {
   status?: string;
+  top_k?: number;
   method?: string;
   query?: string;
   aiModel?: string;

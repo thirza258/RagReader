@@ -275,7 +275,7 @@ const DeepResult: React.FC = () => {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {results.map((item) => (
           <div key={`${item.method}-${item.aiModel}`} className="overflow-hidden">
-            <DeepAnalysisCard method={item.method} aiModel={item.aiModel} query={item.query} answer={item.answer} error={item.error} errorCode={item.error_code} retrievedChunks={item.retrievedChunks} evaluationMetrics={item.evaluation} onShowFlow={() => {
+            <DeepAnalysisCard method={item.method} aiModel={item.aiModel} query={item.query} answer={item.answer} error={item.error} errorCode={item.error_code} retrievedChunks={item.retrievedChunks} evaluationMetrics={item.evaluation} topK={item.top_k ?? activeConfig?.top_k} onShowFlow={() => {
               setFlowVariant(variantKey(item.method, item.aiModel));
               const flow = document.getElementById("analysis-flow");
               if (flow) flow.closest("main")?.scrollTo({ top: flow.offsetTop - 16 });
