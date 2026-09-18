@@ -37,6 +37,23 @@ test("course and lesson URLs are unambiguous and each quiz has a valid answer", 
   }
 });
 
+test("public sitemap includes all courses and individual lessons", () => {
+  const sitemap = readFileSync(new URL("../public/sitemap.xml", import.meta.url), "utf8");
+  for (const course of courses) {
+    assert.ok(
+      sitemap.includes(`<loc>https://rag.nevatal.tech/courses/${course.id}</loc>`),
+      `sitemap must include course ${course.id}`
+    );
+  }
+  for (const { course, lesson } of lessonEntries) {
+    assert.ok(
+      sitemap.includes(`<loc>https://rag.nevatal.tech/courses/${course.id}/${lesson.id}</loc>`),
+      `sitemap must include lesson ${course.id}/${lesson.id}`
+    );
+  }
+});
+
+
 test("saved progress survives reload, repeated completion, and marking incomplete", () => {
   let progress = parseCourseProgress(null, ids);
   progress = setLessonComplete(progress, ids[0], true);
