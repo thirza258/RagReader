@@ -27,6 +27,38 @@
     <meta name="color-scheme" content="light" />
 
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <script>
+      (() => {
+        function registerWebMcpTools() {
+          if (!('modelContext' in navigator) || !navigator.modelContext) return;
+          try {
+            const controller = new AbortController();
+            navigator.modelContext.registerTool({
+              name: 'search_ragreader_documents',
+              title: 'Search RagReader Documents',
+              description: 'Search documents, passages, and RAG pipelines on RagReader.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string', description: 'Search term or question to query documents' }
+                },
+                required: ['query']
+              },
+              execute: async ({ query }) => {
+                return {
+                  content: [{ type: 'text', text: `Results for ${query}: Visit https://rag.nevatal.tech` }]
+                };
+              }
+            }, { signal: controller.signal });
+          } catch (e) {}
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', registerWebMcpTools);
+        } else {
+          registerWebMcpTools();
+        }
+      })();
+    </script>
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="mobile-web-app-capable" content="yes" />

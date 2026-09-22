@@ -1,0 +1,16 @@
+{
+  "resource": "https://rag.nevatal.tech",
+  "authorization_servers": [
+    "https://rag.nevatal.tech"
+  ],
+  "scopes_supported": [
+    "read",
+    "write",
+    "rag",
+    "mcp"
+  ],
+  "bearer_methods_supported": [
+    "header"
+  ],
+  "resource_documentation": "https://rag.nevatal.tech/api/docs"
+}

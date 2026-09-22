@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "rag-document-chat",
+      "type": "skill-md",
+      "description": "Multi-strategy RAG chatbot for document analysis, multi-hop retrieval, citation generation, and question answering on RagReader.",
+      "url": "https://rag.nevatal.tech/skills/rag-document-chat/SKILL.md",
+      "digest": "sha256:05c793d9bba492d5328f928d1809a7f74cfc8408ba58149c1007809882ce504f"
+    }
+  ]
+}

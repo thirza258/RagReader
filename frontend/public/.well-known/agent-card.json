@@ -1,0 +1,30 @@
+{
+  "name": "RagReader Agent",
+  "version": "1.0.0",
+  "description": "Multi-hop RAG research assistant for interactive document analysis and question answering.",
+  "url": "https://rag.nevatal.tech",
+  "supportedInterfaces": [
+    {
+      "url": "https://rag.nevatal.tech/mcp",
+      "protocol": "mcp"
+    },
+    {
+      "url": "https://rag.nevatal.tech/api",
+      "protocol": "http"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "rag-document-chat",
+      "name": "RAG Document Chat",
+      "description": "Hybrid vector/keyword document retrieval and conversational QA"
+    }
+  ],
+  "skills": [
+    {
+      "id": "rag-document-chat",
+      "name": "RAG Document Chat",
+      "description": "Ingest, search, analyze, and query document collections with verified citations."
+    }
+  ]
+}
