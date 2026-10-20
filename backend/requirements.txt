@@ -9,13 +9,13 @@
 # Hybrid reranking stays in the separate Ollama service.
 
 # ── Django and the API ──────────────────────────────────────────────────────
-Django==6.1.1
-djangorestframework==3.18.0
+Django==6.1.2
+djangorestframework==3.18.3
 django-cors-headers==4.9.0
 drf-spectacular==0.30.0
 dj-database-url==3.1.2
-psycopg2-binary==2.9.12
-python-dotenv==1.2.3
+psycopg2-binary==2.9.13
+python-dotenv==1.2.4
 whitenoise==6.12.0
 
 # ── Async and background work ───────────────────────────────────────────────
@@ -29,11 +29,11 @@ redis==8.1.0
 
 # ── Retrieval ───────────────────────────────────────────────────────────────
 openai==2.54.0                # compatible with Ragas/Instructor's jiter range
-numpy==2.5.2
-scikit-learn==1.9.0           # cosine similarity for dense retrieval
+numpy==2.5.4
+scikit-learn==1.9.1           # cosine similarity for dense retrieval
 rank-bm25==0.2.2              # sparse retrieval
 nltk==3.10.3                  # tokenization and stopwords for BM25
-ollama==0.6.2                 # embeds and reranks hybrid's fused candidates
+ollama==0.6.3                 # embeds and reranks hybrid's fused candidates
 
 # ── Evaluation ──────────────────────────────────────────────────────────────
 ragas==0.4.3

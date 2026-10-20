@@ -333,7 +333,7 @@ class AnalysisConsumerTests(TransactionTestCase):
         self.assertEqual(stored.retrieved_chunks, [{"id": 7, "text": "chunk text", "score": 0.83}])
         self.assertEqual(
             [metric["name"] for metric in stored.evaluation_metrics],
-            ["chunk_evaluation", "response_evaluation", "retrieval_score"],
+            ["chunk_evaluation", "response_evaluation", "response_evaluation_details", "retrieval_score"],
         )
 
     def test_module_trace_is_saved_and_replayed_from_the_batch_configuration(self):
