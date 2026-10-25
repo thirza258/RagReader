@@ -1,7 +1,7 @@
 ---
 title: RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines
 description: Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs.
-image: https://rag.nevatal.tech/og-image.jpg
+image: https://rag.nevatal.id/og-image.jpg
 ---
 
 # RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines
@@ -49,8 +49,8 @@ Yes, RAGReader is open source under the MIT License and can be self-hosted using
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "RAGReader",
-  "url": "https://rag.nevatal.tech/",
-  "image": "https://rag.nevatal.tech/og-image.jpg",
+  "url": "https://rag.nevatal.id/",
+  "image": "https://rag.nevatal.id/og-image.jpg",
   "description": "Document question answering platform that benchmarks Dense, Sparse, and Hybrid retrieval across three LLMs, evaluating retrieval with Precision@K, Recall@K, and F1@K, and answers with Ragas faithfulness, response relevance, and factual correctness.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Any",

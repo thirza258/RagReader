@@ -96,7 +96,7 @@ jobs:
         run: npm run build
 
       # These are served from frontend/public and are the whole SEO surface for
-      # rag.nevatal.tech; a build that quietly stops publishing them is a
+      # rag.nevatal.id; a build that quietly stops publishing them is a
       # regression worth failing on.
       - name: Verify the static SEO files are published
         run: |

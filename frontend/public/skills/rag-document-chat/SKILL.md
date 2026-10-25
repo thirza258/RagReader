@@ -16,6 +16,6 @@ Use RagReader's hybrid retrieval-augmented generation engine to ingest, search, 
 
 ## Endpoints
 
-- API Base: `https://rag.nevatal.tech/api`
-- OpenAPI Specification: `https://rag.nevatal.tech/api/openapi.json`
-- API Documentation: `https://rag.nevatal.tech/api/docs`
+- API Base: `https://rag.nevatal.id/api`
+- OpenAPI Specification: `https://rag.nevatal.id/api/openapi.json`
+- API Documentation: `https://rag.nevatal.id/api/docs`

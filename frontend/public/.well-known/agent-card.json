@@ -2,14 +2,14 @@
   "name": "RagReader Agent",
   "version": "1.0.0",
   "description": "Multi-hop RAG research assistant for interactive document analysis and question answering.",
-  "url": "https://rag.nevatal.tech",
+  "url": "https://rag.nevatal.id",
   "supportedInterfaces": [
     {
-      "url": "https://rag.nevatal.tech/mcp",
+      "url": "https://rag.nevatal.id/mcp",
       "protocol": "mcp"
     },
     {
-      "url": "https://rag.nevatal.tech/api",
+      "url": "https://rag.nevatal.id/api",
       "protocol": "http"
     }
   ],

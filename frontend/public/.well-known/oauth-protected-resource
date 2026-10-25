@@ -1,7 +1,7 @@
 {
-  "resource": "https://rag.nevatal.tech",
+  "resource": "https://rag.nevatal.id",
   "authorization_servers": [
-    "https://rag.nevatal.tech"
+    "https://rag.nevatal.id"
   ],
   "scopes_supported": [
     "read",
@@ -12,5 +12,5 @@
   "bearer_methods_supported": [
     "header"
   ],
-  "resource_documentation": "https://rag.nevatal.tech/api/docs"
+  "resource_documentation": "https://rag.nevatal.id/api/docs"
 }

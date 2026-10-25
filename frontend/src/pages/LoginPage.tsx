@@ -47,7 +47,7 @@ const LoginPage: React.FC = () => {
       <SEO
         title="Sign In — RAGReader"
         description="Sign in or register your workspace to benchmark RAG retrieval pipelines."
-        canonicalUrl="https://rag.nevatal.tech/login"
+        canonicalUrl="https://rag.nevatal.id/login"
       />
 
       <form

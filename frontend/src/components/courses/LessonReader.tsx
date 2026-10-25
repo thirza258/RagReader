@@ -43,7 +43,7 @@ export default function LessonReader({ course, lesson, completed, storageAvailab
   const count = course.lessons.filter((item) => completed.includes(item.id)).length;
   return (
     <>
-      <SEO title={`${lesson.title} — RAGReader Courses`} description={lesson.summary} canonicalUrl={`https://rag.nevatal.tech${lessonHref(course.id, lesson.id)}`} ogType="article" />
+      <SEO title={`${lesson.title} — RAGReader Courses`} description={lesson.summary} canonicalUrl={`https://rag.nevatal.id${lessonHref(course.id, lesson.id)}`} ogType="article" />
       <nav aria-label="Breadcrumb" className="mb-8 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Link to="/courses" className="link">Courses</Link><span aria-hidden="true">/</span><Link to={`/courses/${course.id}`} className="link">{course.title}</Link><span aria-hidden="true">/</span><span>Lesson {coursePosition + 1}</span></nav>
       <div className="grid items-start gap-8 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12">
         <aside className="hidden lg:sticky lg:top-24 lg:block">

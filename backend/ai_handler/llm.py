@@ -28,7 +28,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # OpenRouter attributes traffic by these; they are cosmetic, not auth.
 OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://rag.nevatal.tech",
+    "HTTP-Referer": "https://rag.nevatal.id",
     "X-Title": "RagReader",
 }
 

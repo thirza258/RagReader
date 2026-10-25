@@ -13,8 +13,8 @@ interface SEOProps {
 const DEFAULT_TITLE = "RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines";
 const DEFAULT_DESCRIPTION =
   "Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs.";
-const DEFAULT_CANONICAL = "https://rag.nevatal.tech/";
-const DEFAULT_OG_IMAGE = "https://rag.nevatal.tech/og-image.jpg";
+const DEFAULT_CANONICAL = "https://rag.nevatal.id/";
+const DEFAULT_OG_IMAGE = "https://rag.nevatal.id/og-image.jpg";
 const DEFAULT_KEYWORDS = [
   "RAG pipeline comparison",
   "Dense retrieval",

@@ -43,7 +43,7 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,backend,rag.nevatal.tech").split(",")
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,backend,rag.nevatal.id").split(",")
     if host.strip()
 ]
 
@@ -82,13 +82,13 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://localhost:5150,http://localhost:3000,https://rag.nevatal.tech"
+        "http://localhost:5173,http://localhost:5150,http://localhost:3000,https://rag.nevatal.id"
     ).split(",")
     if origin.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
 
-_csrf_trusted = os.getenv("CSRF_TRUSTED_ORIGINS", os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5150,http://localhost:5173,https://rag.nevatal.tech"))
+_csrf_trusted = os.getenv("CSRF_TRUSTED_ORIGINS", os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5150,http://localhost:5173,https://rag.nevatal.id"))
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in _csrf_trusted.split(",")

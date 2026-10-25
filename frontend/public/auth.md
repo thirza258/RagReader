@@ -5,10 +5,10 @@
 RagReader provides authentication and registration protocols for AI agents to interact with hybrid retrieval-augmented generation, multi-hop document research, and query pipelines.
 
 - **Audience**: AI Agents, Code Assistants, and Automated Systems
-- **Resource Identifier**: `https://rag.nevatal.tech`
-- **Authorization Server**: `https://rag.nevatal.tech`
-- **Registration Endpoint**: `https://rag.nevatal.tech/api/agent/register`
-- **Token Endpoint**: `https://rag.nevatal.tech/api/auth/token`
+- **Resource Identifier**: `https://rag.nevatal.id`
+- **Authorization Server**: `https://rag.nevatal.id`
+- **Registration Endpoint**: `https://rag.nevatal.id/api/agent/register`
+- **Token Endpoint**: `https://rag.nevatal.id/api/auth/token`
 - **Supported Methods**: Bearer Token (`Authorization: Bearer <token>`)
 - **Supported Scopes**: `read`, `write`, `rag`, `mcp`
 
@@ -18,7 +18,7 @@ Agents can register or provision an API token:
 
 ```http
 POST /api/agent/register HTTP/1.1
-Host: rag.nevatal.tech
+Host: rag.nevatal.id
 Content-Type: application/json
 
 {
@@ -39,10 +39,10 @@ Response:
 
 ## Discovery Endpoints
 
-- OAuth Authorization Server Metadata: [/.well-known/oauth-authorization-server](https://rag.nevatal.tech/.well-known/oauth-authorization-server)
-- OpenID Connect Configuration: [/.well-known/openid-configuration](https://rag.nevatal.tech/.well-known/openid-configuration)
-- OAuth Protected Resource Metadata: [/.well-known/oauth-protected-resource](https://rag.nevatal.tech/.well-known/oauth-protected-resource)
-- API Catalog: [/.well-known/api-catalog](https://rag.nevatal.tech/.well-known/api-catalog)
-- MCP Server Card: [/.well-known/mcp/server-card.json](https://rag.nevatal.tech/.well-known/mcp/server-card.json)
-- A2A Agent Card: [/.well-known/agent-card.json](https://rag.nevatal.tech/.well-known/agent-card.json)
-- Agent Skills Discovery: [/.well-known/agent-skills/index.json](https://rag.nevatal.tech/.well-known/agent-skills/index.json)
+- OAuth Authorization Server Metadata: [/.well-known/oauth-authorization-server](https://rag.nevatal.id/.well-known/oauth-authorization-server)
+- OpenID Connect Configuration: [/.well-known/openid-configuration](https://rag.nevatal.id/.well-known/openid-configuration)
+- OAuth Protected Resource Metadata: [/.well-known/oauth-protected-resource](https://rag.nevatal.id/.well-known/oauth-protected-resource)
+- API Catalog: [/.well-known/api-catalog](https://rag.nevatal.id/.well-known/api-catalog)
+- MCP Server Card: [/.well-known/mcp/server-card.json](https://rag.nevatal.id/.well-known/mcp/server-card.json)
+- A2A Agent Card: [/.well-known/agent-card.json](https://rag.nevatal.id/.well-known/agent-card.json)
+- Agent Skills Discovery: [/.well-known/agent-skills/index.json](https://rag.nevatal.id/.well-known/agent-skills/index.json)

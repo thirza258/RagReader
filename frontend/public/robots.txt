@@ -1,4 +1,4 @@
-# https://rag.nevatal.tech/robots.txt
+# https://rag.nevatal.id/robots.txt
 # Marketing, courses, walkthrough, and sign-in entry points are public.
 # Dynamic user application routes are dis-allowed.
 
@@ -15,4 +15,4 @@ Disallow: /loading
 Disallow: /error
 Disallow: /api/
 
-Sitemap: https://rag.nevatal.tech/sitemap.xml
+Sitemap: https://rag.nevatal.id/sitemap.xml

@@ -9,7 +9,7 @@ const Docs: React.FC = () => {
       <SEO
         title="Walkthrough Guide — RAGReader Step-by-Step"
         description="Learn how to upload documents, ask questions, select ground truth, and run 9-pipeline RAG benchmarks step-by-step with screenshots."
-        canonicalUrl="https://rag.nevatal.tech/docs"
+        canonicalUrl="https://rag.nevatal.id/docs"
       />
 
       <main className="container mx-auto max-w-4xl px-6 pb-24 pt-28">

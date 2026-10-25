@@ -32,7 +32,7 @@ export default function CourseCatalog({ progress, storageAvailable }: { progress
 
   return (
     <>
-      <SEO title="RAG Courses — Fundamentals to Advanced Modules | RAGReader" description="Learn RAG in six complete courses: 28 lessons, all 13 modules, worked examples, quizzes, hands-on exercises, and a final capstone." canonicalUrl="https://rag.nevatal.tech/courses" />
+      <SEO title="RAG Courses — Fundamentals to Advanced Modules | RAGReader" description="Learn RAG in six complete courses: 28 lessons, all 13 modules, worked examples, quizzes, hands-on exercises, and a final capstone." canonicalUrl="https://rag.nevatal.id/courses" />
       <header className="grid gap-8 border-b border-border pb-10 lg:grid-cols-[1fr_18rem] lg:gap-16">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">The RAGReader classroom</p>

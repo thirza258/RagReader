@@ -293,7 +293,7 @@ const LandingPage: React.FC = () => {
       <SEO
         title="RAGReader — Compare Dense, Sparse & Hybrid RAG Pipelines"
         description="Ask questions about your own PDF, URL, or pasted text, then score the answer across 9 RAG pipelines — Dense, Sparse and Hybrid retrieval x three LLMs."
-        canonicalUrl="https://rag.nevatal.tech/"
+        canonicalUrl="https://rag.nevatal.id/"
       />
 
       <main className="container mx-auto max-w-4xl px-6 pt-28">
@@ -856,7 +856,7 @@ const LandingPage: React.FC = () => {
             <span>
               © {new Date().getFullYear()} RAGReader · Open source under the MIT licence
             </span>
-            <span className="font-mono">rag.nevatal.tech</span>
+            <span className="font-mono">rag.nevatal.id</span>
           </div>
         </div>
       </footer>

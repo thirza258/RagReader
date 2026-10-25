@@ -29,7 +29,7 @@ export default function Courses() {
     <main className="courses-page container mx-auto min-h-screen max-w-6xl px-5 pb-20 pt-28 sm:px-8">
       {notFound ? (
         <div className="py-16">
-          <SEO title="Lesson not found — RAGReader Courses" description="Find a course on RAG fundamentals, retrieval modules, or evaluation." canonicalUrl="https://rag.nevatal.tech/courses" />
+          <SEO title="Lesson not found — RAGReader Courses" description="Find a course on RAG fundamentals, retrieval modules, or evaluation." canonicalUrl="https://rag.nevatal.id/courses" />
           <p className="text-xs uppercase tracking-wide text-primary">Courses</p>
           <h1 id="course-page-title" tabIndex={-1} className="mt-3 text-4xl font-semibold">This lesson could not be found.</h1>
           <p className="mt-4 text-muted-foreground">Choose a lesson from the curriculum to continue learning.</p>

@@ -3,10 +3,10 @@
     "name": "ragreader-mcp",
     "version": "1.0.0"
   },
-  "endpoint": "https://rag.nevatal.tech/mcp",
+  "endpoint": "https://rag.nevatal.id/mcp",
   "transport": {
     "type": "streamable-http",
-    "url": "https://rag.nevatal.tech/mcp"
+    "url": "https://rag.nevatal.id/mcp"
   },
   "capabilities": {
     "tools": true,

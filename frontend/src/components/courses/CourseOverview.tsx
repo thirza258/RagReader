@@ -12,7 +12,7 @@ export default function CourseOverview({ course, completed }: { course: Course; 
   const nextId = nextIncompleteLesson(course.lessons.map((lesson) => lesson.id), completed) || course.lessons[0].id;
   return (
     <>
-      <SEO title={`${course.title} — RAGReader Courses`} description={course.description} canonicalUrl={`https://rag.nevatal.tech/courses/${course.id}`} />
+      <SEO title={`${course.title} — RAGReader Courses`} description={course.description} canonicalUrl={`https://rag.nevatal.id/courses/${course.id}`} />
       <Link to="/courses" className="link inline-flex items-center gap-2 text-sm"><ArrowLeft className="h-4 w-4" aria-hidden="true" />All courses</Link>
       <header className="mt-8 grid gap-8 border-b border-border pb-10 lg:grid-cols-[1fr_18rem] lg:gap-16">
         <div>
