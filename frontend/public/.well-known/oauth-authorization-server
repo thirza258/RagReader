@@ -49,5 +49,10 @@
       ],
       "claim_uri": "https://rag.nevatal.id/api/agent/claim"
     }
-  }
+  },
+  "poppy_domains": [
+    "rag.nevatal.id"
+  ],
+  "revocation_endpoint": "https://rag.nevatal.id/api/agent/revoke",
+  "device_authorization_endpoint": "https://rag.nevatal.id/oauth/device_authorization"
 }

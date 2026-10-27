@@ -1,0 +1,9 @@
+# RagReader Agent
+
+> Multi-hop RAG research assistant for interactive document analysis and question answering.
+
+- Site: https://rag.nevatal.id/
+- Agent card: https://rag.nevatal.id/.well-known/agent-card.json
+- MCP server card: https://rag.nevatal.id/.well-known/mcp/server-card.json
+- API catalog: https://rag.nevatal.id/.well-known/api-catalog
+- API docs: https://rag.nevatal.id/api/docs

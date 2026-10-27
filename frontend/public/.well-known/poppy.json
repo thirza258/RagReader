@@ -1,0 +1,46 @@
+{
+  "protocol_version": "0.1",
+  "organization": {
+    "name": "Nevatal",
+    "domain": "rag.nevatal.id"
+  },
+  "auth": {
+    "issuer": "https://rag.nevatal.id",
+    "direct": {
+      "scopes": [
+        "poppy:read",
+        "poppy:write"
+      ]
+    },
+    "device": {
+      "scopes": [
+        "poppy:read",
+        "poppy:write"
+      ]
+    }
+  },
+  "agent": {
+    "protocols": [
+      {
+        "type": "poppy",
+        "endpoint": "https://rag.nevatal.id/api"
+      }
+    ]
+  },
+  "apis": [
+    {
+      "type": "openapi",
+      "url": "https://rag.nevatal.id/api/openapi.json",
+      "description": "RagReader API"
+    },
+    {
+      "type": "mcp",
+      "url": "https://rag.nevatal.id/mcp",
+      "description": "RagReader MCP server"
+    }
+  ],
+  "web": {
+    "browser_session_endpoint": "https://rag.nevatal.id/"
+  },
+  "extensions": {}
+}

@@ -1,0 +1,42 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "RagReader",
+    "identifier": "did:web:rag.nevatal.id"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:rag.nevatal.id:server:mcp",
+      "displayName": "RagReader MCP Server",
+      "type": "application/mcp-server-card+json",
+      "url": "https://rag.nevatal.id/.well-known/mcp/server-card.json",
+      "representativeQueries": [
+        "explore RagReader",
+        "discover RagReader capabilities",
+        "use rag document chat"
+      ]
+    },
+    {
+      "identifier": "urn:air:rag.nevatal.id:agent:a2a",
+      "displayName": "RagReader A2A Agent",
+      "type": "application/json",
+      "url": "https://rag.nevatal.id/.well-known/agent-card.json",
+      "representativeQueries": [
+        "explore RagReader",
+        "discover RagReader capabilities",
+        "use rag document chat"
+      ]
+    },
+    {
+      "identifier": "urn:air:rag.nevatal.id:api:v1",
+      "displayName": "RagReader API",
+      "type": "application/json",
+      "url": "https://rag.nevatal.id/api",
+      "representativeQueries": [
+        "explore RagReader",
+        "discover RagReader capabilities",
+        "use rag document chat"
+      ]
+    }
+  ]
+}
