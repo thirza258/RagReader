@@ -853,9 +853,14 @@ const LandingPage: React.FC = () => {
           </div>
 
           <div className="mt-10 flex flex-col gap-2 border-t border-border pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              © {new Date().getFullYear()} RAGReader · Open source under the MIT licence · Self-hosted RAG workbench
-            </span>
+            <div className="flex flex-col gap-1">
+              <span>
+                © {new Date().getFullYear()} RAGReader · Open source under the MIT licence · Self-hosted RAG workbench
+              </span>
+              <span className="text-[11px] text-muted-foreground/80">
+                This project is under nevatal.id for educational purposes.
+              </span>
+            </div>
             <div className="flex items-center gap-4">
               <Link to="/privacy" className="link">Privacy Policy</Link>
               <span>•</span>

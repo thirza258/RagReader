@@ -188,8 +188,11 @@ export default function Legal() {
           </div>
         )}
 
-        <footer className="mt-12 border-t border-border pt-6 text-xs text-muted-foreground flex items-center justify-between">
-          <p>RAGReader · Self-Hosted Multi-Pipeline RAG Benchmark</p>
+        <footer className="mt-12 border-t border-border pt-6 text-xs text-muted-foreground flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div>
+            <p>RAGReader · Self-Hosted Multi-Pipeline RAG Benchmark</p>
+            <p className="text-[11px] text-muted-foreground/80">This project is under nevatal.id for educational purposes.</p>
+          </div>
           <p>Contact: nevatalapp@gmail.com</p>
         </footer>
       </main>
