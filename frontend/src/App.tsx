@@ -15,6 +15,7 @@ import ErrorPage from "./pages/ErrorPage";
 import LoadingPage from "./pages/LoadingPage";
 import GroundTruthSelector from "./pages/GroundTruth";
 import Docs from "./pages/Docs";
+import Legal from "./pages/Legal";
 
 const Courses = lazy(() => import("./pages/Courses"));
 const coursePage = (
@@ -62,6 +63,8 @@ function App() {
 
         <Route element={<LandingPageLayout />}>
           <Route path="/docs" element={<Docs />} />
+          <Route path="/privacy" element={<Legal />} />
+          <Route path="/terms" element={<Legal />} />
           <Route path="/courses/:courseId?/:lessonId?" element={coursePage} />
           <Route path="/courses/*" element={coursePage} />
         </Route>
