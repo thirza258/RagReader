@@ -65,7 +65,7 @@ export const steps: DocStep[] = [
     id: 6,
     title: "Trigger Deep Analysis",
     description:
-      "Click the green 'Deep Analysis' button located directly below the assistant's response to benchmark multiple pipelines against the document.",
+      "Click the 'Deep Analysis' button located directly below the assistant's response to benchmark multiple pipelines against the document.",
     imagePath: triggerDeepImage,
     imageAlt: "Deep Analysis Action Button under Chat Response",
     imagePlaceholderText: "Deep Analysis Button",
