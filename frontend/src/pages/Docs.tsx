@@ -16,8 +16,8 @@ const Docs: React.FC = () => {
         <header className="border-b border-border pb-12">
           <h1 className="text-4xl font-semibold">RAGReader, step by step</h1>
           <p className="prose-note measure mt-4">
-            Every screen you'll pass through, from signing in to reading the
-            evaluation metrics for each retrieval method and model.
+            Every screen you'll pass through, from exploring the benchmark to reading
+            the evaluation metrics for each retrieval method and model.
           </p>
           <p className="mt-5 text-sm text-muted-foreground">
             Learn the ideas behind each step in the <Link to="/courses" className="link">full RAG courses</Link>, from fundamentals to all 13 optional modules.
@@ -32,16 +32,16 @@ const Docs: React.FC = () => {
                   {String(step.id).padStart(2, "0")}
                 </p>
                 <h2 className="mt-2 text-xl font-semibold">{step.title}</h2>
-                <p className="prose-note mt-3 text-base">{step.description}</p>
+                <div className="prose-note mt-3 text-base">{step.description}</div>
               </div>
 
-              <figure className="border border-border">
+              <figure className="overflow-hidden border border-border bg-card">
                 {step.imagePath ? (
                   <img
                     src={step.imagePath}
                     alt={step.imageAlt}
                     loading="lazy"
-                    className="aspect-video w-full object-cover"
+                    className="block h-auto w-full object-contain"
                   />
                 ) : (
                   <div className="flex aspect-video w-full items-center justify-center bg-muted px-4 text-center text-xs text-muted-foreground">
