@@ -22,91 +22,6 @@ const signUp = async (email: string, username: string) => {
     return response.data;
 };
 
-const submitFile = async ( 
-    file: File,
-    username: string
-) => {
-    const formData = new FormData();
-    formData.append("FILE", file);
-    formData.append("USER", username);
-
-    const response = await apiClient.post("/insert-data/", formData, {
-        headers: {
-            "Content-Type": "multipart/form-data",
-        },
-    });
-
-    return response.data;
-};
-
-const submitURL = async (
-    url: string,
-    username: string
-) => {
-    const response = await apiClient.post(
-        "/insert-url/",
-        {
-            URL: url,
-            USER: username,
-        },
-        {
-            headers: {
-                "Content-Type": "application/json",
-            },
-        }
-    );
-
-    return response.data;
-};
-
-const submitText = async (
-    text: string,
-    username: string
-) => {
-    const response = await apiClient.post("/insert-text/", {
-        TEXT: text,
-        USER: username,
-    },
-    {
-        headers: {
-            "Content-Type": "application/json",
-        },
-    }
-);
-
-    return response.data;
-};
-
-const generateChat = async (
-    query: string,
-    username: string
-) => {
-    const response = await apiClient.post("/query/", {
-        QUERY: query,
-        USER: username,
-    });
-
-    return response.data;
-};
-
-const openChat = async (
-    username: string,
-    retry = false
-) => {
-    const response = await apiClient.post("/open-chat/", {
-        USER: username,
-        retry,
-    });
-    return response.data;
-};
-
-const getJobStatus = async (
-    jobId: string
-) => {
-    const response = await apiClient.get(`/job-status/${jobId}/`);
-    return response.data;
-};
-
 const startDeepAnalysis = async (
     conversation_id: string,
     config?: Partial<DeepAnalysisConfig>,
@@ -136,11 +51,6 @@ const getAnalysisStatus = async (jobId: string, conversationId?: string): Promis
 
 
 
-
-const cleanSystem = async () => {
-    const response = await apiClient.get("/clean/");
-    return response.data;
-};
 
 const jsonConfig = {
   headers: {
@@ -264,32 +174,8 @@ const getConversation = async (conversation_id: string) => {
   return response.data;
 };
 
-const getDocumentInfo = async (username: string) => {
-  const response = await apiClient.get(
-    `/document/${username}/`,
-    jsonConfig
-  );
-  return response.data;
-}
-
-const getConversationHistory = async (username: string) => {
-  const response = await apiClient.get(
-    `/conversation-history/${username}/`,
-    jsonConfig
-  );
-  return response.data;
-}
-
-
 export default {
-    submitFile,
-    submitURL,
-    generateChat,
-    cleanSystem,
     signUp,
-    submitText,
-    openChat,
-    getJobStatus,
     startDeepAnalysis,
     getAnalysisConfig,
     createChunk,
@@ -301,7 +187,5 @@ export default {
     PostResponseEvaluationResult,
     getChunk,
     getConversation,
-    getDocumentInfo,
-    getConversationHistory,
     getAnalysisStatus
 };

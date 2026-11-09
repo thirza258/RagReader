@@ -22,6 +22,11 @@ const Docs: React.FC = () => {
           <p className="mt-5 text-sm text-muted-foreground">
             Learn the ideas behind each step in the <Link to="/courses" className="link">full RAG courses</Link>, from fundamentals to all 13 optional modules.
           </p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Documents, the reader and chat now share one screen: the{" "}
+            <Link to="/workspace" className="link">workspace</Link>. Some screenshots below still show the
+            earlier single-document chat.
+          </p>
         </header>
 
         <ol>

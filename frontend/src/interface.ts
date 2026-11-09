@@ -1,17 +1,5 @@
 import type { OnErrorCallback, OnProgressCallback, OnResultCallback } from "./services/websocket";
 
-export interface ChatResponse {
-  status: number;
-  message: string;
-  timestamp: number;
-  data: {
-    answer: string;
-    context?: string[];
-    conversation_id?: string;
-    document_id?: string;
-  };
-}
-
 export interface RetrievedChunk {
   id: string | number;
   text: string;
@@ -318,19 +306,4 @@ export interface GroundTruthChunkRecord {
 export interface GroundTruthChunkResponse {
   ground_truth_chunks: GroundTruthChunkRecord[];
   source: GroundTruthMode | null;
-}
-
-export interface FileMetadata {
-  id: string;
-  name: string;
-  source_type: string;
-  source_path: string;
-  extracted_text_path: string;
-  created_at: string;
-}
-
-export interface ConversationItem {
-  query: string;
-  response: string;
-  created_at: string;
 }

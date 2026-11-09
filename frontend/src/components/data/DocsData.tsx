@@ -34,38 +34,40 @@ export const steps: DocStep[] = [
     id: 3,
     title: "Document Ingestion",
     description:
-      "Insert a PDF URL, upload a local file, or paste raw text directly. The system prepares and indexes your data for the knowledge base.",
+      "Upload PDF, Word, text or Markdown files, add a web page URL, or paste raw text. Each source becomes a document in your workspace library.",
     imagePath: pdfInputImage,
     imageAlt: "Document Upload Interface",
     imagePlaceholderText: "Document Upload Image",
   },
   {
     id: 4,
-    title: "Initialization & Vector Indexing",
+    title: "Background Ingestion & Vector Indexing",
     description:
-      "The system initializes and vectors your document into chunks. A real-time loading indicator shows processing and vectorization progress.",
+      "Documents are processed in the background. The workspace library shows each step as it happens — text extracted, content cleaned, chunks created, embeddings generated, index built — and failed steps can be retried.",
     imagePath: initImage,
     imageAlt: "Document Vectorization and Initialization State",
     imagePlaceholderText: "Loading State",
   },
   {
     id: 5,
-    title: "Chat Interaction & Initial Retrieval",
+    title: "Workspace Chat with Citations",
     description: (
       <>
-        Engage with the chatbot to ask questions. By default, it utilizes{" "}
-        <em>dense retrieval</em> to fetch relevant context and ground the initial answer.
+        Ask questions in a workspace conversation. Answers stream in, grounded with{" "}
+        <em>dense retrieval</em>, and every claim carries a numbered citation — click one to
+        open the passage, highlighted, in the reader. Conversations are saved, so you can
+        come back to them later.
       </>
     ),
     imagePath: chatInterfaceImage,
-    imageAlt: "Chatbot QA Interface",
-    imagePlaceholderText: "Chatbot Interface",
+    imageAlt: "Workspace chat with cited answers",
+    imagePlaceholderText: "Workspace Chat",
   },
   {
     id: 6,
     title: "Trigger Deep Analysis",
     description:
-      "Click the 'Deep Analysis' button located directly below the assistant's response to benchmark multiple pipelines against the document.",
+      "Click the 'Deep analysis' button below an answer about a single document to benchmark multiple pipelines against that document.",
     imagePath: triggerDeepImage,
     imageAlt: "Deep Analysis Action Button under Chat Response",
     imagePlaceholderText: "Deep Analysis Button",

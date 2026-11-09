@@ -1,19 +1,10 @@
 import type { AnalysisRunState } from "../components/DeepSidebar";
 import type { AnalysisConfigOptions, DeepAnalysisConfig } from "../interface";
 
-export type UserRole = "me" | "bot";
-
 export type EvalScore = {
   mrr5?: number;
   precision3?: number;
   recall3?: number;
-};
-
-export type Message = {
-  user: UserRole;
-  text: string;
-  conversationId?: string;
-  documentId?: string;
 };
 
 export type EmbeddingStatus = "embedded" | "pending" | "failed";
@@ -55,12 +46,4 @@ export type ErrorState = {
   error: string;
   status: number;
   message: string;
-};
-
-export type JobStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
-
-export type ChatbotContextType = {
-  username: string | null;
-  documentId: string | null;
-  setContext: (context: { username: string; documentId: string }) => void;
 };

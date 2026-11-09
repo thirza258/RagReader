@@ -94,6 +94,48 @@
     @apply text-primary underline decoration-primary/30 underline-offset-[3px]
            transition-colors hover:decoration-primary;
   }
+
+  /* Chat answers: model-written markdown, set like the rest of the prose. */
+  .answer-markdown {
+    @apply font-serif text-[0.98rem] leading-7 text-foreground/90;
+  }
+  .answer-markdown > * + * {
+    @apply mt-3;
+  }
+  .answer-markdown h1,
+  .answer-markdown h2,
+  .answer-markdown h3,
+  .answer-markdown h4 {
+    @apply mt-4 text-base font-semibold;
+  }
+  .answer-markdown ul {
+    @apply list-disc pl-5;
+  }
+  .answer-markdown ol {
+    @apply list-decimal pl-5;
+  }
+  .answer-markdown li + li {
+    @apply mt-1;
+  }
+  .answer-markdown blockquote {
+    @apply border-l-2 border-border pl-3 text-muted-foreground;
+  }
+  .answer-markdown code {
+    @apply bg-muted px-1 font-mono text-[0.85em];
+  }
+  .answer-markdown pre {
+    @apply overflow-x-auto bg-muted p-3 text-[0.85em] leading-6;
+  }
+  .answer-markdown pre code {
+    @apply bg-transparent p-0;
+  }
+  .answer-markdown table {
+    @apply block overflow-x-auto font-sans text-sm;
+  }
+  .answer-markdown th,
+  .answer-markdown td {
+    @apply border border-border px-2 py-1 text-left;
+  }
 }
 
 .custom-scrollbar::-webkit-scrollbar {

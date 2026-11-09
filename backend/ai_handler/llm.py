@@ -187,6 +187,101 @@ class OpenRouterLLM(BaseLLM):
                         continue
             raise provider_error(e, "Answer generation", self.model) from e
 
+    # ── Streaming ────────────────────────────────────────────────────────────
+    # Engines (and therefore this LLM) are shared between threads, so nothing
+    # below stores per-call state on the instance: the model that answered,
+    # the usage and the first-token flag all live in local variables.
+
+    def stream_chat(self, messages, temperature=None):
+        """Stream an answer to chat `messages`.
+
+        Yields text deltas (str) and, last, one StreamResult with the model
+        that actually answered and the token usage. Like `_call_api`, a
+        credit-exhaustion error falls back to the free models — but only
+        before the first token, since text already sent cannot be retracted.
+        """
+        temperature = self.temperature if temperature is None else temperature
+        try:
+            yield from self._stream_model(self.model, messages, temperature)
+            return
+        except _FailedBeforeFirstToken as failure:
+            original = failure.cause
+        if isinstance(original, PipelineError):
+            raise original
+        if not is_credit_exhausted_error(original):
+            raise provider_error(original, "Answer generation", self.model) from original
+        logger.warning("OpenRouter credits exhausted (%s), falling back to shuffled free models", original)
+        for free_model in get_shuffled_free_models():
+            try:
+                logger.info("Retrying stream with free fallback model: %s", free_model)
+                yield from self._stream_model(free_model, messages, temperature)
+                logger.info("Fallback stream succeeded with free model: %s", free_model)
+                return
+            except _FailedBeforeFirstToken as failure:
+                logger.warning("Free model %s failed: %s", free_model, failure.cause)
+        raise provider_error(original, "Answer generation", self.model) from original
+
+    def _stream_model(self, model, messages, temperature):
+        started = False
+        stream = None
+        try:
+            stream = self.client.chat.completions.create(
+                model=model, messages=messages, temperature=temperature,
+                stream=True, stream_options={"include_usage": True},
+            )
+            answered_by, usage, finish_reason = model, None, None
+            for chunk in stream:
+                answered_by = getattr(chunk, "model", None) or answered_by
+                chunk_usage = getattr(chunk, "usage", None)
+                if chunk_usage is not None:
+                    usage = _usage_dict(chunk_usage)
+                for choice in getattr(chunk, "choices", None) or []:
+                    delta = getattr(getattr(choice, "delta", None), "content", None)
+                    if isinstance(delta, str) and delta:
+                        started = True
+                        yield delta
+                    finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+            if not started:
+                raise PipelineError("empty_model_response", f"OpenRouter returned an empty answer for {model}. Try again.", retryable=True, http_status=502)
+            yield StreamResult(model=answered_by, usage=usage, finish_reason=finish_reason)
+        except Exception as exc:
+            if not started:
+                raise _FailedBeforeFirstToken(exc) from exc
+            raise provider_error(exc, "Answer generation", model) from exc
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.debug("Could not close the answer stream", exc_info=True)
+
+
+class StreamResult:
+    """The end of a `stream_chat` stream."""
+
+    __slots__ = ("model", "usage", "finish_reason")
+
+    def __init__(self, model, usage=None, finish_reason=None):
+        self.model = model
+        self.usage = usage
+        self.finish_reason = finish_reason
+
+
+class _FailedBeforeFirstToken(Exception):
+    def __init__(self, cause):
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def _usage_dict(usage):
+    values = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key) if isinstance(usage, dict) else getattr(usage, key, None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            values[key] = value
+    return values or None
+
 
 # ── Named defaults ───────────────────────────────────────────────────────────
 # Kept as separate classes because call sites read better as `MistralLLM()`

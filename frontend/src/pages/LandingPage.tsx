@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AxiosError } from "axios";
 
-import service from "../services/service";
 import { SubmitPayload } from "../types/types";
+import { createDocument } from "../features/documents/api/documents";
+import { loginPathFor } from "../features/auth/lib/redirect";
+import { getToken } from "../features/auth/lib/session";
 
 import FileSubmit from "../components/FileSubmit";
 import SEO from "../components/SEO";
@@ -169,11 +170,11 @@ const STACK = [
 const FAQ = [
   {
     q: "What does RAGReader actually do?",
-    a: "You add a document, ask a question, and get an answer from dense retrieval. Clicking that answer opens a deep analysis that re-runs the same question through every combination of retrieval method and LLM you selected — up to nine pipelines — and scores each one against ground truth.",
+    a: "You add documents to a workspace, ask a question, and get a streamed answer from dense retrieval with citations you can click to read the passage. From an answer about a single document, Deep analysis re-runs the same question through every combination of retrieval method and LLM you selected — up to nine pipelines — and scores each one against ground truth.",
   },
   {
     q: "What can I upload?",
-    a: "A PDF file, a web page URL (the HTML is fetched and reduced to text), or text pasted straight into the form. One source at a time.",
+    a: "A PDF, Word (DOCX), plain-text or Markdown file up to 25 MB, a web page URL (the page is fetched on the server and reduced to text), or text pasted straight into the form. Each becomes a document in your workspace library, processed in the background.",
   },
   {
     q: "Do I need my own API keys?",
@@ -244,44 +245,21 @@ const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
+  // The upload is acknowledged at once (202) and processed in the background;
+  // the workspace shows its progress. Errors are shown inline by FileSubmit.
   const handleSubmit = async (payload: SubmitPayload) => {
-    const username = localStorage.getItem("username");
-    if (!username) {
-      navigate("/login");
+    if (!getToken()) {
+      navigate(loginPathFor("/"));
       return;
     }
-    try {
-      switch (payload.type) {
-        case "file":
-          await service.submitFile(payload.file, username);
-          break;
-
-        case "url":
-          await service.submitURL(payload.url, username);
-          break;
-
-        case "text":
-          await service.submitText(payload.text, username);
-          break;
-      }
-      navigate("/loading");
-    } catch (error) {
-      navigate("/error", {
-        state: {
-          status:
-            error instanceof AxiosError && error.response?.status
-              ? error.response.status
-              : 500,
-          error: "Failed to submit",
-          message:
-            error instanceof AxiosError
-              ? error.response?.data?.message ||
-                error.message ||
-                "Failed to submit."
-              : (error as Error)?.message || "Failed to submit.",
-        },
-      });
-    }
+    const { document } = await createDocument(
+      payload.type === "file"
+        ? { kind: "file", file: payload.file }
+        : payload.type === "url"
+          ? { kind: "url", url: payload.url }
+          : { kind: "text", text: payload.text },
+    );
+    navigate(`/workspace?document=${document.id}`);
   };
 
   const toggleFaq = (idx: number) => {
@@ -356,7 +334,8 @@ const LandingPage: React.FC = () => {
             Add a document
           </h2>
           <p className="prose-note measure mt-4">
-            One source at a time: a PDF, a web page URL, or pasted text. New here?{" "}
+            A PDF, Word or text file, a web page URL, or pasted text. It opens in
+            your workspace while it is processed, ready to read and ask about. New here?{" "}
             <Link to="/docs" className="link">
               Walk through the whole flow in screenshots
             </Link>{" "}

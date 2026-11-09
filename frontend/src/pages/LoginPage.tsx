@@ -1,31 +1,41 @@
 import React, { useState } from "react";
 import service from "../services/service";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import SEO from "../components/SEO";
+import { sanitizeNextPath } from "../features/auth/lib/redirect";
+import { saveSession } from "../features/auth/lib/session";
 
 const LoginPage: React.FC = () => {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [formError, setFormError] = useState("");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Only a path on this site is followed; anything else falls back to home.
+  const next = sanitizeNextPath(searchParams.get("next"));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !email) {
-      alert("Please enter both username and email.");
+      setFormError("Enter both a username and an email.");
       return;
     }
+    setFormError("");
     service
       .signUp(email, username)
       .then((response) => {
         if (response.status !== 200 && response.status !== 201) {
           throw new Error(response.message);
         }
-        const { username, email } = response.data;
+        const { username, email, token } = response.data;
 
-        localStorage.setItem("username", username);
-        localStorage.setItem("email", email);
+        saveSession({ username, email, token });
+        if (!token) {
+          setFormError("Signed in, but the server did not issue an access token, so the workspace cannot be opened. Try again later.");
+          return;
+        }
 
-        navigate("/");
+        navigate(next ?? "/", { replace: true });
       })
       .catch((error) => {
         navigate("/error", {
@@ -58,6 +68,11 @@ const LoginPage: React.FC = () => {
         <p className="mt-1 text-sm text-muted-foreground">
           A username and email is all it takes — no password.
         </p>
+        {next && next !== "/" && (
+          <p className="mt-3 border-l-2 border-primary/50 pl-3 text-sm">
+            Sign in to continue where you were.
+          </p>
+        )}
 
         <div className="mt-8 space-y-5">
           <div>
@@ -93,6 +108,12 @@ const LoginPage: React.FC = () => {
             />
           </div>
         </div>
+
+        {formError && (
+          <p role="alert" className="mt-6 border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {formError}
+          </p>
+        )}
 
         <button
           type="submit"

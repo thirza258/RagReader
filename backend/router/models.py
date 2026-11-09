@@ -11,13 +11,42 @@ class GuestUser(models.Model):
     def __str__(self):
         return self.username
 
+    # DRF's IsAuthenticated reads these. A GuestUser only becomes
+    # request.user through workspace.auth.GuestTokenAuthentication, i.e. after
+    # a valid token was presented, so it is always an authenticated identity.
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
 class Document(models.Model):
+    class Status(models.TextChoices):
+        UPLOADING = "UPLOADING"
+        QUEUED = "QUEUED"
+        EXTRACTING = "EXTRACTING"
+        CLEANING = "CLEANING"
+        CHUNKING = "CHUNKING"
+        EMBEDDING = "EMBEDDING"
+        INDEXING = "INDEXING"
+        READY = "READY"
+        FAILED = "FAILED"
+
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
+    # Nullable because legacy rows predate workspaces; the backfill migration
+    # and every insert path since assign one.
+    workspace = models.ForeignKey(
+        "workspace.Workspace", null=True, blank=True,
+        on_delete=models.CASCADE, related_name="documents",
+    )
     name = models.CharField(max_length=255)
     source_type = models.CharField(
         max_length=20,
         choices=[
             ("pdf", "PDF"),
+            ("docx", "DOCX"),
             ("url", "URL"),
             ("text", "Text"),
             ("txt", "TXT"),
@@ -28,7 +57,24 @@ class Document(models.Model):
     file = models.TextField(null=True, blank=True)
     extracted_text_path = models.TextField(null=True, blank=True)
     source_path = models.TextField(null=True, blank=True)
-    source_url = models.URLField(null=True, blank=True)
+    # Real-world article URLs routinely exceed URLField's default 200.
+    source_url = models.URLField(max_length=2048, null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    status_detail = models.CharField(max_length=255, blank=True)
+    progress = models.PositiveSmallIntegerField(default=0)
+    error_stage = models.CharField(max_length=16, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.TextField(blank=True)
+    retryable = models.BooleanField(default=False)
+    mime_type = models.CharField(max_length=100, blank=True)
+    file_size = models.BigIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    # The dense index chat answers from (the PRD's current_index_version_id).
+    current_index = models.ForeignKey(
+        "DocumentVector", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    ingested_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -100,7 +146,12 @@ class Job(models.Model):
         PROCESSING = "PROCESSING"
         READY = "READY"
         FAILED = "FAILED"
+
+    class Kind(models.TextChoices):
+        INITIALIZE = "initialize"
+        INGEST = "ingest"
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.INITIALIZE)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     progress = models.PositiveSmallIntegerField(default=0)
     user = models.ForeignKey(GuestUser, on_delete=models.CASCADE)
@@ -128,9 +179,13 @@ class Job(models.Model):
         from django.utils import timezone
         cutoff = timezone.now() - timedelta(minutes=35)
         if self.status in (self.Status.PENDING, self.Status.PROCESSING) and self.updated_at < cutoff:
+            if self.kind == self.Kind.INGEST:
+                code, message = "ingestion_timeout", "Ingestion stopped making progress. Retry ingestion to resume from the saved embeddings."
+            else:
+                code, message = "initialization_timeout", "Initialization stopped making progress. Retry initialization to create a new job."
             type(self).objects.filter(pk=self.pk, status=self.status, updated_at=self.updated_at).update(
-                status=self.Status.FAILED, error_code="initialization_timeout", retryable=True,
-                error_message="Initialization stopped making progress. Retry initialization to create a new job.",
+                status=self.Status.FAILED, error_code=code, retryable=True,
+                error_message=message,
                 updated_at=timezone.now(),
             )
             self.refresh_from_db()

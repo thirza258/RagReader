@@ -1,4 +1,5 @@
 import React, { RefObject, ChangeEvent } from "react";
+import { ACCEPT_ATTRIBUTE } from "../../features/documents/lib/uploadValidation";
 
 interface FileUploadProps {
   // React 19 types `useRef<T>(null)` as RefObject<T | null>.
@@ -9,10 +10,9 @@ interface FileUploadProps {
   onClear?: () => void;
 }
 
-// Kept in step with what the backend's DataLoader can actually read, so the
+// Kept in step with what the backend's upload validation accepts, so the
 // picker never offers a file the upload would reject.
-const ACCEPTED_FILE_TYPES =
-  ".pdf,.txt,.md,.markdown,text/plain,text/markdown,application/pdf";
+const ACCEPTED_FILE_TYPES = ACCEPT_ATTRIBUTE;
 
 export const FileUploadSection: React.FC<FileUploadProps> = ({
   inputRef,
@@ -25,7 +25,7 @@ export const FileUploadSection: React.FC<FileUploadProps> = ({
     <div className="mb-1.5 flex items-baseline justify-between">
       <label htmlFor="file-upload" className="text-sm font-medium">
         Upload a file{" "}
-        <span className="font-normal text-muted-foreground">(PDF, TXT, MD)</span>
+        <span className="font-normal text-muted-foreground">(PDF, DOCX, TXT, MD · up to 25 MB)</span>
       </label>
       {fileName && !disabled && (
         <button

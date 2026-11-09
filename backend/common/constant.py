@@ -191,6 +191,20 @@ DEFAULT_VECTOR_STORE_PATH = os.getenv("RAG_VECTOR_STORE_PATH", "./vector_stores"
 
 CHUNK_STRATEGIES = ["fixed", "paragraph", "semantic"]
 
+
+# ── Workspace chat ───────────────────────────────────────────────────────────
+# How many passages each question scores across all documents in scope before
+# the prompt is built, and how many of those the model actually sees. The gap
+# is what the "Retrieved 20 → 5 sources" status line reports.
+CHAT_CANDIDATE_K = 20
+CHAT_CONTEXT_K = 5
+# Completed messages (user and assistant) used to rewrite a follow-up into a
+# standalone search query and given to the model as conversation history.
+CHAT_HISTORY_MESSAGES = 6
+# Stamped on every answer's retrieval metadata; bump it whenever
+# common.prompt_builder.cited_chat_messages changes what the model is told.
+CHAT_PROMPT_VERSION = "chat-cited-v1"
+
 INGEST_CONFIG = {
     "embedding_model": DEFAULT_EMBEDDING_MODEL,
     "chunk_strategy": DEFAULT_CHUNK_STRATEGY,

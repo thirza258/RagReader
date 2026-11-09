@@ -2,7 +2,6 @@ import io
 import os
 
 import re
-import requests
 from typing import Union
 from bs4 import BeautifulSoup
 import PyPDF2
@@ -129,9 +128,18 @@ class DataLoader:
             }
 
         # ---------- Raw Text ----------
-        text = source if isinstance(source, str) else ""
-        text_path = DataLoader._save_text(base_path, text)
+        return DataLoader.process_text(source if isinstance(source, str) else "", username, base_path)
 
+    @staticmethod
+    def process_text(text: str, username: str, base_path: str | None = None) -> dict:
+        """Store `text` verbatim as a pasted-text document.
+
+        Pasted text must never go through `process_input`: that routes strings
+        ending in .pdf/.txt/.md to the server's filesystem and strings starting
+        with http(s) to a fetch, so a "paste" of `/app/requirements.txt` would
+        read a server file into the caller's document.
+        """
+        text_path = DataLoader._save_text(base_path or _document_base_path(username), text)
         return {
             "user": username,
             "text": text,
@@ -203,12 +211,15 @@ class DataLoader:
 
     @staticmethod
     def _fetch_url(url: str) -> str:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.text
+        # Same SSRF guard as the workspace API (no private/loopback/metadata
+        # addresses, redirects re-checked, proxies ignored, size-capped).
+        from workspace.services.url_fetch import fetch_url
+
+        result = fetch_url(url)
+        try:
+            return result.body.decode(result.charset or "utf-8", errors="replace")
+        except LookupError:  # an unknown charset name in the response header
+            return result.body.decode("utf-8", errors="replace")
 
     @staticmethod
     def _extract_text_from_html(html: str) -> str:

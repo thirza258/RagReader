@@ -125,7 +125,7 @@ class DenseRAGPipeline(BasePipeline):
         
         chunks_with_ids = self._sync_chunks(document, chunks)
         
-        self.rag.index_documents(chunks_with_ids)
+        self.rag.index_documents(chunks_with_ids, embedding_cache=self._embedding_cache_for(document))
 
         file_name = f"{username}_{document.pk}_dense_{uuid.uuid4().hex[:6]}.pkl"
         save_path = os.path.join(self.vector_store_root, file_name)
