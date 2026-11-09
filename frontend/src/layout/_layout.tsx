@@ -1,5 +1,4 @@
 import NavBar from "../components/Navbar";
-import Sidebar from "../components/Sidebar";
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 import DeepSidebar, { AnalysisRunState } from "../components/DeepSidebar";
 import { AnalysisRequest, DeepResultContextType } from "../types/types";
@@ -7,18 +6,14 @@ import { AnalysisRequest, DeepResultContextType } from "../types/types";
 import { useState } from "react";
 import type { AnalysisConfigOptions } from "../interface";
 
-const ChatLayout = () => {
-
-
+/** Full-height app frame: the fixed navbar, then a page that scrolls inside its own panes. */
+const WorkspaceLayout = () => {
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
       <NavBar />
-      <div className="flex flex-1 overflow-hidden pt-16">
-        <Sidebar />
-        <main className="relative flex-1 overflow-y-auto bg-background">
-           <Outlet />
-        </main>
-      </div>
+      <main className="flex min-h-0 flex-1 flex-col bg-background pt-16">
+        <Outlet />
+      </main>
     </div>
   );
 };
@@ -118,7 +113,7 @@ const DeepResultWorkspace = () => {
 };
 
 export {
-    ChatLayout,
+    WorkspaceLayout,
     LandingPageLayout,
     LoginPageLayout,
     DeepResultLayout

@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "evaluation",
+    "workspace",
 ]
 
 REST_FRAMEWORK = {
@@ -276,3 +277,14 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", 100 * 1024 * 1024))  # 100 MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", 50 * 1024 * 1024))   # 50 MB
 DATA_UPLOAD_MAX_NUMBER_FIELDS = int(os.getenv("DATA_UPLOAD_MAX_NUMBER_FIELDS", 10000))
+
+# ── Workspace API limits (PRD §39) ───────────────────
+# Largest file POST /api/v1/documents/ accepts. Checked against the request's
+# Content-Length before the upload is parsed, and again against the file.
+MAX_UPLOAD_BYTES = int(os.getenv("RAG_MAX_UPLOAD_BYTES", 25 * 1024 * 1024))  # 25 MB
+# Longest pasted text (source_type "text"), in characters.
+RAG_MAX_TEXT_CHARS = int(os.getenv("RAG_MAX_TEXT_CHARS", 2_000_000))
+# Largest response body the URL fetcher reads before giving up.
+RAG_MAX_URL_BYTES = int(os.getenv("RAG_MAX_URL_BYTES", 10 * 1024 * 1024))  # 10 MB
+# How many loaded document indexes chat keeps in memory per process.
+RAG_CHAT_INDEX_CACHE_SIZE = int(os.getenv("RAG_CHAT_INDEX_CACHE_SIZE", 8))

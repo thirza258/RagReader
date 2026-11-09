@@ -122,6 +122,22 @@ class BasePipeline(ABC):
         """
         return self.config.get("embedding_model") or self.config.get("model")
 
+    def _embedding_cache_for(self, document):
+        """Vectors already committed for `document` by background ingestion.
+
+        Passed to the engine's `index_documents` from inside `_build_index`, so
+        an index build reuses checkpointed embeddings instead of re-calling the
+        provider (and stays one short transaction). Read-only: a build that
+        embeds a missing text does not write it back, so a failed build leaves
+        nothing behind. Keyed by the model the dense engine really embeds with.
+        """
+        dense = getattr(self.rag, "dense_engine", self.rag)
+        model = getattr(dense, "model", None)
+        if document is None or getattr(document, "pk", None) is None or not isinstance(model, str):
+            return None
+        from workspace.services.embedding_cache import EmbeddingCache
+        return EmbeddingCache(document.pk, model)
+
     def _run_analysis_core(self, document, conversation):
         """Optional stages are entered only by analysis, never by normal chat."""
         if conversation.document_id != document.pk or conversation.user_id != document.user_id:

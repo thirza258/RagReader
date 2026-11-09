@@ -157,11 +157,12 @@ class HybridRAG(BaseRAG):
 
         self.document_metadata = []
 
-    def index_documents(self, documents: List[str]) -> None:
+    def index_documents(self, documents: List[str], embedding_cache=None) -> None:
         from copy import copy
         sparse, dense = copy(self.sparse_engine), copy(self.dense_engine)
         sparse.index_documents(documents)
-        dense.index_documents(documents)
+        # Only the dense half embeds; see DenseRAG.index_documents.
+        dense.index_documents(documents, embedding_cache=embedding_cache)
         self.sparse_engine, self.dense_engine = sparse, dense
         self._documents = documents
         self.document_metadata = [{"chunk_id": doc.get("chunk_id")} for doc in documents]

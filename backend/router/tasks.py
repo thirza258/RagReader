@@ -5,7 +5,7 @@ from celery import shared_task
 from celery.exceptions import Retry
 from django.utils import timezone
 
-from .models import Job, AnalysisBatch, AnalysisResult
+from .models import Document, DocumentVector, Job, AnalysisBatch, AnalysisResult
 from rag.rag_service import apply_retrieval_depth, engine_execution, rag_registry
 from common.constant import normalize_analysis_config
 from common.errors import PipelineError, error_payload
@@ -30,20 +30,55 @@ def initialize_rag_task(self, job_id, username, method, model_config):
         job.refresh_from_db()
         if not job.document:
             raise PipelineError("missing_document", "The initialization job has no document. Upload a document and try again.", http_status=400)
+        _document_status(job.document_id, Document.Status.CHUNKING, status_detail="Building the search index", progress=20)
         engine = rag_registry.get_engine(method, model_config)
         with engine_execution(engine):
             if engine.init_job(job.user.username, job=job) is False:
                 raise PipelineError("initialization_failed", "The retrieval index could not be initialized. Try again.", retryable=True)
-        return bool(Job.objects.filter(pk=job.pk, status=Job.Status.PROCESSING).update(
+        ready = bool(Job.objects.filter(pk=job.pk, status=Job.Status.PROCESSING).update(
             status=Job.Status.READY, progress=100, error_message="", error_code="", retryable=False,
             updated_at=timezone.now(),
         ))
+        if ready:
+            _document_ready(job.document_id)
+        return ready
     except Exception as exc:
         logger.warning("Initialization failed for job %s", job_id, exc_info=True)
         if job is not None:
             error = error_payload(exc, code="initialization_failed", message="Document initialization failed. Try initializing this document again.")
             job.mark_failed(error["error"], error["error_code"], error["retryable"])
+            if job.document_id:
+                _document_status(
+                    job.document_id, Document.Status.FAILED, error_stage=Document.Status.CHUNKING,
+                    error_code=error["error_code"], error_message=error["error"], retryable=error["retryable"],
+                    status_detail="Failed",
+                )
         return False
+
+
+# The workspace API reads Document.status; the legacy initialization path
+# keeps it in step so a document indexed through open-chat shows as READY
+# there too.
+def _document_status(document_id, status, **fields):
+    try:
+        Document.objects.filter(pk=document_id).update(status=status, updated_at=timezone.now(), **fields)
+    except Exception:
+        logger.warning("Could not update status of document %s", document_id, exc_info=True)
+
+
+def _document_ready(document_id):
+    # Chat answers from a dense index; other methods leave the status alone.
+    vector = (
+        DocumentVector.objects.filter(document_id=document_id, status="ready", method="dense")
+        .order_by("-created_at", "-id").first()
+    )
+    if vector is None:
+        return
+    now = timezone.now()
+    _document_status(
+        document_id, Document.Status.READY, current_index=vector, progress=100, status_detail="Ready",
+        ingested_at=now, error_stage="", error_code="", error_message="", retryable=False,
+    )
 
 
 @shared_task(bind=True)

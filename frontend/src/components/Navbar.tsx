@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Menu, X, LogOut, MessageSquare } from "lucide-react";
+import { Menu, X, LogOut, FolderOpen } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -126,9 +126,9 @@ const Navbar: React.FC = () => {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer" onClick={() => navigate("/chat")}>
-                  <MessageSquare className="mr-2 h-4 w-4" />
-                  <span>Go to chat</span>
+                <DropdownMenuItem className="cursor-pointer" onClick={() => navigate("/workspace")}>
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                  <span>Workspace</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -222,11 +222,11 @@ const Navbar: React.FC = () => {
               <Button
                 onClick={() => {
                   setIsMenuOpen(false);
-                  navigate("/chat");
+                  navigate("/workspace");
                 }}
                 className="w-full"
               >
-                <MessageSquare className="h-4 w-4" /> Go to chat
+                <FolderOpen className="h-4 w-4" /> Workspace
               </Button>
               <Button variant="outline" onClick={handleLogout} className="w-full">
                 <LogOut className="h-4 w-4" /> Log out

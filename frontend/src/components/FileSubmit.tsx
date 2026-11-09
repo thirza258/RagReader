@@ -1,13 +1,14 @@
 import React, { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import FileUploadSection from "./file/FileInput";
 import UrlUploadSection from "./file/URLInput";
 import TextUploadSection from "./file/TextInput";
 import { SubmitPayload } from "../types/types";
-import { errorMessage } from "../lib/utils";
+import { toApiError } from "../services/api/errors";
+import { validatePastedText, validateSourceUrl, validateUploadFile } from "../features/documents/lib/uploadValidation";
 
 
 interface FileSubmitProps {
+  /** Uploads the source and moves on (to the workspace); rejects on failure. */
   onSubmit: (payload: SubmitPayload) => Promise<void>;
 }
 
@@ -18,10 +19,10 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
   const [url, setLocalUrl] = useState<string>("");
   const [textInput, setTextInput] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<{ code: string; message: string } | null>(null);
 
   // Reference to the file input element to clear it programmatically
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -58,23 +59,41 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
 
   const handleSubmit = async () => {
     if (!fileLocal && !url && !textInput) {
-      alert("Please upload a file, enter a URL, or paste text.");
+      setError({ code: "invalid_request", message: "Upload a file, enter a URL, or paste text." });
       return;
     }
-    setIsLoading(true);
-  
-    try {
-      if (fileLocal) {
-        await onSubmit({ type: "file", file: fileLocal });
-      } else if (url) {
-        await onSubmit({ type: "url", url });
-      } else if (textInput) {
-        await onSubmit({ type: "text", text: textInput });
+    // The same checks the backend makes, so a doomed upload is never sent.
+    let payload: SubmitPayload;
+    if (fileLocal) {
+      const problem = validateUploadFile(fileLocal);
+      if (problem) {
+        setError(problem);
+        return;
       }
-      navigate("/loading");
-    } catch (error) {
-      console.error("Error submitting:", error);
-      alert(errorMessage(error, "Failed to submit."));
+      payload = { type: "file", file: fileLocal };
+    } else if (url) {
+      const checked = validateSourceUrl(url);
+      if ("problem" in checked) {
+        setError(checked.problem);
+        return;
+      }
+      payload = { type: "url", url: checked.url };
+    } else {
+      const problem = validatePastedText(textInput);
+      if (problem) {
+        setError(problem);
+        return;
+      }
+      payload = { type: "text", text: textInput };
+    }
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      await onSubmit(payload);
+    } catch (caught) {
+      const apiError = toApiError(caught, "Failed to submit.");
+      setError({ code: apiError.code, message: apiError.message });
     } finally {
       setIsLoading(false);
     }
@@ -111,6 +130,13 @@ const FileSubmit: React.FC<FileSubmitProps> = ({
           disabled={isFileFilled || isUrlFilled}
         />
       </div>
+
+      {error && (
+        <div role="alert" className="mt-6 border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p className="text-destructive">{error.message}</p>
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">Error code: {error.code}</p>
+        </div>
+      )}
 
       <button
         onClick={handleSubmit}

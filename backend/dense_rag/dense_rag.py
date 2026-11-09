@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from typing import List, Dict, Any, Optional
 from django.conf import settings
@@ -7,6 +8,8 @@ from rag.base_rag import BaseRAG
 from common.constant import DEFAULT_EMBEDDING_MODEL
 from common.embeddings import embed_texts, validate_vectors, EMBEDDING_TIMEOUT_SECONDS
 from common.errors import PipelineError
+
+logger = logging.getLogger(__name__)
 
 class DenseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):
@@ -52,21 +55,35 @@ class DenseRAG(BaseRAG):
         """
         return embed_texts(self.client, texts, self.model)
 
-    def index_documents(self, documents: List[Dict[str, Any]]) -> None:
+    def index_documents(self, documents: List[Dict[str, Any]], embedding_cache=None) -> None:
         """
         1. Sends text to OpenAI to get vectors.
         2. Stores vectors in memory.
+
+        `embedding_cache` (workspace.services.embedding_cache.EmbeddingCache)
+        supplies vectors already committed for these texts; only the misses
+        go to the provider. Without one, every text is embedded as before.
         """
-        texts = [doc["text"] for doc in documents] 
-        
+        texts = [doc["text"] for doc in documents]
+
         metadata = [{"chunk_id": doc.get("chunk_id")} for doc in documents]
-        print(f"Embedding {len(documents)} documents using {self.model}...")
-        
-        embeddings = self._get_embeddings(texts)
+        logger.info("Embedding %s documents using %s...", len(documents), self.model)
+
+        if embedding_cache is None or not texts:
+            embeddings = self._get_embeddings(texts)
+        else:
+            embeddings = self._embed_with_cache(texts, embedding_cache)
         vectors = validate_vectors(embeddings, len(texts))
         # Commit all three fields together only after every batch validates.
         self.documents, self.document_metadata, self.document_vectors = texts, metadata, vectors
-        print("Indexing complete. Vectors stored in memory.")
+        logger.info("Indexing complete. Vectors stored in memory.")
+
+    def _embed_with_cache(self, texts: List[str], embedding_cache) -> List[Any]:
+        known = embedding_cache.lookup(texts)
+        missing = [text for text in dict.fromkeys(texts) if text not in known]
+        if missing:
+            known.update(zip(missing, self._get_embeddings(missing)))
+        return [known[text] for text in texts]
             
 
     def retrieve(self, query: str) -> List[str]:

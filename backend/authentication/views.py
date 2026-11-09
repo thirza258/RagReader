@@ -3,6 +3,7 @@ from rest_framework.generics import GenericAPIView
 from router.serializers import SignUpSerializer
 from router.models import GuestUser
 from common.schema import get_responses
+from workspace.auth import issue_token
 
 # Create your views here.
 class SignUpView(GenericAPIView):
@@ -24,6 +25,8 @@ class SignUpView(GenericAPIView):
                 "response": "User created successfully!" if created else "User already exists",
                 "username": username,
                 "email": email,
+                # Bearer token for the workspace API; a new one per sign-in.
+                "token": issue_token(user),
             }
             if created:
                 return get_responses().response_201(response_dict)

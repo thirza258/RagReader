@@ -22,6 +22,7 @@ from router.models import (
     Conversation, ConversationHistory
 )
 from router.tasks import initialize_rag_task
+from workspace.models import default_workspace_for
 
 from rag.rag_service import apply_retrieval_depth, engine_execution, rag_registry
 from router.serializers import (
@@ -71,10 +72,12 @@ class InsertDataView(GenericAPIView):
     def create_document(self, data: dict, user: GuestUser) -> Document:
         return Document.objects.create(
             user=user,
+            workspace=default_workspace_for(user),
             name=data["filename"],
             source_type=data.get("source_type", "pdf"),
             source_path=data["source_path"],
             extracted_text_path=data["text_path"],
+            metadata={"original_filename": data["filename"]},
         )
 
     def post(self, request):
@@ -107,10 +110,12 @@ class InsertURLView(GenericAPIView):
         user = GuestUser.objects.get(username=data["user"])
         document = Document.objects.create(
             user=user,
+            workspace=default_workspace_for(user),
             name=data["name"],
             source_type=data["source_type"],
             extracted_text_path=data["text_path"],
             source_path=data["source_path"],
+            source_url=data["name"][:2048],
         )
         return document
 
@@ -137,6 +142,7 @@ class InsertTextView(GenericAPIView):
         user = GuestUser.objects.get(username=data.get("user"))
         document = Document.objects.create(
             user=user,
+            workspace=default_workspace_for(user),
             name=data.get("name"),
             source_type="text",
             extracted_text_path=data.get("text_path"),
@@ -152,7 +158,7 @@ class InsertTextView(GenericAPIView):
             username = serializer.validated_data.get("USER")
             text = serializer.validated_data.get("TEXT")
 
-            data = get_loader().process_input(text, username)
+            data = get_loader().process_text(text, username)
             document = self.create_document(data)
             document.save()
 

@@ -131,6 +131,25 @@ class InsertTextEndpointTests(TestCase):
         with default_storage.open(second) as f:
             self.assertEqual(f.read().decode(), "second")
 
+    def test_insert_text_stores_a_server_path_literally(self):
+        # Regression: pasted text went through process_input, which reads any
+        # existing server file whose path ends in .txt/.md/.pdf.
+        from django.core.files.storage import default_storage
+
+        make_user("alice")
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as handle:
+            handle.write("server secret")
+        self.addCleanup(os.remove, handle.name)
+        resp = self.client.post(
+            "/api/v1/insert-text/",
+            {"USER": "alice", "TEXT": handle.name},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        doc = Document.objects.get(user__username="alice")
+        with default_storage.open(doc.extracted_text_path) as f:
+            self.assertEqual(f.read().decode(), handle.name)
+
     def test_insert_text_unknown_user_errors(self):
         resp = self.client.post(
             "/api/v1/insert-text/",

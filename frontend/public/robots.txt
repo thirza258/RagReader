@@ -9,6 +9,7 @@ Allow: /docs
 Allow: /courses
 Allow: /login
 Disallow: /chat
+Disallow: /workspace
 Disallow: /deep-result/
 Disallow: /ground-truth/
 Disallow: /loading

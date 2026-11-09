@@ -120,6 +120,29 @@ cross-encoder downloads) so the suite runs fast anywhere. The same suite is
 executed inside the backend Docker image by `./deploy.sh` before every deploy.
 
 
+## Workspace (documents, conversations, citations)
+
+The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`)
+turns RAGReader into a persistent research workspace:
+
+*   **Documents** — upload PDF, DOCX, TXT or Markdown, add a web page by URL,
+    or paste text. Every document gets a permanent ID and is ingested in the
+    background (extract → clean → chunk → embed → index), with a live status
+    checklist. Embeddings are checkpointed, so a retry resumes where a failure
+    happened instead of starting over.
+*   **Conversations** — threads are stored server-side and can span one,
+    several or all documents in a workspace.
+*   **Streamed, cited answers** — answers stream token by token over
+    server-sent events. Every claim cites a numbered source; each citation
+    resolves to the document, page, character range and passage text, so the
+    reader can jump to and highlight the evidence.
+
+Requests use a bearer token, which `POST /api/v1/sign-up/` now returns.
+URL ingestion is protected against SSRF, and uploads are checked by content.
+Endpoints, event formats, the ingestion lifecycle, security rules and known
+limitations are documented in [Workspace API](docs/workspace-api.md).
+
+
 ## Key Features
 
 ### 1. Standard Mode (Fast & Efficient)
