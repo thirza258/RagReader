@@ -6,13 +6,21 @@ password hash. Tokens are only ever issued against a password:
 * sign-up with PASSWORD creates an account (201 + token), or sets the
   password of an account created before passwords existed when the username
   *and* email match it exactly (one-time claim, 200 + token);
-* sign-in checks the password (200 + token);
-* sign-up without PASSWORD keeps its legacy response but issues no token.
+* sign-in checks the password (200 + token). The identifier is looked up as
+  an email when it contains "@" and as a username otherwise, and new
+  usernames may not contain "@", so one value can never match two accounts.
+
+Every new account has a password: sign-up without PASSWORD is a 400, so no
+claimable passwordless account can be created any more. Sign-in answers an
+account that has no password yet exactly like a wrong password, so it does
+not reveal which accounts can still be claimed.
 
 Sign-up keeps the legacy `status/message/data` envelope and only adds fields
 (`token`, and `error` on failures); sign-in and sign-out are new endpoints and
 use the workspace API's error envelope. Both sign-up and sign-in are throttled
-per client (scope "auth", settings.RAG_AUTH_THROTTLE_RATE).
+per client (scope "auth", settings.RAG_AUTH_THROTTLE_RATE) and per submitted
+account identifier (settings.RAG_AUTH_IDENTIFIER_THROTTLE_RATE), so rotating
+client addresses does not buy more guesses against one account.
 """
 import logging
 import secrets
@@ -22,7 +30,6 @@ from django.contrib.auth.hashers import check_password, get_hasher, make_passwor
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import exceptions
@@ -32,7 +39,7 @@ from rest_framework.response import Response
 from common.schema import get_responses
 from router.models import GuestUser
 from router.serializers import SignInSerializer, SignUpSerializer
-from workspace.auth import AuthRateThrottle, hash_token, issue_token
+from workspace.auth import AuthIdentifierThrottle, AuthRateThrottle, hash_token, issue_token
 from workspace.errors import ApiError, api_exception_handler, describe_exception, error_object
 from workspace.models import ApiToken
 from workspace.views.base import OwnedAPIView
@@ -45,11 +52,11 @@ ACCOUNT_EXISTS_MESSAGE = (
     "before passwords existed can be given one here, using its exact username and email."
 )
 WEAK_PASSWORD_MESSAGE = "Choose a different password."
-INVALID_CREDENTIALS_MESSAGE = "The username, email or password is incorrect."
-PASSWORD_NOT_SET_MESSAGE = (
-    "This account was created before passwords existed. Create a password for it with "
-    "its exact username and email."
+INVALID_CREDENTIALS_MESSAGE = (
+    "The username, email or password is incorrect. An account created before passwords "
+    "existed needs one first: use Create account with its exact username and email."
 )
+USERNAME_AT_MESSAGE = "Usernames cannot contain \"@\"."
 
 
 # ── Sign-up (legacy envelope) ────────────────────────────────────────────────
@@ -96,7 +103,7 @@ class SignUpView(GenericAPIView):
     # A stale token from an earlier session must not turn sign-up into a 401.
     authentication_classes = []
     permission_classes = []
-    throttle_classes = [AuthRateThrottle]
+    throttle_classes = [AuthRateThrottle, AuthIdentifierThrottle]
     throttle_scope = "auth"
 
     def get_exception_handler(self):
@@ -108,33 +115,21 @@ class SignUpView(GenericAPIView):
             return legacy_error(400, "invalid_request", INVALID_REQUEST_MESSAGE, details=serializer.errors)
         email = serializer.validated_data["EMAIL"]
         username = serializer.validated_data["USERNAME"]
-        password = serializer.validated_data.get("PASSWORD")
+        password = serializer.validated_data["PASSWORD"]
         try:
-            if password is None:
-                return self.sign_up_without_password(username, email)
             return self.sign_up_with_password(username, email, password)
         except Exception:
             logger.exception("Sign-up failed")
             return legacy_error(500, "internal_error", "Sign-up could not be completed. Try again.", retryable=True)
-
-    def sign_up_without_password(self, username, email):
-        """The pre-password behaviour, minus the token: nothing to sign in with."""
-        if GuestUser.objects.filter(username=username, email=email).exists():
-            return get_responses().response_200({"response": "User already exists", "username": username, "email": email})
-        if GuestUser.objects.filter(Q(username=username) | Q(email=email)).exists():
-            return account_exists()
-        try:
-            with transaction.atomic():
-                GuestUser.objects.create(username=username, email=email)
-        except IntegrityError:
-            return account_exists()
-        return get_responses().response_201({"response": "User created successfully!", "username": username, "email": email})
 
     def sign_up_with_password(self, username, email, password):
         by_username = GuestUser.objects.filter(username=username).first()
         by_email = GuestUser.objects.filter(email=email).first()
 
         if by_username is None and by_email is None:
+            if "@" in username:
+                return legacy_error(400, "invalid_request", INVALID_REQUEST_MESSAGE,
+                                    details={"USERNAME": [USERNAME_AT_MESSAGE]})
             user = GuestUser(username=username, email=email)
             errors = password_errors(password, user)
             if errors:
@@ -190,6 +185,16 @@ def dummy_password_hash():
     return _dummy_hashes[algorithm]
 
 
+def find_account(identifier):
+    """The account an identifier names: by email if it contains "@", else by username.
+
+    Never both. A legacy username that equals another account's email would
+    otherwise let one identifier resolve to either account.
+    """
+    field = "email" if "@" in identifier else "username"
+    return GuestUser.objects.filter(**{field: identifier}).first()
+
+
 def invalid_credentials():
     return ApiError("invalid_credentials", INVALID_CREDENTIALS_MESSAGE, status=401)
 
@@ -198,7 +203,7 @@ class SignInView(GenericAPIView):
     serializer_class = SignInSerializer
     authentication_classes = []
     permission_classes = []
-    throttle_classes = [AuthRateThrottle]
+    throttle_classes = [AuthRateThrottle, AuthIdentifierThrottle]
     throttle_scope = "auth"
 
     def get_exception_handler(self):
@@ -210,13 +215,12 @@ class SignInView(GenericAPIView):
         identifier = serializer.validated_data.get("USERNAME") or serializer.validated_data.get("EMAIL")
         password = serializer.validated_data["PASSWORD"]
 
-        matches = list(GuestUser.objects.filter(Q(username=identifier) | Q(email=identifier))[:2])
-        user = next((m for m in matches if m.username == identifier), None) or (matches[0] if matches else None)
-        if user is None:
+        user = find_account(identifier)
+        if user is None or not user.has_password:
+            # Same work and same answer as a wrong password: neither a missing
+            # account nor a still-claimable one is revealed.
             check_password(password, dummy_password_hash())
             raise invalid_credentials()
-        if not user.has_password:
-            raise ApiError("password_not_set", PASSWORD_NOT_SET_MESSAGE, status=409)
         if not user.check_password(password):
             raise invalid_credentials()
 

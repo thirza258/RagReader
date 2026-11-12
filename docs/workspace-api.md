@@ -19,12 +19,13 @@ Accounts are a username, an email and a password (Django's
 1. **Create an account** — `POST /api/v1/sign-up/` with
    `{"USERNAME": "…", "EMAIL": "…", "PASSWORD": "…"}`. The password must pass
    Django's `AUTH_PASSWORD_VALIDATORS` (length ≥ 8, not common, not only
-   digits, not similar to the username or email). Answers **201** in the
+   digits, not similar to the username or email); `PASSWORD` is required and
+   new usernames cannot contain `@`. Answers **201** in the
    legacy envelope, `{"status", "message", "timestamp", "data": {"response",
    "username", "email", "token"}}`.
 2. **Sign in** — `POST /api/v1/sign-in/` with `{"USERNAME": "…", "PASSWORD": "…"}`
-   (or `EMAIL`; either value is matched as a username first, then as an
-   email) → **200** `{"token", "username", "email", "expires_at"}`. Every
+   (or `EMAIL`; a value containing `@` is looked up as an email, anything
+   else as a username — never both) → **200** `{"token", "username", "email", "expires_at"}`. Every
    sign-in issues a new token, so a second browser does not log the first one
    out; only the newest 20 tokens per user are kept.
 3. Send the token on every request: `Authorization: Bearer rr_…` (`rr_`
@@ -43,27 +44,33 @@ Only a SHA-256 of each token is stored.
 | Weak password | 400 `invalid_request`, validator messages in `details.PASSWORD` | — |
 | Account with a password | 409 `account_exists` (no token) | 200 + token, or 401 `invalid_credentials` |
 | Username or email taken by different accounts | 409 `account_exists` | — |
-| Account from before passwords, same username **and** email | Sets the password: 200 + token, `"claimed": true` | 409 `password_not_set` |
-| Account from before passwords, other email | 409 `account_exists` | 409 `password_not_set` |
+| Account from before passwords, same username **and** email | Sets the password: 200 + token, `"claimed": true` | 401 `invalid_credentials` |
+| Account from before passwords, other email | 409 `account_exists` | 401 `invalid_credentials` |
+| No `PASSWORD` | 400 `invalid_request` (`details.PASSWORD`), nothing created | 400 `invalid_request` |
 
-An unknown account and a wrong password give byte-for-byte the same 401, and
-the unknown case still checks the password against a dummy hash, so neither
-the body nor the response time tells them apart. Claiming an account from
+An unknown account, an account from before passwords and a wrong password
+give byte-for-byte the same 401, and the first two still check the password
+against a dummy hash, so neither the body nor the response time tells them
+apart (the message tells owners of old accounts to set a password through
+Create account). Claiming an account from
 before passwords is a conditional update (only while the stored password is
 empty), so two concurrent claims cannot both win; it also revokes every
 token the account had, since those were issued to anyone who knew its
 username and email.
 
-Sign-up **without** `PASSWORD` keeps its old behaviour and response (201
-"User created successfully!" / 200 "User already exists") but never contains
-a token, so it cannot be used to sign in. Sign-up errors keep the legacy
-envelope and add the `error` object below (`data` is `null`).
+Sign-up **without** `PASSWORD` is rejected (400): a passwordless account
+could later be claimed by anyone who learns its username and email, so none
+can be created any more. Sign-up errors keep the legacy envelope and add the
+`error` object below (`data` is `null`).
 
 Sign-up and sign-in share a per-client throttle (DRF `ScopedRateThrottle`,
-scope `auth`, `RAG_AUTH_THROTTLE_RATE`, default `10/min`): beyond it they
-answer **429** `rate_limited` with `Retry-After`. Clients are told apart by
-IP address; set `RAG_NUM_PROXIES` to the number of reverse proxies in front
-of Daphne so the address is taken from the right `X-Forwarded-For` hop.
+scope `auth`, `RAG_AUTH_THROTTLE_RATE`, default `10/min`) and a per-account
+throttle keyed on the submitted username/email whatever address it comes
+from (`RAG_AUTH_IDENTIFIER_THROTTLE_RATE`, default `20/hour`): beyond either
+they answer **429** `rate_limited` with `Retry-After`. Clients are told apart
+by IP address taken `RAG_NUM_PROXIES` hops from the end of
+`X-Forwarded-For` (default 1, matching the bundled nginx; 2 behind a TLS
+proxy as well, 0 when clients reach Daphne directly).
 
 Every object is filtered by the token's user. Another user's workspace,
 document or conversation returns **404**, exactly like an id that does not
@@ -87,7 +94,6 @@ stage or chat step where that applies.
 | --- | --- | --- |
 | `authentication_required` | 401 | No, invalid, revoked or expired token |
 | `invalid_credentials` | 401 | Sign-in: unknown account or wrong password |
-| `password_not_set` | 409 | Sign-in to an account created before passwords; claim it through sign-up |
 | `account_exists` | 409 | Sign-up for a username or email that is taken |
 | `rate_limited` | 429 | Too many sign-up/sign-in attempts from this client |
 | `not_found` | 404 | Unknown id, or another user's object |
@@ -549,7 +555,8 @@ debt).
 | `RAG_CHAT_BM25_CACHE_SIZE` | 4 | Built BM25 indexes (one per set of documents searched together) kept per process |
 | `RAG_TOKEN_TTL_DAYS` | 30 | Days a token stays valid after sign-up/sign-in |
 | `RAG_AUTH_THROTTLE_RATE` | `10/min` | Sign-up + sign-in attempts per client (DRF rate; empty disables) |
-| `RAG_NUM_PROXIES` | unset | Reverse proxies in front of Daphne; picks the client IP from `X-Forwarded-For` for the throttle |
+| `RAG_AUTH_IDENTIFIER_THROTTLE_RATE` | `20/hour` | Sign-up + sign-in attempts per submitted username/email, across clients |
+| `RAG_NUM_PROXIES` | `1` | Reverse proxies in front of Daphne; picks the client IP from `X-Forwarded-For` for the throttle |
 
 The embedding model and chunking settings are the ingest-time settings in
 `common/constant.py` (`RAG_EMBEDDING_MODEL`, `RAG_CHUNK_*`); chat retrieval
@@ -562,12 +569,12 @@ depth and the prompt version of the default pipeline are constants there too
 ## Known debt
 
 * **One-time claim of passwordless accounts.** An account from before
-  passwords — or one created since by a sign-up without `PASSWORD` (legacy
-  clients) — gets its password from the first sign-up that names its exact
-  username and email. Whoever knows both can therefore claim it before its
-  owner does (and sign-in's `password_not_set` tells anyone which usernames
-  are still unclaimed). The claim revokes every earlier token, and afterwards
-  the account needs its password like any other.
+  passwords gets its password from the first sign-up that names its exact
+  username and email; whoever knows both can claim it before its owner does.
+  No new passwordless accounts can be created, sign-in does not reveal which
+  accounts are still unclaimed, the claim revokes every earlier token, and
+  afterwards the account needs its password like any other. Closing this
+  fully needs email verification.
 * **Deploying this signs everyone out once.** Tokens issued before
   passwords were minted from a username and email alone, so migration
   `workspace/0003_apitoken_expires_at` deletes them; every user signs in
@@ -577,10 +584,12 @@ depth and the prompt version of the default pipeline are constants there too
   forgotten password cannot be recovered yet. Sign-up reveals whether a
   username or email is taken (409), as any sign-up form does; the throttle
   limits how fast that can be probed.
-* **The throttle is per IP address.** Without `RAG_NUM_PROXIES` matching
-  the deployment, either every client behind the proxy shares one budget or
-  a client can rotate a forged `X-Forwarded-For` to get a new one. There is
-  no per-account lockout.
+* **`RAG_NUM_PROXIES` must match the deployment.** Too low (e.g. a TLS
+  proxy in front of the bundled nginx with the default 1) and every client
+  shares one per-client budget; too high and a forged `X-Forwarded-For` hop
+  is trusted. The per-account throttle caps guesses against one account
+  either way; its trade-off is that someone hammering a username also delays
+  its owner's sign-in until the window passes.
 * **`analysis-config/` is public.** It exposes no user data, but
   `?refresh=1` bypasses the catalogue cache, so anyone can make the server
   refetch the model list from OpenRouter on every such request.

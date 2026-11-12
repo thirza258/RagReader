@@ -94,7 +94,7 @@ class AuthEndpointTests(TestCase):
     def test_sign_up_creates_user(self):
         resp = self.client.post(
             "/api/v1/sign-up/",
-            {"EMAIL": "new@example.com", "USERNAME": "newuser"},
+            {"EMAIL": "new@example.com", "USERNAME": "newuser", "PASSWORD": "correct horse battery staple"},
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 201)
@@ -104,9 +104,10 @@ class AuthEndpointTests(TestCase):
         make_user("bob")
         resp = self.client.post(
             "/api/v1/sign-up/",
-            {"EMAIL": "bob@example.com", "USERNAME": "bob"},
+            {"EMAIL": "bob@example.com", "USERNAME": "bob", "PASSWORD": "correct horse battery staple"},
             content_type="application/json",
         )
+        # An existing passwordless account is claimed with its exact email.
         self.assertEqual(resp.status_code, 200)
 
 

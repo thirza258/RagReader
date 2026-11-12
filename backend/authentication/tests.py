@@ -87,22 +87,21 @@ class SignUpTests(AccountTestCase):
         self.assertEqual(ApiToken.objects.count(), 1)
         self.assertTrue(GuestUser.objects.get(username="newcomer").check_password(PASSWORD))
 
-    def test_without_a_password_the_legacy_shape_comes_back_without_a_token(self):
-        created = self.sign_up(password=None)
-        self.assertEqual(created.status_code, 201)
-        self.assertEqual(set(created.json()["data"]), {"response", "username", "email"})
-        again = self.sign_up(password=None)
-        self.assertEqual(again.status_code, 200)
-        self.assertEqual(again.json()["data"]["response"], "User already exists")
-        self.assertNotIn("token", again.json()["data"])
+    def test_a_password_is_required(self):
+        # A passwordless account could later be claimed by anyone who learns
+        # its username and email, so none can be created any more.
+        response = self.sign_up(password=None)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_request")
+        self.assertIn("PASSWORD", response.json()["error"]["details"])
+        self.assertFalse(GuestUser.objects.filter(username="newcomer").exists())
         self.assertFalse(ApiToken.objects.exists())
-        self.assertFalse(GuestUser.objects.get(username="newcomer").has_password)
 
-    def test_without_a_password_a_clashing_email_is_409_not_500(self):
-        self.sign_up(password=None)
-        response = self.sign_up(username="other", password=None)
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["error"]["code"], "account_exists")
+    def test_new_usernames_cannot_contain_an_at_sign(self):
+        response = self.sign_up(username="someone@example.com", email="real@example.com")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("USERNAME", response.json()["error"]["details"])
+        self.assertFalse(GuestUser.objects.filter(email="real@example.com").exists())
 
 
 class LegacyClaimTests(AccountTestCase):
@@ -194,12 +193,31 @@ class SignInTests(AccountTestCase):
         self.assertEqual(unknown.json()["error"]["code"], "invalid_credentials")
         self.assertEqual(ApiToken.objects.count(), 1)  # Only the sign-up token.
 
-    def test_a_passwordless_account_is_sent_to_the_claim_flow(self):
+    def test_a_passwordless_account_looks_like_a_wrong_password(self):
+        # Revealing "no password yet" would list the accounts still open to a claim.
         GuestUser.objects.create(username="legacy", email="legacy@example.com")
-        response = self.sign_in(USERNAME="legacy")
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["error"]["code"], "password_not_set")
+        with mock.patch("authentication.views.check_password", wraps=check_password) as dummy:
+            passwordless = self.sign_in(USERNAME="legacy")
+        dummy.assert_called_once()
+        unknown = self.sign_in(USERNAME="nobody")
+        self.assertEqual(passwordless.status_code, 401)
+        self.assertEqual(passwordless.content, unknown.content)
         self.assertFalse(ApiToken.objects.filter(user__username="legacy").exists())
+
+    def test_an_identifier_with_an_at_sign_is_only_looked_up_as_an_email(self):
+        # A legacy username equal to someone else's email must not shadow them.
+        shadow = GuestUser.objects.create(username="newcomer@example.com", email="shadow@example.com")
+        shadow.set_password("shadow passphrase 77")
+        shadow.save()
+        response = self.sign_in(USERNAME="newcomer@example.com")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["username"], "newcomer")
+        wrong_account = self.sign_in(password="shadow passphrase 77", USERNAME="newcomer@example.com")
+        self.assertEqual(wrong_account.status_code, 401)
+        # The shadow account signs in with its own email.
+        own = self.sign_in(password="shadow passphrase 77", EMAIL="shadow@example.com")
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(own.json()["username"], "newcomer@example.com")
 
     def test_missing_fields_are_400(self):
         response = self.client.post("/api/v1/sign-in/", {"PASSWORD": PASSWORD}, content_type="application/json")
@@ -270,7 +288,32 @@ class ThrottleTests(AccountTestCase):
                                  content_type="application/json", REMOTE_ADDR="10.0.0.9")
         self.assertEqual(other.status_code, 401)
 
-    @override_settings(RAG_AUTH_THROTTLE_RATE="")
+    @override_settings(RAG_AUTH_THROTTLE_RATE="", RAG_AUTH_IDENTIFIER_THROTTLE_RATE="3/hour")
+    def test_one_account_is_limited_across_client_addresses(self):
+        for index in range(3):
+            response = self.client.post("/api/v1/sign-in/", {"USERNAME": "newcomer", "PASSWORD": "guess"},
+                                        content_type="application/json", REMOTE_ADDR=f"10.0.0.{index + 1}")
+            self.assertEqual(response.status_code, 401)
+        limited = self.client.post("/api/v1/sign-in/", {"USERNAME": " NEWCOMER ", "PASSWORD": PASSWORD},
+                                   content_type="application/json", REMOTE_ADDR="10.0.0.99")
+        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(limited.json()["error"]["code"], "rate_limited")
+        # Other accounts are unaffected.
+        other = self.client.post("/api/v1/sign-in/", {"USERNAME": "someone", "PASSWORD": "guess"},
+                                 content_type="application/json", REMOTE_ADDR="10.0.0.99")
+        self.assertEqual(other.status_code, 401)
+
+    @override_settings(RAG_AUTH_THROTTLE_RATE="3/min")
+    def test_a_forged_forwarded_for_does_not_reset_the_client_limit(self):
+        # NUM_PROXIES defaults to 1: only the address the proxy appended counts.
+        for index in range(3):
+            self.client.post("/api/v1/sign-in/", {"USERNAME": f"probe{index}", "PASSWORD": "x"},
+                             content_type="application/json", HTTP_X_FORWARDED_FOR=f"1.2.3.{index}, 203.0.113.5")
+        limited = self.client.post("/api/v1/sign-in/", {"USERNAME": "probe9", "PASSWORD": "x"},
+                                   content_type="application/json", HTTP_X_FORWARDED_FOR="9.9.9.9, 203.0.113.5")
+        self.assertEqual(limited.status_code, 429)
+
+    @override_settings(RAG_AUTH_THROTTLE_RATE="", RAG_AUTH_IDENTIFIER_THROTTLE_RATE="")
     def test_an_empty_rate_disables_the_throttle(self):
         for _ in range(12):
             self.assertEqual(self.sign_in(USERNAME="nobody").status_code, 401)

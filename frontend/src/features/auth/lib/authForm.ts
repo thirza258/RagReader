@@ -2,9 +2,9 @@
  * The sign-in / create-account form's rules: what it checks before sending,
  * and what it shows for each server answer. No imports, so tests can load it.
  *
- * Server codes: `invalid_credentials` (401, unknown account or wrong password
- * alike), `password_not_set` (409, an account from before passwords),
- * `account_exists` (409), `invalid_request` (400, field errors in `details`,
+ * Server codes: `invalid_credentials` (401: unknown account, wrong password and
+ * an account from before passwords all look the same; the message says how to
+ * set a password for an old account), `account_exists` (409), `invalid_request` (400, field errors in `details`,
  * including the password validators' messages) and `rate_limited` (429).
  */
 
@@ -38,9 +38,6 @@ export interface AuthFeedback {
   suggestMode: AuthMode | null;
 }
 
-export const PASSWORD_NOT_SET_NOTICE =
-  "This account was created before passwords existed. Enter its exact username and email, " +
-  "then choose a password to keep using it.";
 
 const RATE_LIMITED_FALLBACK = "Too many attempts. Wait a minute and try again.";
 
@@ -76,9 +73,6 @@ function fieldErrorsFrom(details: unknown, mode: AuthMode): FieldErrors {
 
 export function authFeedback(error: AuthErrorLike, mode: AuthMode): AuthFeedback {
   const base: AuthFeedback = { mode, formError: "", notice: "", fieldErrors: {}, suggestMode: null };
-  if (error.code === "password_not_set") {
-    return { ...base, mode: "create", notice: PASSWORD_NOT_SET_NOTICE };
-  }
   if (error.code === "account_exists") {
     return { ...base, formError: error.message, suggestMode: "signin" };
   }

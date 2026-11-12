@@ -28,16 +28,14 @@ MAX_PASSWORD_LENGTH = 1024
 class SignUpSerializer(serializers.Serializer):
     EMAIL = serializers.EmailField(max_length=254)
     USERNAME = serializers.CharField(max_length=255)
-    # Optional only so legacy clients keep their response shape; without it
-    # no token is issued.
-    PASSWORD = serializers.CharField(
-        required=False, write_only=True, trim_whitespace=False, max_length=MAX_PASSWORD_LENGTH,
-    )
+    # Required: an account created without a password could be claimed by
+    # anyone who learns its username and email.
+    PASSWORD = serializers.CharField(write_only=True, trim_whitespace=False, max_length=MAX_PASSWORD_LENGTH)
 
 
 class SignInSerializer(serializers.Serializer):
-    # Either one identifies the account; each is matched as a username first,
-    # then as an email.
+    # Either one identifies the account: a value containing "@" is looked up
+    # as an email, anything else as a username (authentication.views.find_account).
     USERNAME = serializers.CharField(required=False, max_length=255)
     EMAIL = serializers.CharField(required=False, max_length=254)
     PASSWORD = serializers.CharField(write_only=True, trim_whitespace=False, max_length=MAX_PASSWORD_LENGTH)

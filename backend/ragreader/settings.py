@@ -69,18 +69,21 @@ INSTALLED_APPS = [
     "workspace",
 ]
 
-def _optional_int(name):
+def _optional_int(name, default=None):
     value = os.getenv(name, "").strip()
-    return int(value) if value else None
+    return int(value) if value else default
 
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     # How many reverse proxies sit in front of Daphne. Throttling keys
-    # anonymous clients by IP: with this set, DRF takes the client address
-    # that many hops from the end of X-Forwarded-For; unset, it uses the
-    # whole header, which a client can rotate to dodge the sign-in throttle.
-    'NUM_PROXIES': _optional_int("RAG_NUM_PROXIES"),
+    # anonymous clients by IP, taking the address that many hops from the end
+    # of X-Forwarded-For. Never left unset: unset, DRF keys on the whole
+    # header, which a client can rotate to dodge the sign-in throttle. The
+    # default 1 matches docker-compose (the frontend nginx appends the real
+    # peer); add one per extra proxy (e.g. 2 behind a TLS terminator), or 0
+    # when clients reach Daphne directly.
+    'NUM_PROXIES': _optional_int("RAG_NUM_PROXIES", default=1),
 }
 
 SPECTACULAR_SETTINGS = {
@@ -308,3 +311,5 @@ RAG_TOKEN_TTL_DAYS = int(os.getenv("RAG_TOKEN_TTL_DAYS", 30))
 # Sign-up and sign-in attempts per client (DRF rate syntax, e.g. "10/min";
 # empty disables the throttle). Counted in the default cache.
 RAG_AUTH_THROTTLE_RATE = os.getenv("RAG_AUTH_THROTTLE_RATE", "10/min")
+# Attempts per submitted username/email, across all clients.
+RAG_AUTH_IDENTIFIER_THROTTLE_RATE = os.getenv("RAG_AUTH_IDENTIFIER_THROTTLE_RATE", "20/hour")

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  PASSWORD_NOT_SET_NOTICE,
   authFeedback,
   carryOver,
   validateAuthForm,
@@ -48,13 +47,6 @@ test("wrong credentials are one message, whichever part was wrong", () => {
   const feedback = authFeedback({ status: 401, code: "invalid_credentials", message: "The username, email or password is incorrect." }, "signin");
   assert.equal(feedback.formError, "The username, email or password is incorrect.");
   assert.equal(feedback.mode, "signin");
-});
-
-test("an account without a password switches to the claim form with an explanation", () => {
-  const feedback = authFeedback({ status: 409, code: "password_not_set", message: "…" }, "signin");
-  assert.equal(feedback.mode, "create");
-  assert.equal(feedback.notice, PASSWORD_NOT_SET_NOTICE);
-  assert.equal(feedback.formError, "");
 });
 
 test("throttling shows the server's wait, or a fallback", () => {

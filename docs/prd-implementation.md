@@ -198,17 +198,20 @@ atomic build reuses committed vectors instead of calling the provider.
   email match exactly (one-time claim, 200 + `token`, `claimed: true`,
   earlier tokens revoked); otherwise 409 `account_exists`. Passwords go
   through `validate_password` (400 `invalid_request`, messages in
-  `details.PASSWORD`). Without `PASSWORD` the legacy response comes back with
-  no token.
-- `POST /api/v1/sign-in/` (`USERNAME` or `EMAIL`, `PASSWORD`) → 200
-  `{token, username, email, expires_at}`; unknown account and wrong password
-  give the identical 401 `invalid_credentials` (a dummy hash is checked for
-  unknown accounts); a passwordless account → 409 `password_not_set`.
+  `details.PASSWORD`). `PASSWORD` is required (400 without it) and new
+  usernames cannot contain `@`.
+- `POST /api/v1/sign-in/` (`USERNAME` or `EMAIL`, `PASSWORD`; an identifier
+  containing `@` is looked up as an email only, otherwise as a username only)
+  → 200 `{token, username, email, expires_at}`; unknown account, passwordless
+  account and wrong password give the identical 401 `invalid_credentials` (a
+  dummy hash is checked when there is no password to check).
   `POST /api/v1/sign-out/` revokes the presenting token (204).
 - Sign-up and sign-in are throttled per client by
   `workspace.auth.AuthRateThrottle` (a `ScopedRateThrottle`, scope `auth`,
   rate read per request from `RAG_AUTH_THROTTLE_RATE`, default `10/min`;
-  `RAG_NUM_PROXIES` sets DRF's `NUM_PROXIES`) → 429 `rate_limited`.
+  `RAG_NUM_PROXIES` sets DRF's `NUM_PROXIES`, default 1) and per submitted
+  identifier by `workspace.auth.AuthIdentifierThrottle`
+  (`RAG_AUTH_IDENTIFIER_THROTTLE_RATE`, default `20/hour`) → 429 `rate_limited`.
 - `workspace.auth.GuestTokenAuthentication` reads `Authorization: Bearer <token>`
   through `resolve_token` (prefix, SHA-256 lookup, expiry; expired rows are
   deleted). `authenticate_header()` returns `Bearer`, so missing/invalid

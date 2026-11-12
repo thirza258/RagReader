@@ -15,7 +15,7 @@ from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 from rest_framework.views import exception_handler as drf_exception_handler
 
 from workspace.errors import api_exception_handler
@@ -133,3 +133,31 @@ class AuthRateThrottle(ScopedRateThrottle):
 
     def get_rate(self):
         return getattr(settings, "RAG_AUTH_THROTTLE_RATE", None) or None
+
+
+class AuthIdentifierThrottle(SimpleRateThrottle):
+    """Per-account limit on sign-in/sign-up attempts, whatever address they come from.
+
+    The per-client throttle is keyed by IP, which a botnet or a forged
+    X-Forwarded-For can rotate; this one is keyed by the submitted username or
+    email (normalised, hashed), so guesses against one account stay capped.
+    The trade-off is that someone hammering an identifier also delays its
+    owner's sign-in until the window passes. An empty rate disables it.
+    """
+
+    scope = "auth_identifier"
+
+    def get_rate(self):
+        return getattr(settings, "RAG_AUTH_IDENTIFIER_THROTTLE_RATE", None) or None
+
+    def get_cache_key(self, request, view):
+        try:
+            data = request.data
+        except Exception:
+            return None
+        values = [data.get(field) for field in ("USERNAME", "EMAIL")] if hasattr(data, "get") else []
+        identifiers = sorted({value.strip().lower() for value in values if isinstance(value, str) and value.strip()})
+        if not identifiers:
+            return None  # Nothing to key on; the per-client throttle still applies.
+        ident = hashlib.sha256("\n".join(identifiers).encode("utf-8")).hexdigest()
+        return self.cache_format % {"scope": self.scope, "ident": ident}
