@@ -64,7 +64,8 @@ Frontend (from `frontend/`): `npm run lint` (0 errors), `npm run test:modules`,
 
 Baseline before Phase 1: backend 583 tests OK; frontend lint 0 errors and 1
 pre-existing warning (`src/components/ui/button.tsx`), 47 module tests pass,
-build OK.
+build OK. After Phase 1: backend 699, 91 module tests. After Phase 2: backend
+734, 102 module tests.
 
 ## Backend layout
 
@@ -87,6 +88,9 @@ workspace/
     chat.py               run_chat_turn(): event generator
     citations.py          [n] marker parsing, evidence objects
     sse.py                SSE framing + WSGI/ASGI transports
+    tracing.py            Phase 2: span tracer (bounded, never raises)
+    runs.py               Phase 2: save_run(), percentile(), reliability_summary()
+  views/runs.py           Phase 2: retrieval runs list/detail/summary
   tests/                  package; modules named test_*.py
 ```
 
@@ -316,7 +320,8 @@ positions existed.
 }
 ```
 `generation_model` is the model that actually answered (it differs from the
-configured one when the OpenRouter free-model fallback was used).
+configured one when the OpenRouter free-model fallback was used). Phase 2 adds
+`run_id`, the answer's retrieval run (see Phase 2 below).
 
 ## Chat turn
 
@@ -464,10 +469,214 @@ src/services/streaming/sse.ts   fetch-based POST SSE client
 - Pure logic (SSE parsing, citation markers, stage derivation, highlight
   segmentation) lives in plain `.ts` modules covered by `tests/*.test.mjs`.
 
+## Phase 2 — RAG observability (PRD §20–21, §32, §44, §49)
+
+Every chat turn is traced and stored as a **retrieval run**, completed or
+failed. Phase 1 shapes are unchanged except for the additive `run_id` keys
+below.
+
+### Tracer (`workspace/services/tracing.py`)
+
+`Tracer(name, label, origin=…)` records a tree of spans on the monotonic
+clock: `name` (stable id), `label` (for people), `start_ms` (offset from the
+run's start), `duration_ms`, `status` (`completed`, `skipped`, `failed`),
+`detail`, `error_code`, `data`. `with tracer.span(name, label, **data) as span`
+or `tracer.start()`/`tracer.finish()`; finishing a span closes any span still
+open inside it. An exception leaving a span scope closes it (and its open
+children) as `failed` with the error's code (`PipelineError.code`/`ApiError.code`,
+`stream_interrupted` for `GeneratorExit`, else `internal_error`) and is
+re-raised unchanged. `span.skip()` / `span.fail(code)` mark steps that did not
+raise. Bounds: 100 spans per trace (the rest counted as root
+`data.dropped_spans`), 2 KB of JSON data per span, strings ≤ 200 chars,
+detail ≤ 255. Every tracer method swallows its own errors, logs the first and
+goes inert (`export()` then returns `[]`): **tracing never fails a turn**.
+
+The chat turn's tree (§32):
+
+```
+chat.turn
+├── prepare                   history + save the question
+├── rewrite                   completed | skipped (first question, unusable) | failed (rewrite_failed, recovered)
+├── retrieve
+│   ├── retrieve.load_indexes data: documents, cache_hits, cache_misses
+│   │   └── index.load ×doc   data: document_id, index_version_id, cache hit|miss, chunks (first 25 documents)
+│   ├── retrieve.embed_query  data: model, dimensions
+│   ├── retrieve.search       data: similarity, chunks_scored, pooled
+│   └── retrieve.select       data: candidates, duplicates_skipped, context
+├── generate                  data: configured_model, model, fallback, finish_reason, characters
+│   └── generate.first_token  request → first token
+├── citations                 data: sources, cited
+└── persist                   answer + legacy analysis turn saved
+```
+
+`persist` ends after `total` is measured, so the root span can outlast
+`total_ms`; the waterfall scales to the later of the two.
+
+### Models (`workspace` app, migration `workspace/0002_retrieval_runs`, depends on `workspace/0001` and `router/0016`)
+
+`RetrievalRun`: `user` FK GuestUser (CASCADE, `retrieval_runs`), `workspace`
+FK (CASCADE), `conversation` FK ChatSession (null, CASCADE — runs hold the
+question text), `message` FK ChatMessage (null, CASCADE), `source`
+(`chat`/`evaluation`/`research`, default `chat`), `status`
+(`completed`/`failed`), `error_stage` (`rewrite`/`retrieve`/`generate`, the
+SSE error stage), `error_code`, `error_message`, `query_original`,
+`query_rewritten`, `rewrite_applied`, `rewrite_reason`
+(`first_question`/`rewritten`/`unchanged`/`unusable`/`failed`), `provenance`
+JSON, `total_ms`, `rewrite_ms`, `retrieval_ms`, `rerank_ms` (null until
+Phase 3), `generation_ms`, `first_token_ms` (null when the step did not run or
+complete; `total_ms` = the message's `latency_ms`, `first_token_ms` from the
+turn's start), `prompt_tokens`, `completion_tokens`, `total_tokens` (generation
+only; the rewrite call reports no usage), `candidate_count`, `context_count`,
+`cited_count`, `started_at` (settable, the window field), `created_at`.
+Indexes `(workspace, -started_at)`, `(user, -started_at)`.
+
+`RetrievalSpan`: `run` FK (CASCADE, `spans`), `ordinal` (pre-order position,
+unique per run), `parent_ordinal` (null for the root), `depth`, `name`,
+`label`, `status`, `start_ms`/`duration_ms` (float ms), `detail`,
+`error_code`, `data` JSON.
+
+`RetrievalCandidate`: `run` FK (CASCADE, `candidates`), `rank`, `document` FK
+(null, SET_NULL) + `document_title` snapshot, `index_version_id` and
+`chunk_id` (plain bigints — a re-index may replace chunk rows),
+`retrieval_score`, `rerank_score` (null until Phase 3),
+`selected_for_context`, `cited`, `citation_id` (its `[n]`, null outside the
+context), `page_start`, `page_end`, `char_start`, `char_end`, `snippet`
+(≤ 300 chars). At most 50 candidates per run (`MAX_RUN_CANDIDATES`; chat
+stores its 20).
+
+Provenance (§20):
+
+```json
+{
+  "schema_version": 1, "timestamp": "…",
+  "strategy": "dense",
+  "retrieval_parameters": {"candidate_k": 20, "context_k": 5, "similarity": "cosine", "deduplicate": true, "query_rewrite": true, "history_messages": 2, "history_limit": 6},
+  "embedding_model": "openai/text-embedding-3-small",
+  "reranker": null,
+  "generation_model": "…", "configured_generation_model": "…", "fallback_used": false,
+  "generation_parameters": {"temperature": 0.0, "stream": true},
+  "prompt_version": "chat-cited-v1",
+  "index_versions": [{"document_id": 12, "document_title": "…", "index_version_id": 7, "method": "dense", "created_at": "…", "embedding_model": "…", "loaded": true}],
+  "index_version_count": 1
+}
+```
+
+`generation_model` is what the provider reported (null if no model answered);
+`fallback_used` comes from `StreamResult.fallback`, set only on the
+free-model path (`StreamResult` also gained `requested_model`).
+`index_versions` holds at most 200 entries; `index_version_count` is the
+number of documents in scope.
+
+### Recording
+
+The run is written by the producer in its own savepoint, **before** the
+closing events: on success after the answer is saved (then
+`ChatMessage.retrieval.run_id` is set with one UPDATE), on failure before the
+message is marked failed (including `stream_interrupted` on a WSGI
+disconnect). Any error while recording is logged and the turn continues
+without a run id.
+
+### Payload additions
+
+- `ChatMessage.retrieval.run_id` (int or null); every Phase 1 key unchanged.
+- SSE `message.completed`: `{"message": Message, "run_id": int | null}`.
+- SSE `error`: `{"error": Error, "message": Message | null, "run_id": int | null}`.
+- No new SSE events or stage ids.
+- Reader evidence: client-side `Evidence.candidate_rank` (optional) when a
+  candidate that was not a cited source is opened.
+
+### API (token required, owner-scoped, error envelope)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `retrieval/runs/?workspace_id=&conversation_id=&status=&source=&limit=` | `{"results": [Run], "has_more"}` newest first (`started_at`); `limit` 1–200, default 50. Filters combine; with neither id the default workspace. |
+| GET | `retrieval/runs/{id}/` | RunDetail |
+| GET | `retrieval/runs/summary/?workspace_id=&days=&source=` | ReliabilitySummary; `days` 1–365, default 30 |
+
+Bad `status`/`source`/`limit`/`days` → 400 `invalid_request`; another user's
+run, workspace or conversation → 404 `not_found`.
+
+Run:
+
+```json
+{
+  "id": 41, "workspace_id": 3, "conversation_id": 9, "message_id": 55, "source": "chat", "status": "completed",
+  "query": {"original": "…", "rewritten": "…", "rewrite_applied": true, "rewrite_reason": "rewritten"},
+  "error": null,
+  "latency_ms": {"total": 2600, "rewrite": 350, "retrieval": 140, "rerank": null, "generation": 2100, "first_token": 900},
+  "token_usage": {"prompt_tokens": 812, "completion_tokens": 96, "total_tokens": 908},
+  "candidate_count": 20, "context_count": 5, "cited_count": 3,
+  "strategy": "dense", "generation_model": "…", "started_at": "…", "created_at": "…"
+}
+```
+
+`error` is `{"code", "message", "stage"}` for failed runs. RunDetail adds
+`provenance`, `spans` (a list of root spans, each
+`{"name", "label", "status", "start_ms", "duration_ms", "detail", "error_code", "data", "children"}`)
+and `candidates`:
+
+```json
+{"rank": 1, "document_id": 12, "document_title": "…", "document_available": true, "index_version_id": 7, "chunk_id": 345,
+ "page_number": 4, "page_end": 4, "char_start": 10234, "char_end": 10746, "text": "…",
+ "retrieval_score": 0.82, "rerank_score": null, "selected_for_context": true, "cited": true, "citation_id": 1}
+```
+
+`text` is the whole chunk while it exists in the same document, else the
+stored snippet; `document_title` is the current title, else the snapshot.
+
+ReliabilitySummary (§49):
+
+```json
+{
+  "workspace_id": 3, "days": 30, "source": null, "since": "…",
+  "runs": {"total": 8, "completed": 5, "failed": 3},
+  "failure_rate": 0.375,
+  "failures_by_stage": {"retrieval": {"count": 1, "rate": 0.125}, "generation": {"count": 1, "rate": 0.125}, "other": {"count": 1, "rate": 0.125}},
+  "latency_ms": {"sample_size": 5, "total": {"p50": 300.0, "p95": 880.0, "count": 5}, "retrieval": {…}, "generation": {…}, "first_token": {…}},
+  "tokens": {"prompt": 960, "completion": 40, "total": 1000, "runs_with_usage": 4, "average_per_run": 250.0},
+  "ingestion": {"documents": 5, "ready": 2, "failed": 1, "in_progress": 1, "not_indexed": 1, "success_rate": 0.6667, "failure_rate": 0.3333,
+                "attempts": {"total": 4, "succeeded": 2, "failed": 1, "failure_rate": 0.3333}}
+}
+```
+
+Runs are counted by `started_at` within the window. Rates are fractions
+(4 decimals), null when the denominator is 0; `retrieval` counts
+`error_stage=retrieve`, `generation` counts `generate`, `other` the rest
+(e.g. a disconnect during the rewrite). Percentiles: completed runs only (the
+newest 10,000), nulls skipped, linear interpolation between closest ranks
+(numpy's default, PostgreSQL `percentile_cont`), null for no values, rounded
+to 0.1 ms. Ingestion counts the workspace's documents by current status; the
+Phase 1 backfill's `not_indexed` documents are reported apart and are not
+failures; `attempts` are `ingest` jobs created in the window.
+
+### Frontend
+
+`src/features/runs/` — `api/runs.ts`, `types/`, `hooks/useRunDetail.ts`
+(fetched only when needed, cached per run id, aborted on unmount),
+`hooks/useRunsOverview.ts`, `lib/waterfall.ts` (layout),
+`lib/runMetrics.ts` (formatting, funnel, rewrite text, summary cards,
+candidate → evidence), components `RunTrace`, `LatencyWaterfall`,
+`CandidateTable`, `ProvenanceBlock`, `RunsPanel`.
+
+- "Why this answer?" loads `retrieval/runs/{run_id}/` when opened and shows
+  the error (failed runs), question and rewrite (or why not), the funnel, the
+  candidate table (clicking a row opens the passage in the reader), the
+  latency waterfall with a text equivalent per row, timings, tokens and
+  provenance. Without a `run_id` (older answers), or if the run cannot be
+  loaded, it shows the Phase 1 metadata panel. Failed answers with a run get
+  the same panel as "What went wrong?".
+- Workspace page: the right column has **Chat | Runs** tabs on desktop;
+  mobile has a fourth **Runs** tab. The chat stays mounted while Runs is
+  shown. Runs shows the summary cards (7/30/90-day window), recent runs and,
+  on selection, the run's trace; it refreshes after every chat turn.
+- `retrieval/…` paths are treated as token-protected (401 → sign in).
+
 ## Reserved for later phases
 
-- Phase 2 adds persisted retrieval runs and full per-stage telemetry; it
-  extends `ChatMessage.retrieval` rather than replacing it.
+- Phase 2 (done, see above) added persisted retrieval runs and per-stage
+  telemetry; Phase 3 fills `rerank_ms`, `rerank_score` and
+  `provenance.reranker`, and Phase 4/5 record runs with `source`
+  `evaluation`/`research`.
 - Phase 3 adds pipeline configuration/versioning and makes the chat strategy
   (`dense`, `bm25`, `hybrid`, `hybrid+rerank`) selectable; Phase 1 hardcodes
   `dense`.

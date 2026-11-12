@@ -27,6 +27,8 @@ export interface Evidence {
   retrieval_score: number | null;
   rerank_score: number | null;
   cited: boolean;
+  /** Client-side only: set when a retrieved candidate (not a cited source) is opened in the reader. */
+  candidate_rank?: number | null;
 }
 
 export interface RetrievalPipeline {
@@ -65,6 +67,8 @@ export interface RetrievalMetadata {
   context_count?: number | null;
   cited_count?: number | null;
   timings_ms?: RetrievalTimings;
+  /** Phase 2: the retrieval run recorded for this answer (GET /retrieval/runs/{id}/). */
+  run_id?: number | null;
 }
 
 export interface TokenUsage {

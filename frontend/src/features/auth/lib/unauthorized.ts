@@ -18,7 +18,7 @@ export function setUnauthorizedHandler(next: Handler | null) {
 }
 
 /** Paths (relative to `/api/v1`) that belong to the token-protected API. */
-const PROTECTED = /^\/?(?:api\/v\d+\/)?(?:workspaces|documents|conversations)(?:\/|\?|$)/;
+const PROTECTED = /^\/?(?:api\/v\d+\/)?(?:workspaces|documents|conversations|retrieval)(?:\/|\?|$)/;
 
 export function isWorkspaceApiPath(url: string | null | undefined): boolean {
   if (!url) return false;

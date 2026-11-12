@@ -21,15 +21,24 @@ import NewConversation from "../features/chat/components/NewConversation";
 import { formatRetrievalSummary } from "../features/chat/lib/retrievalSummary";
 import type { ChatMessage, Evidence } from "../features/chat/types";
 import DocumentReader from "../features/reader/components/DocumentReader";
+import RunsPanel from "../features/runs/components/RunsPanel";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-type Pane = "documents" | "reader" | "chat";
+type Pane = "documents" | "reader" | "chat" | "runs";
+/** What the right-hand column shows on wide screens. */
+type SidePane = "chat" | "runs";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "documents", label: "Documents" },
   { id: "reader", label: "Reader" },
   { id: "chat", label: "Chat" },
+  { id: "runs", label: "Runs" },
+];
+
+const SIDE_PANES: { id: SidePane; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "runs", label: "Runs" },
 ];
 
 function parseId(value: string | null | undefined): number | null {
@@ -179,6 +188,15 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const [scopeError, setScopeError] = useState<ApiRequestError | null>(null);
   const [pending, setPending] = useState<{ conversationId: number; content: string } | null>(null);
   const [latestAnswer, setLatestAnswer] = useState<ChatMessage | null>(null);
+  const [sidePane, setSidePane] = useState<SidePane>("chat");
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [runsVersion, setRunsVersion] = useState(0);
+
+  /** Chat or Runs: a mobile tab, or the right-hand column on wide screens. */
+  const showPane = useCallback((id: Pane) => {
+    setPane(id);
+    if (id === "chat" || id === "runs") setSidePane(id);
+  }, []);
 
   const search = searchParams.toString();
   const pathFor = useCallback(
@@ -255,7 +273,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const selectConversation = (id: number | null) => {
     setScopeError(null);
     navigate(pathFor(id));
-    setPane("chat");
+    showPane("chat");
   };
 
   const createEmptyConversation = async () => {
@@ -282,7 +300,10 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
 
   const onInitialQuestionSent = useCallback(() => setPending(null), []);
   const { refresh: refreshWorkspaces } = workspaces;
-  const onTurnFinished = useCallback(() => refreshConversations(), [refreshConversations]);
+  const onTurnFinished = useCallback(() => {
+    refreshConversations();
+    setRunsVersion((value) => value + 1);
+  }, [refreshConversations]);
   const onDeepAnalysis = useCallback((legacyConversationId: number, documentId: number) => navigate(`/ground-truth/${legacyConversationId}/${documentId}`), [navigate]);
 
   // ---- documents -------------------------------------------------------
@@ -330,6 +351,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
 
   const summary = formatRetrievalSummary(latestAnswer?.retrieval, latestAnswer?.latency_ms);
   const paneClass = (id: Pane) => `${isDesktop || pane === id ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden`;
+  // The chat stays mounted (only hidden) while Runs is shown: unmounting it
+  // would abort an answer that is still streaming.
+  const side: SidePane = isDesktop ? sidePane : pane === "runs" ? "runs" : "chat";
+  const sideVisible = isDesktop || pane === "chat" || pane === "runs";
+  const sideLabelledBy = (id: SidePane) => (isDesktop ? `side-tab-${id}` : `tab-${id}`);
   const paneProps = (id: Pane, label: string) =>
     isDesktop
       ? { id: `pane-${id}`, "aria-label": label }
@@ -346,8 +372,17 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
     const next = targets[event.key];
     if (next === undefined) return;
     event.preventDefault();
-    setPane(PANES[next].id);
+    showPane(PANES[next].id);
     window.document.getElementById(`tab-${PANES[next].id}`)?.focus();
+  };
+
+  const onSideTabKeyDown = (event: React.KeyboardEvent) => {
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = SIDE_PANES.findIndex((item) => item.id === sidePane);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? SIDE_PANES.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + SIDE_PANES.length) % SIDE_PANES.length;
+    showPane(SIDE_PANES[next].id);
+    window.document.getElementById(`side-tab-${SIDE_PANES[next].id}`)?.focus();
   };
 
   return (
@@ -376,7 +411,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
               aria-selected={pane === item.id}
               aria-controls={`pane-${item.id}`}
               tabIndex={pane === item.id ? 0 : -1}
-              onClick={() => setPane(item.id)}
+              onClick={() => showPane(item.id)}
               className={`flex-1 border-b-2 px-3 py-2 text-sm transition-colors ${focusRing} ${
                 pane === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
@@ -421,54 +456,92 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
           />
         </section>
 
-        <section {...paneProps("chat", "Chat")} className={`${paneClass("chat")} border-border lg:border-l`}>
-          <ConversationBar
-            conversations={conversations.list}
-            loaded={conversations.loaded}
-            activeId={conversationId}
-            onSelect={selectConversation}
-            onCreate={createEmptyConversation}
-            onRename={async (id, title) => {
-              await conversations.update(id, { title });
-            }}
-            onDelete={deleteConversation}
-          />
-          {conversations.error && (
-            <div className="border-b border-border p-3">
-              <ErrorNotice
-                title="Could not load the conversations"
-                code={conversations.error.code}
-                message={conversations.error.message}
-                actions={
-                  <button type="button" className={buttonOutline} onClick={refreshConversations}>
-                    Try again
-                  </button>
-                }
-              />
+        <section
+          aria-label={isDesktop ? "Chat and runs" : undefined}
+          className={`${sideVisible ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden border-border lg:border-l`}
+        >
+          {isDesktop && (
+            <div role="tablist" aria-label="Chat or runs" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
+              {SIDE_PANES.map((item) => (
+                <button
+                  key={item.id}
+                  id={`side-tab-${item.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={sidePane === item.id}
+                  aria-controls={`pane-${item.id}`}
+                  tabIndex={sidePane === item.id ? 0 : -1}
+                  onClick={() => showPane(item.id)}
+                  className={`flex-1 border-b-2 px-3 py-1.5 text-sm transition-colors ${focusRing} ${
+                    sidePane === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           )}
-          {conversationId != null ? (
-            <ChatThread
-              key={conversationId}
-              conversationId={conversationId}
-              initialQuestion={pending?.conversationId === conversationId ? pending.content : null}
-              onInitialQuestionSent={onInitialQuestionSent}
-              onOpenSource={openSource}
-              onTurnFinished={onTurnFinished}
-              onLatestAnswer={setLatestAnswer}
-              onMissing={() => selectConversation(null)}
-              onDeepAnalysis={onDeepAnalysis}
-              documentTitle={documentTitle}
-              composerDisabledReason={composerDisabledReason}
-            />
-          ) : (
-            <NewConversation
+          <div id="pane-chat" role="tabpanel" aria-labelledby={sideLabelledBy("chat")} className={`${side === "chat" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            <ConversationBar
               conversations={conversations.list}
-              onSelect={(id) => selectConversation(id)}
-              onStart={startConversation}
-              composerDisabledReason={composerDisabledReason}
+              loaded={conversations.loaded}
+              activeId={conversationId}
+              onSelect={selectConversation}
+              onCreate={createEmptyConversation}
+              onRename={async (id, title) => {
+                await conversations.update(id, { title });
+              }}
+              onDelete={deleteConversation}
             />
-          )}
+            {conversations.error && (
+              <div className="border-b border-border p-3">
+                <ErrorNotice
+                  title="Could not load the conversations"
+                  code={conversations.error.code}
+                  message={conversations.error.message}
+                  actions={
+                    <button type="button" className={buttonOutline} onClick={refreshConversations}>
+                      Try again
+                    </button>
+                  }
+                />
+              </div>
+            )}
+            {conversationId != null ? (
+              <ChatThread
+                key={conversationId}
+                conversationId={conversationId}
+                initialQuestion={pending?.conversationId === conversationId ? pending.content : null}
+                onInitialQuestionSent={onInitialQuestionSent}
+                onOpenSource={openSource}
+                onTurnFinished={onTurnFinished}
+                onLatestAnswer={setLatestAnswer}
+                onMissing={() => selectConversation(null)}
+                onDeepAnalysis={onDeepAnalysis}
+                documentTitle={documentTitle}
+                composerDisabledReason={composerDisabledReason}
+              />
+            ) : (
+              <NewConversation
+                conversations={conversations.list}
+                onSelect={(id) => selectConversation(id)}
+                onStart={startConversation}
+                composerDisabledReason={composerDisabledReason}
+              />
+            )}
+          </div>
+          <div id="pane-runs" role="tabpanel" aria-labelledby={sideLabelledBy("runs")} className={`${side === "runs" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {side === "runs" && sideVisible && (
+              <RunsPanel
+                workspaceId={workspaceId}
+                version={runsVersion}
+                selectedRunId={selectedRunId}
+                onSelectRun={setSelectedRunId}
+                onOpenCandidate={openSource}
+                onOpenConversation={(id) => selectConversation(id)}
+              />
+            )}
+          </div>
         </section>
       </div>
 

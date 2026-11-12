@@ -2,7 +2,8 @@
 
 The workspace API is RAGReader's resource-oriented API for persistent
 documents, background ingestion, conversations and cited, streamed answers
-(PRD Phase 1). It lives in the `workspace` Django app, under `/api/v1/`, next
+(PRD Phase 1), and the retrieval runs that make every answer inspectable
+(Phase 2). It lives in the `workspace` Django app, under `/api/v1/`, next
 to the legacy endpoints, which keep working unchanged.
 
 The authoritative shapes are in [`prd-implementation.md`](prd-implementation.md);
@@ -82,6 +83,9 @@ All paths are under `/api/v1/` and require the token.
 | GET, PATCH, DELETE | `conversations/{id}/` | PATCH `{title?, document_ids?}`. Renaming stops automatic titles. |
 | GET | `conversations/{id}/messages/` | Oldest first. |
 | POST | `conversations/{id}/messages/` | `{content, document_ids?}` → `text/event-stream`; `?stream=0` → 201 `{"user_message", "assistant_message"}`. |
+| GET | `retrieval/runs/` | Recent runs, newest first. `?workspace_id=&conversation_id=&status=completed\|failed&source=chat&limit=1–200` (default 50) → `{"results", "has_more"}`. See [Retrieval runs](#retrieval-runs). |
+| GET | `retrieval/runs/{id}/` | One run's trace: provenance, span tree, candidates. |
+| GET | `retrieval/runs/summary/` | Reliability for `?workspace_id=&days=1–365` (default 30): failure rates, latency percentiles, tokens, ingestion. |
 
 `document_ids` must belong to the conversation's workspace (otherwise 400
 `invalid_request`). Interactive OpenAPI docs are at `/api/docs/`.
@@ -235,8 +239,8 @@ One turn:
 | `stage` | `{"id": "rewrite" \| "retrieve" \| "generate", "status": "running" \| "completed" \| "skipped" \| "failed", "detail", "duration_ms"}` |
 | `retrieval` | `{"candidate_count", "context_count", "citations": [Evidence with cited=false]}` (before generation) |
 | `token` | `{"delta": "text"}` |
-| `message.completed` | `{"message": Message}` |
-| `error` | `{"error": {"code", "message", "retryable", "stage", "details"}, "message": Message \| null}` |
+| `message.completed` | `{"message": Message, "run_id": int \| null}` |
+| `error` | `{"error": {"code", "message", "retryable", "stage", "details"}, "message": Message \| null, "run_id": int \| null}` |
 
 A successful turn reads `message.created`, `stage` (rewrite completed or
 skipped), `stage` (retrieve running/completed), `retrieval`, `stage`
@@ -259,6 +263,65 @@ on reload. (Under WSGI a disconnect stops the turn and marks the answer
 `failed` with `stream_interrupted`.) An answer left `streaming` for more than
 10 minutes (server restart) is shown as failed. Behind nginx,
 `X-Accel-Buffering: no` turns proxy buffering off for this response.
+
+## Retrieval runs
+
+Every question is traced (PRD §32) and stored as a **retrieval run** —
+whether it completed or failed — before the stream's closing events, so a
+client that leaves early loses neither the answer nor its trace. The answer's
+`retrieval.run_id` (and `run_id` in `message.completed`/`error`) points at it.
+Recording is best-effort: if it fails, the error is logged and the answer is
+delivered and saved without a run id. Tracing never fails a turn.
+
+A run records:
+
+* **What was asked and searched** — the question, the rewritten query, and
+  why it was not rewritten when it was not (`first_question`, `unchanged`,
+  `unusable`, `failed`).
+* **Provenance** (§20) — strategy, retrieval parameters (`candidate_k`,
+  `context_k`, cosine similarity, de-duplication, history), embedding model,
+  reranker (none until Phase 3), the generation model that answered and the
+  configured one (they differ when the free-model fallback was used;
+  `fallback_used` says so), generation parameters, prompt version, and every
+  index version searched (DocumentVector id, method, build time, embedding
+  model, whether it loaded).
+* **Latency** — total (= the message's `latency_ms`), rewrite, retrieval,
+  rerank (null), generation and first token (from the question), each null
+  when that step did not run or complete.
+* **Tokens** — prompt, completion and total for the answer (the rewrite call
+  reports none).
+* **The span tree** — `chat.turn` → `prepare`, `rewrite`, `retrieve`
+  (`retrieve.load_indexes` with one `index.load` per document and its cache
+  hit or miss, `retrieve.embed_query`, `retrieve.search`, `retrieve.select`),
+  `generate` (`generate.first_token`), `citations`, `persist`. Offsets are
+  milliseconds from the start of the turn. A failure closes the failing span
+  and its parents as `failed` with the error code.
+* **Candidates** — every retrieved passage in rank order (at most 50 are
+  stored; chat retrieves 20): document, page and character range, retrieval
+  score, rerank score (null), whether it was in the context and under which
+  `[n]`, and whether the answer cited it.
+
+`GET retrieval/runs/{id}/` returns all of it. A candidate's `text` is the
+whole passage while its chunk still exists, otherwise the stored 300-character
+snippet; after the document is deleted, `document_id` is null,
+`document_available` false and the title is kept. Deleting a conversation
+deletes its runs (they contain the question).
+
+`GET retrieval/runs/summary/` reports a workspace's reliability (§49) over the
+last `days`:
+
+* run counts and the failure rate, overall and by stage — `retrieval`
+  (`error_stage=retrieve`), `generation` (`generate`), `other`;
+* p50 and p95 of total, retrieval and generation latency and of first-token
+  time over **completed** runs (linear interpolation between closest ranks, as
+  numpy and PostgreSQL's `percentile_cont`; null without data);
+* token totals and the average per answer;
+* ingestion: the workspace's documents by current status with the success
+  rate (READY of READY + FAILED), and ingestion attempts (jobs) started in the
+  window. Documents from before background ingestion that were never indexed
+  (`not_indexed`) are listed apart and not counted as failures.
+
+Rates are fractions with four decimals, null when nothing was counted.
 
 ## Configuration
 
@@ -293,3 +356,8 @@ depth and the prompt version are constants there too (`CHAT_CANDIDATE_K`,
 * The chat index cache is per process; a document deleted through another
   process stays cached there (unreachable, never served) until evicted.
 * Phase 1 chat is dense-only; BM25, hybrid and reranking arrive in Phase 3.
+* Runs are kept until their conversation or workspace is deleted; there is
+  no age-based clean-up yet. Each run is bounded (≤ 100 spans of ≤ 2 KB data,
+  ≤ 50 candidates with 300-character snippets).
+* A producer killed mid-turn (worker restart) leaves no run; its message is
+  shown as failed after 10 minutes.

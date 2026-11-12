@@ -52,21 +52,26 @@ def _key(vector, model):
 
 def get_snapshot(engine, vector, model):
     """The snapshot for `vector`, loading it if needed; None if it cannot load."""
+    return fetch_snapshot(engine, vector, model)[0]
+
+
+def fetch_snapshot(engine, vector, model):
+    """(snapshot or None, cache hit) — the hit flag is for the request trace."""
     key = _key(vector, model)
     with _lock:
         snapshot = _cache.get(key)
         if snapshot is not None:
             _cache.move_to_end(key)
-            return snapshot
+            return snapshot, True
     snapshot = _load(engine, vector)
     if snapshot is None:
-        return None
+        return None, False
     with _lock:
         _cache[key] = snapshot
         _cache.move_to_end(key)
         while len(_cache) > _size():
             _cache.popitem(last=False)
-    return snapshot
+    return snapshot, False
 
 
 def _load(engine, vector):

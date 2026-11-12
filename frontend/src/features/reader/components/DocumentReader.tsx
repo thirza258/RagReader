@@ -124,7 +124,10 @@ const ReaderForDocument: React.FC<ReaderForDocumentProps> = ({ document, evidenc
       {evidence && (
         <div className="flex items-start justify-between gap-2 border-b border-border bg-primary/5 px-4 py-2 text-xs" role="status">
           <p className="min-w-0">
-            <span className="font-medium text-primary">Evidence [{evidence.citation_id}]</span> · {describeSource(evidence)}
+            <span className="font-medium text-primary">
+              {evidence.citation_id > 0 ? `Evidence [${evidence.citation_id}]` : `Retrieved candidate${evidence.candidate_rank ? ` #${evidence.candidate_rank}` : ""}`}
+            </span>{" "}
+            · {describeSource(evidence)}
           </p>
           <button type="button" className={buttonQuiet} onClick={onClearEvidence}>
             Clear highlight

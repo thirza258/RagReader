@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from router.models import Document
 from workspace.auth import GuestTokenAuthentication
 from workspace.errors import ApiError, api_exception_handler
-from workspace.models import ChatSession, Workspace, default_workspace_for
+from workspace.models import ChatSession, RetrievalRun, Workspace, default_workspace_for
 
 # Ids above this cannot exist and make some database drivers raise instead of
 # simply finding nothing.
@@ -74,6 +74,13 @@ class OwnedAPIView(APIView):
         if session is None:
             raise not_found("Conversation")
         return session
+
+    def get_run(self, run_id):
+        pk = parse_id(run_id)
+        run = RetrievalRun.objects.filter(pk=pk, user=self.request.user).first() if pk else None
+        if run is None:
+            raise not_found("Run")
+        return run
 
     def documents_in_workspace(self, workspace, document_ids, field="document_ids"):
         """Validate client-sent document ids against one of the user's workspaces.

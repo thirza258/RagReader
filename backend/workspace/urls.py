@@ -4,6 +4,7 @@ from workspace.views.conversations import ConversationDetailView, ConversationLi
 from workspace.views.documents import (
     DocumentDetailView, DocumentFileView, DocumentIngestionView, DocumentListView, DocumentTextView,
 )
+from workspace.views.runs import RetrievalRunDetailView, RetrievalRunListView, RetrievalRunSummaryView
 from workspace.views.workspaces import WorkspaceDetailView, WorkspaceListView
 
 # Names are prefixed: router.urls already uses "document-detail".
@@ -18,4 +19,7 @@ urlpatterns = [
     path("conversations/", ConversationListView.as_view(), name="workspace-conversation-list"),
     path("conversations/<int:conversation_id>/", ConversationDetailView.as_view(), name="workspace-conversation-detail"),
     path("conversations/<int:conversation_id>/messages/", ConversationMessagesView.as_view(), name="workspace-conversation-messages"),
+    path("retrieval/runs/", RetrievalRunListView.as_view(), name="workspace-run-list"),
+    path("retrieval/runs/summary/", RetrievalRunSummaryView.as_view(), name="workspace-run-summary"),
+    path("retrieval/runs/<int:run_id>/", RetrievalRunDetailView.as_view(), name="workspace-run-detail"),
 ]

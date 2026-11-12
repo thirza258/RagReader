@@ -122,7 +122,8 @@ executed inside the backend Docker image by `./deploy.sh` before every deploy.
 
 ## Workspace (documents, conversations, citations)
 
-The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`)
+The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`,
+`/retrieval/runs/`)
 turns RAGReader into a persistent research workspace:
 
 *   **Documents** — upload PDF, DOCX, TXT or Markdown, add a web page by URL,
@@ -136,6 +137,13 @@ turns RAGReader into a persistent research workspace:
     server-sent events. Every claim cites a numbered source; each citation
     resolves to the document, page, character range and passage text, so the
     reader can jump to and highlight the evidence.
+*   **Why this answer?** — every question is traced and stored as a
+    retrieval run: the rewritten query, every retrieved candidate with its
+    score and whether it was used and cited, a latency waterfall of each
+    step, token usage, and the exact models, prompt and index versions that
+    produced the answer. The workspace's **Runs** view lists recent runs and
+    reports failure rates, p50/p95 latency and ingestion success
+    (`/api/v1/retrieval/runs/`).
 
 Requests use a bearer token, which `POST /api/v1/sign-up/` now returns.
 URL ingestion is protected against SSRF, and uploads are checked by content.

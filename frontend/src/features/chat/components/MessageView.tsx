@@ -3,6 +3,7 @@ import ErrorNotice from "../../../components/ui/ErrorNotice";
 import { buttonOutline } from "../../../components/ui/classes";
 import { isTurnFinished, type StreamingTurn } from "../lib/chatStream";
 import { formatRetrievalSummary } from "../lib/retrievalSummary";
+import { runIdOf } from "../../runs/lib/runMetrics";
 import type { ChatMessage, Evidence, MessageError } from "../types";
 import AnswerMarkdown from "./AnswerMarkdown";
 import SourcesList from "./SourcesList";
@@ -79,7 +80,9 @@ export function AssistantMessage({ message, onOpenSource, documentTitle, onRetry
           )}
         </div>
       )}
-      {message.status === "complete" && <WhyThisAnswer message={message} documentTitle={documentTitle} />}
+      {(message.status === "complete" || (message.status === "failed" && runIdOf(message) != null)) && (
+        <WhyThisAnswer message={message} documentTitle={documentTitle} onOpenSource={onOpenSource} />
+      )}
     </article>
   );
 }

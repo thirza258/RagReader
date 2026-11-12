@@ -4,10 +4,12 @@
 question/answer turn `router.Conversation` stay in the router app: the deep
 analysis flow, its migrations and the evaluation app all reference them there.
 This app adds what is new around them — workspaces, API tokens, chat threads
-(`ChatSession`, called "conversation" in the API) and the embedding checkpoint.
+(`ChatSession`, called "conversation" in the API), the embedding checkpoint
+and, since Phase 2, retrieval runs (one traced RAG request each).
 """
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
+from django.utils import timezone
 
 DEFAULT_WORKSPACE_NAME = "My Workspace"
 DEFAULT_CONVERSATION_TITLE = "New conversation"
@@ -152,3 +154,143 @@ class EmbeddingCacheEntry(models.Model):
 
     def __str__(self):
         return f"Embedding {self.text_hash[:12]} of document {self.document_id}"
+
+
+# ── Retrieval runs (PRD §20, §21, §32) ───────────────────────────────────────
+
+class RetrievalRun(models.Model):
+    """One traced RAG request: provenance, latency, tokens, spans, candidates.
+
+    A chat turn records one run, whether it completed or failed. Later
+    phases record runs from other sources (evaluation, research) with the
+    same shape.
+    """
+
+    class Source(models.TextChoices):
+        CHAT = "chat"
+        EVALUATION = "evaluation"
+        RESEARCH = "research"
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed"
+        FAILED = "failed"
+
+    user = models.ForeignKey("router.GuestUser", on_delete=models.CASCADE, related_name="retrieval_runs")
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="retrieval_runs")
+    # Deleting a conversation deletes its runs: they hold the question text.
+    conversation = models.ForeignKey(
+        ChatSession, null=True, blank=True, on_delete=models.CASCADE, related_name="retrieval_runs",
+    )
+    message = models.ForeignKey(
+        ChatMessage, null=True, blank=True, on_delete=models.CASCADE, related_name="retrieval_runs",
+    )
+    source = models.CharField(max_length=16, choices=Source.choices, default=Source.CHAT, db_index=True)
+    status = models.CharField(max_length=16, choices=Status.choices, db_index=True)
+    # The chat step that failed, as in the SSE error: rewrite, retrieve, generate.
+    error_stage = models.CharField(max_length=16, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.TextField(blank=True)
+
+    query_original = models.TextField()
+    query_rewritten = models.TextField(blank=True)
+    rewrite_applied = models.BooleanField(default=False)
+    # first_question, rewritten, unchanged, unusable or failed.
+    rewrite_reason = models.CharField(max_length=32, blank=True)
+
+    # Strategy, parameters, models, prompt and index versions (§20).
+    provenance = models.JSONField(default=dict, blank=True)
+
+    # Milliseconds; null when the step did not run or did not complete.
+    total_ms = models.PositiveIntegerField(null=True, blank=True)
+    rewrite_ms = models.PositiveIntegerField(null=True, blank=True)
+    retrieval_ms = models.PositiveIntegerField(null=True, blank=True)
+    rerank_ms = models.PositiveIntegerField(null=True, blank=True)
+    generation_ms = models.PositiveIntegerField(null=True, blank=True)
+    first_token_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    prompt_tokens = models.PositiveIntegerField(null=True, blank=True)
+    completion_tokens = models.PositiveIntegerField(null=True, blank=True)
+    total_tokens = models.PositiveIntegerField(null=True, blank=True)
+
+    candidate_count = models.PositiveIntegerField(default=0)
+    context_count = models.PositiveIntegerField(default=0)
+    cited_count = models.PositiveIntegerField(default=0)
+
+    started_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-started_at", "-id"]
+        indexes = [
+            models.Index(fields=["workspace", "-started_at"], name="run_workspace_started"),
+            models.Index(fields=["user", "-started_at"], name="run_user_started"),
+        ]
+
+    def __str__(self):
+        return f"Run {self.pk} ({self.source}, {self.status})"
+
+
+class RetrievalSpan(models.Model):
+    """One node of a run's trace. The tree is stored in pre-order:
+    `ordinal` is the position, `parent_ordinal` the parent's (null for the root)."""
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed"
+        SKIPPED = "skipped"
+        FAILED = "failed"
+
+    run = models.ForeignKey(RetrievalRun, on_delete=models.CASCADE, related_name="spans")
+    ordinal = models.PositiveIntegerField()
+    parent_ordinal = models.PositiveIntegerField(null=True, blank=True)
+    depth = models.PositiveSmallIntegerField(default=0)
+    name = models.CharField(max_length=64)
+    label = models.CharField(max_length=200, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.COMPLETED)
+    # Milliseconds from the start of the run (monotonic clock).
+    start_ms = models.FloatField(default=0.0)
+    duration_ms = models.FloatField(null=True, blank=True)
+    detail = models.CharField(max_length=255, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["run", "ordinal"]
+        constraints = [
+            models.UniqueConstraint(fields=["run", "ordinal"], name="unique_span_ordinal_per_run"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} of run {self.run_id}"
+
+
+class RetrievalCandidate(models.Model):
+    """A passage retrieval returned for a run, in rank order."""
+
+    run = models.ForeignKey(RetrievalRun, on_delete=models.CASCADE, related_name="candidates")
+    rank = models.PositiveIntegerField()
+    document = models.ForeignKey(
+        "router.Document", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+    )
+    # Kept when the document is deleted later.
+    document_title = models.CharField(max_length=255, blank=True)
+    # Plain ids, not foreign keys: a re-index may replace the chunk rows,
+    # and a trace must not stop being storable because of it.
+    index_version_id = models.BigIntegerField(null=True, blank=True)
+    chunk_id = models.BigIntegerField(null=True, blank=True)
+    retrieval_score = models.FloatField(null=True, blank=True)
+    rerank_score = models.FloatField(null=True, blank=True)
+    selected_for_context = models.BooleanField(default=False)
+    cited = models.BooleanField(default=False)
+    # The [n] the passage had in the prompt; null when not in the context.
+    citation_id = models.PositiveSmallIntegerField(null=True, blank=True)
+    page_start = models.PositiveIntegerField(null=True, blank=True)
+    page_end = models.PositiveIntegerField(null=True, blank=True)
+    char_start = models.PositiveIntegerField(null=True, blank=True)
+    char_end = models.PositiveIntegerField(null=True, blank=True)
+    snippet = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["run", "rank"]
+
+    def __str__(self):
+        return f"Candidate {self.rank} of run {self.run_id}"

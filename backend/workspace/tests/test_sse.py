@@ -16,7 +16,7 @@ from asgiref.sync import async_to_sync
 from django.test import AsyncRequestFactory, RequestFactory, SimpleTestCase, TransactionTestCase, override_settings
 
 import rag.rag_service as rag_service
-from workspace.models import ChatMessage
+from workspace.models import ChatMessage, RetrievalRun
 from workspace.services import index_cache
 from workspace.services.ingestion import run_ingestion
 from workspace.services.sse import PING, async_stream, event_stream_response, format_event, sync_stream
@@ -188,3 +188,7 @@ class AsgiEndToEndTests(TransactionTestCase):
         self.assertTrue(producer_threads and all(ident != main_thread for ident in producer_threads))
         stored = ChatMessage.objects.get(session_id=thread["id"], role="assistant")
         self.assertEqual((stored.status, stored.content), ("complete", self.chat.answer))
+        # Phase 2: the run is recorded by the worker thread too, and linked.
+        run = RetrievalRun.objects.get(message=stored)
+        self.assertEqual((run.status, stored.retrieval["run_id"], events[-1][1]["run_id"]), ("completed", run.pk, run.pk))
+        self.assertTrue(run.spans.exists())
