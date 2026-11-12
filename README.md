@@ -145,7 +145,11 @@ turns RAGReader into a persistent research workspace:
     reports failure rates, p50/p95 latency and ingestion success
     (`/api/v1/retrieval/runs/`).
 
-Requests use a bearer token, which `POST /api/v1/sign-up/` now returns.
+Accounts have a password: `POST /api/v1/sign-up/` creates one and
+`POST /api/v1/sign-in/` signs in, each returning a bearer token that expires
+after 30 days (`RAG_TOKEN_TTL_DAYS`); `POST /api/v1/sign-out/` revokes it.
+Every endpoint, including the legacy and deep-analysis ones and the analysis
+WebSocket, requires that token and only serves the caller's own data.
 URL ingestion is protected against SSRF, and uploads are checked by content.
 Endpoints, event formats, the ingestion lifecycle, security rules and known
 limitations are documented in [Workspace API](docs/workspace-api.md).

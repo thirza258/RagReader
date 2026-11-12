@@ -54,6 +54,7 @@ from pipeline.base_pipeline import BasePipeline
 from dense_rag.dense_rag import DenseRAG
 from ai_handler.llm import OpenRouterLLM
 from ai_handler.model_catalog import default_catalog, fetch_catalog
+from common.testing import SignedInClientMixin
 
 TEST_MEDIA_ROOT = tempfile.mkdtemp(prefix="ragreader-test-media-")
 LOCMEM_CACHE = {
@@ -86,6 +87,10 @@ class ResponseSchemaTests(TestCase):
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
 class AuthEndpointTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()  # The sign-up throttle counts in this cache.
+
     def test_sign_up_creates_user(self):
         resp = self.client.post(
             "/api/v1/sign-up/",
@@ -106,9 +111,9 @@ class AuthEndpointTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class InsertTextEndpointTests(TestCase):
+class InsertTextEndpointTests(SignedInClientMixin, TestCase):
     def test_insert_text_creates_document(self):
-        make_user("alice")
+        self.sign_in(make_user("alice"))
         resp = self.client.post(
             "/api/v1/insert-text/",
             {"USER": "alice", "TEXT": "Some document text about testing."},
@@ -136,7 +141,7 @@ class InsertTextEndpointTests(TestCase):
         # existing server file whose path ends in .txt/.md/.pdf.
         from django.core.files.storage import default_storage
 
-        make_user("alice")
+        self.sign_in(make_user("alice"))
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as handle:
             handle.write("server secret")
         self.addCleanup(os.remove, handle.name)
@@ -150,19 +155,23 @@ class InsertTextEndpointTests(TestCase):
         with default_storage.open(doc.extracted_text_path) as f:
             self.assertEqual(f.read().decode(), handle.name)
 
-    def test_insert_text_unknown_user_errors(self):
+    def test_insert_text_for_another_user_is_404(self):
+        # USER must name the signed-in user; anyone else does not exist.
+        self.sign_in(make_user("alice"))
+        make_user("bob")
         resp = self.client.post(
             "/api/v1/insert-text/",
-            {"USER": "ghost", "TEXT": "text"},
+            {"USER": "bob", "TEXT": "text"},
             content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(Document.objects.exists())
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class InsertDataEndpointTests(TestCase):
+class InsertDataEndpointTests(SignedInClientMixin, TestCase):
     def test_insert_data_txt_file(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         from django.core.files.uploadedfile import SimpleUploadedFile
         txt_content = b"This is a plain text document.\nIt contains multiple lines of information."
         uploaded_file = SimpleUploadedFile("sample.txt", txt_content, content_type="text/plain")
@@ -183,7 +192,7 @@ class InsertDataEndpointTests(TestCase):
         self.assertIn("This is a plain text document.", extracted)
 
     def test_insert_data_markdown_file(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         from django.core.files.uploadedfile import SimpleUploadedFile
         md_content = b"# Header\n\nThis is a **markdown** document with lists:\n- item 1\n- item 2"
         uploaded_file = SimpleUploadedFile("notes.md", md_content, content_type="text/markdown")
@@ -204,7 +213,7 @@ class InsertDataEndpointTests(TestCase):
         self.assertIn("**markdown** document", extracted)
 
     def test_insert_data_pdf_file(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         from django.core.files.uploadedfile import SimpleUploadedFile
         with mock.patch("utils.insert_file.DataLoader._parse_pdf", return_value="Extracted PDF text content"):
             uploaded_file = SimpleUploadedFile("document.pdf", b"%PDF-1.4 dummy content", content_type="application/pdf")
@@ -220,7 +229,7 @@ class InsertDataEndpointTests(TestCase):
             self.assertTrue(doc.extracted_text_path)
 
     def test_insert_data_unsupported_file_extension(self):
-        make_user("alice")
+        self.sign_in(make_user("alice"))
         from django.core.files.uploadedfile import SimpleUploadedFile
         uploaded_file = SimpleUploadedFile("archive.zip", b"fake zip content", content_type="application/zip")
         resp = self.client.post(
@@ -232,6 +241,7 @@ class InsertDataEndpointTests(TestCase):
 
     def test_insert_data_unknown_user(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
+        self.sign_in(make_user("alice"))
         uploaded_file = SimpleUploadedFile("sample.txt", b"hello", content_type="text/plain")
         resp = self.client.post(
             "/api/v1/insert-data/",
@@ -263,9 +273,9 @@ class InsertDataEndpointTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class QueryEndpointTests(TestCase):
+class QueryEndpointTests(SignedInClientMixin, TestCase):
     def test_query_without_job_returns_404(self):
-        make_user("alice")
+        self.sign_in(make_user("alice"))
         resp = self.client.post(
             "/api/v1/query/",
             {"USER": "alice", "QUERY": "what is this?"},
@@ -274,7 +284,7 @@ class QueryEndpointTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_query_while_initializing_returns_409(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         Job.objects.create(user=user, status=Job.Status.PROCESSING)
         resp = self.client.post(
             "/api/v1/query/",
@@ -285,7 +295,7 @@ class QueryEndpointTests(TestCase):
         self.assertEqual(resp.json()["error_code"], "job_not_ready")
 
     def test_query_happy_path_saves_conversation(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         doc = Document.objects.create(user=user, name="d", source_type="text")
         Job.objects.create(user=user, status=Job.Status.READY, document=doc)
 
@@ -309,35 +319,39 @@ class QueryEndpointTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class JobAndConversationEndpointTests(TestCase):
+class JobAndConversationEndpointTests(SignedInClientMixin, TestCase):
     def test_job_status_not_found(self):
+        self.sign_in(make_user("alice"))
         resp = self.client.get(
             "/api/v1/job-status/00000000-0000-0000-0000-000000000000/"
         )
         self.assertEqual(resp.status_code, 404)
 
     def test_job_status_found(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         job = Job.objects.create(user=user, document=Document.objects.create(user=user, name="d", source_type="text"))
         resp = self.client.get(f"/api/v1/job-status/{job.id}/")
         self.assertEqual(resp.status_code, 200)
 
     def test_conversation_not_found(self):
+        self.sign_in(make_user("alice"))
         resp = self.client.get("/api/v1/conversation/99999/")
         self.assertEqual(resp.status_code, 404)
 
     def test_conversation_history_unknown_user_404(self):
+        self.sign_in(make_user("alice"))
         resp = self.client.get("/api/v1/conversation-history/ghost/")
         self.assertEqual(resp.status_code, 404)
 
     def test_document_unknown_user_404(self):
         # Regression: this endpoint previously 500'd because response_404 was
         # not a staticmethod.
+        self.sign_in(make_user("alice"))
         resp = self.client.get("/api/v1/document/ghost/")
         self.assertEqual(resp.status_code, 404)
 
     def test_conversation_found(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         conversation = Conversation.objects.create(
             user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
@@ -346,9 +360,9 @@ class JobAndConversationEndpointTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class OpenChatAndAnalysisEndpointTests(TestCase):
+class OpenChatAndAnalysisEndpointTests(SignedInClientMixin, TestCase):
     def test_open_chat_creates_job_and_schedules_task(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         Document.objects.create(user=user, name="d", source_type="text")
         import router.views as views
         with mock.patch.object(views, "initialize_rag_task") as task:
@@ -363,7 +377,7 @@ class OpenChatAndAnalysisEndpointTests(TestCase):
         task.delay.assert_called_once()
 
     def test_start_analysis_creates_batch(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         conversation = Conversation.objects.create(
             user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
@@ -376,6 +390,7 @@ class OpenChatAndAnalysisEndpointTests(TestCase):
         self.assertEqual(AnalysisBatch.objects.filter(user=user).count(), 1)
 
     def test_start_analysis_unknown_conversation_404(self):
+        self.sign_in(make_user("alice"))
         resp = self.client.post(
             "/api/v1/start-analysis/",
             {"conversation_id": 424242},
@@ -384,6 +399,7 @@ class OpenChatAndAnalysisEndpointTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_analysis_status_not_found(self):
+        self.sign_in(make_user("alice"))
         resp = self.client.get(
             "/api/v1/analysis-status/00000000-0000-0000-0000-000000000000/"
         )
@@ -714,7 +730,7 @@ class RetrievalDepthTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class ChatRetrievalDepthTests(TestCase):
+class ChatRetrievalDepthTests(SignedInClientMixin, TestCase):
     """Chat shares its engine with deep analysis and candidate pooling."""
 
     def test_query_resets_depth_left_behind_by_pooling(self):
@@ -722,7 +738,7 @@ class ChatRetrievalDepthTests(TestCase):
         # engine is a process-wide singleton that candidate pooling re-depths
         # to as much as POOL_TOP_N_MAX, so the next chat message silently
         # retrieved that many chunks instead of DEFAULT_TOP_K.
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         doc = Document.objects.create(user=user, name="d", source_type="text")
         Job.objects.create(user=user, status=Job.Status.READY, document=doc)
 
@@ -748,7 +764,7 @@ class ChatRetrievalDepthTests(TestCase):
 
     def test_query_pins_depth_before_running_not_after(self):
         # Pinning after .run() would be a no-op for the request that needs it.
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         doc = Document.objects.create(user=user, name="d", source_type="text")
         Job.objects.create(user=user, status=Job.Status.READY, document=doc)
 
@@ -1062,7 +1078,7 @@ class ModelCatalogTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT, CACHES=LOCMEM_CACHE)
-class AnalysisConfigEndpointTests(TestCase):
+class AnalysisConfigEndpointTests(SignedInClientMixin, TestCase):
     def _get_config(self, catalog=None):
         """Fetch the endpoint with the catalogue stubbed.
 
@@ -1127,7 +1143,7 @@ class AnalysisConfigEndpointTests(TestCase):
         self.assertEqual(body["model_catalog"]["count"], len(MODEL_IDS))
 
     def test_start_analysis_stores_the_chosen_config(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         conversation = Conversation.objects.create(
             user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
@@ -1153,7 +1169,7 @@ class AnalysisConfigEndpointTests(TestCase):
         self.assertEqual(batch.config["methods"], ["Dense Retrieval"])
 
     def test_start_analysis_without_config_runs_everything(self):
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         conversation = Conversation.objects.create(
             user=user, document=Document.objects.create(user=user, name="d", source_type="text"), query="q", response="r", context="c"
         )
@@ -1167,7 +1183,7 @@ class AnalysisConfigEndpointTests(TestCase):
     def test_start_analysis_reports_the_ground_truth_actually_stored(self):
         from evaluation.models import Chunk, GroundTruthChunk
 
-        user = make_user("alice")
+        user = self.sign_in(make_user("alice"))
         document = Document.objects.create(user=user, name="d", source_type="text")
         conversation = Conversation.objects.create(
             user=user, document=document, query="q", response="r", context="c"

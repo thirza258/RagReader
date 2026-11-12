@@ -230,8 +230,7 @@ class JobProtocolTests(WorkspaceTestCase):
 class LegacyInitializationTests(WorkspaceTestCase):
     def legacy_document(self):
         from router.models import GuestUser
-        self.client.post("/api/v1/insert-text/", {"USER": self.user.username, "TEXT": "Alpha legacy text."},
-                         content_type="application/json")
+        self.post("/api/v1/insert-text/", {"USER": self.user.username, "TEXT": "Alpha legacy text."})
         return Document.objects.filter(user=GuestUser.objects.get(pk=self.user.pk)).latest("created_at")
 
     def test_legacy_insert_assigns_the_default_workspace(self):
@@ -292,7 +291,7 @@ class LegacyGroundTruthTests(WorkspaceTestCase):
     RAW = "Alpha legacy line one\nAlpha legacy line two continues here.\n\nBeta second paragraph of the legacy text."
 
     def legacy_indexed_document(self):
-        self.client.post("/api/v1/insert-text/", {"USER": self.user.username, "TEXT": self.RAW}, content_type="application/json")
+        self.post("/api/v1/insert-text/", {"USER": self.user.username, "TEXT": self.RAW})
         document = Document.objects.filter(user=self.user).latest("created_at")
         self.pipeline._build_index(self.user.username, document)  # what open-chat initialization did
         return document

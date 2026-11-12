@@ -5,6 +5,7 @@ import { AnalysisRequest, DeepResultContextType } from "../types/types";
 
 import { useState } from "react";
 import type { AnalysisConfigOptions } from "../interface";
+import { useRequireToken } from "../features/auth/hooks/useRequireToken";
 
 /** Full-height app frame: the fixed navbar, then a page that scrolls inside its own panes. */
 const WorkspaceLayout = () => {
@@ -62,6 +63,13 @@ const DeepResultWorkspace = () => {
     completed: 0,
     total: 0,
   });
+  // Every deep-analysis request needs the token; without one, sign in first
+  // and come back here.
+  const token = useRequireToken();
+
+  if (!token) {
+    return <p className="p-6 text-sm text-muted-foreground" role="status">Redirecting to sign in…</p>;
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">

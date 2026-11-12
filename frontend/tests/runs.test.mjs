@@ -16,7 +16,7 @@ import {
   stageName,
   summaryCards,
 } from "../src/features/runs/lib/runMetrics.ts";
-import { isWorkspaceApiPath } from "../src/features/auth/lib/unauthorized.ts";
+import { isProtectedApiPath } from "../src/features/auth/lib/unauthorized.ts";
 
 const span = (name, start_ms, duration_ms, children = [], extra = {}) => ({ name, label: name.toUpperCase(), status: "completed", start_ms, duration_ms, detail: "", error_code: null, data: {}, children, ...extra });
 
@@ -175,8 +175,9 @@ test("run ids and list lines come from the stored shapes", () => {
 });
 
 test("the runs endpoints count as the token-protected API", () => {
-  assert.equal(isWorkspaceApiPath("/retrieval/runs/"), true);
-  assert.equal(isWorkspaceApiPath("/api/v1/retrieval/runs/41/"), true);
-  assert.equal(isWorkspaceApiPath("/conversations/9/messages/"), true);
-  assert.equal(isWorkspaceApiPath("/start-analysis/"), false);
+  assert.equal(isProtectedApiPath("/retrieval/runs/"), true);
+  assert.equal(isProtectedApiPath("/api/v1/retrieval/runs/41/"), true);
+  assert.equal(isProtectedApiPath("/conversations/9/messages/"), true);
+  // Deep analysis is token-protected too since the security pass.
+  assert.equal(isProtectedApiPath("/start-analysis/"), true);
 });

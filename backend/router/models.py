@@ -1,3 +1,4 @@
+from django.contrib.auth.hashers import check_password as check_password_hash, make_password
 from django.db import models
 import uuid
 # Create your models here.e
@@ -5,11 +6,33 @@ import uuid
 class GuestUser(models.Model):
     email = models.EmailField(unique=True)
     username = models.CharField(max_length=255, unique=True)
+    # A Django password hash (make_password); "" means no password has been
+    # set yet: an account created before passwords existed, which can be
+    # claimed once through sign-up with its exact username and email.
+    password = models.CharField(max_length=128, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.username
+
+    @property
+    def has_password(self):
+        return bool(self.password)
+
+    def set_password(self, raw_password):
+        self.password = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        """True when `raw_password` matches; upgrades an outdated hash on success."""
+        if not self.password:
+            return False
+
+        def upgrade(raw):
+            self.set_password(raw)
+            type(self).objects.filter(pk=self.pk).update(password=self.password)
+
+        return check_password_hash(raw_password, self.password, setter=upgrade)
 
     # DRF's IsAuthenticated reads these. A GuestUser only becomes
     # request.user through workspace.auth.GuestTokenAuthentication, i.e. after

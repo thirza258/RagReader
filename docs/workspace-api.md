@@ -4,28 +4,71 @@ The workspace API is RAGReader's resource-oriented API for persistent
 documents, background ingestion, conversations and cited, streamed answers
 (PRD Phase 1), and the retrieval runs that make every answer inspectable
 (Phase 2). It lives in the `workspace` Django app, under `/api/v1/`, next
-to the legacy endpoints, which keep working unchanged.
+to the legacy endpoints, which keep their request and response shapes but,
+like everything else, now require the bearer token.
 
 The authoritative shapes are in [`prd-implementation.md`](prd-implementation.md);
 this page explains how the API behaves.
 
 ## Authentication
 
-1. `POST /api/v1/sign-up/` with `{"EMAIL": "…", "USERNAME": "…"}`, as before.
-   The response's `data` now also contains `token` (`rr_` followed by 43
-   URL-safe characters). Every call issues a new token, so a second browser
-   does not log the first one out. Only the newest 20 tokens per user are
-   kept.
-2. Send it on every workspace API request:
-   `Authorization: Bearer rr_…`.
+Accounts are a username, an email and a password (Django's
+`make_password` hash; the plaintext is never stored or logged).
 
-A missing, malformed or unknown token returns **401** with
+1. **Create an account** — `POST /api/v1/sign-up/` with
+   `{"USERNAME": "…", "EMAIL": "…", "PASSWORD": "…"}`. The password must pass
+   Django's `AUTH_PASSWORD_VALIDATORS` (length ≥ 8, not common, not only
+   digits, not similar to the username or email). Answers **201** in the
+   legacy envelope, `{"status", "message", "timestamp", "data": {"response",
+   "username", "email", "token"}}`.
+2. **Sign in** — `POST /api/v1/sign-in/` with `{"USERNAME": "…", "PASSWORD": "…"}`
+   (or `EMAIL`; either value is matched as a username first, then as an
+   email) → **200** `{"token", "username", "email", "expires_at"}`. Every
+   sign-in issues a new token, so a second browser does not log the first one
+   out; only the newest 20 tokens per user are kept.
+3. Send the token on every request: `Authorization: Bearer rr_…` (`rr_`
+   followed by 43 URL-safe characters).
+4. **Sign out** — `POST /api/v1/sign-out/` with the token → **204**. Revokes
+   that token only; other sessions stay signed in.
+
+Tokens expire `RAG_TOKEN_TTL_DAYS` (default 30) after they are issued. A
+missing, malformed, unknown, revoked or expired token returns **401** with
 `WWW-Authenticate: Bearer` and the error envelope (`authentication_required`).
 Only a SHA-256 of each token is stored.
 
+| Situation | Sign-up with `PASSWORD` | Sign-in |
+| --- | --- | --- |
+| New username and email | 201 + token | 401 `invalid_credentials` |
+| Weak password | 400 `invalid_request`, validator messages in `details.PASSWORD` | — |
+| Account with a password | 409 `account_exists` (no token) | 200 + token, or 401 `invalid_credentials` |
+| Username or email taken by different accounts | 409 `account_exists` | — |
+| Account from before passwords, same username **and** email | Sets the password: 200 + token, `"claimed": true` | 409 `password_not_set` |
+| Account from before passwords, other email | 409 `account_exists` | 409 `password_not_set` |
+
+An unknown account and a wrong password give byte-for-byte the same 401, and
+the unknown case still checks the password against a dummy hash, so neither
+the body nor the response time tells them apart. Claiming an account from
+before passwords is a conditional update (only while the stored password is
+empty), so two concurrent claims cannot both win; it also revokes every
+token the account had, since those were issued to anyone who knew its
+username and email.
+
+Sign-up **without** `PASSWORD` keeps its old behaviour and response (201
+"User created successfully!" / 200 "User already exists") but never contains
+a token, so it cannot be used to sign in. Sign-up errors keep the legacy
+envelope and add the `error` object below (`data` is `null`).
+
+Sign-up and sign-in share a per-client throttle (DRF `ScopedRateThrottle`,
+scope `auth`, `RAG_AUTH_THROTTLE_RATE`, default `10/min`): beyond it they
+answer **429** `rate_limited` with `Retry-After`. Clients are told apart by
+IP address; set `RAG_NUM_PROXIES` to the number of reverse proxies in front
+of Daphne so the address is taken from the right `X-Forwarded-For` hop.
+
 Every object is filtered by the token's user. Another user's workspace,
 document or conversation returns **404**, exactly like an id that does not
-exist, so ids cannot be probed.
+exist, so ids cannot be probed. The same holds for the legacy and
+deep-analysis endpoints (see [Legacy and deep-analysis
+endpoints](#legacy-and-deep-analysis-endpoints)).
 
 ## Errors
 
@@ -41,7 +84,11 @@ stage or chat step where that applies.
 
 | Code | Status | When |
 | --- | --- | --- |
-| `authentication_required` | 401 | No or invalid token |
+| `authentication_required` | 401 | No, invalid, revoked or expired token |
+| `invalid_credentials` | 401 | Sign-in: unknown account or wrong password |
+| `password_not_set` | 409 | Sign-in to an account created before passwords; claim it through sign-up |
+| `account_exists` | 409 | Sign-up for a username or email that is taken |
+| `rate_limited` | 429 | Too many sign-up/sign-in attempts from this client |
 | `not_found` | 404 | Unknown id, or another user's object |
 | `invalid_request` | 400 | Validation failed; see `details` |
 | `file_too_large` | 413 | Upload over `RAG_MAX_UPLOAD_BYTES` |
@@ -64,10 +111,14 @@ codes as the rest of the backend (`provider_timeout`, `provider_credits`,
 
 ## Endpoints
 
-All paths are under `/api/v1/` and require the token.
+All paths are under `/api/v1/` and require the token, except `sign-up/` and
+`sign-in/`.
 
 | Method | Path | Notes |
 | --- | --- | --- |
+| POST | `sign-up/` | No token. Create an account or claim a legacy one; see [Authentication](#authentication). |
+| POST | `sign-in/` | No token. `{USERNAME or EMAIL, PASSWORD}` → `{token, username, email, expires_at}`. |
+| POST | `sign-out/` | Revokes the presenting token → 204. |
 | GET | `workspaces/` | `{"results": [Workspace]}`, default first. Creates "My Workspace" on first use. |
 | POST | `workspaces/` | `{name}` → 201. A user's first workspace becomes the default. |
 | GET, PATCH, DELETE | `workspaces/{id}/` | PATCH `{name}`. DELETE removes its documents (with files and indexes) and conversations → 204; deleting the default promotes the oldest remaining workspace; deleting the last one is 409 `last_workspace`. |
@@ -89,6 +140,57 @@ All paths are under `/api/v1/` and require the token.
 
 `document_ids` must belong to the conversation's workspace (otherwise 400
 `invalid_request`). Interactive OpenAPI docs are at `/api/docs/`.
+
+## Legacy and deep-analysis endpoints
+
+The endpoints in `router/urls.py` and `evaluation/urls.py` keep their request
+and success response shapes, and require the same bearer token. Without a
+valid one they answer 401 with the error envelope above. Anything they are
+given that names another user — a `USER` body field, a `<username>` in the
+path, or the id of someone else's document, chunk, legacy turn, ground
+truth, job or analysis batch — is treated exactly like something that does
+not exist: 404 in the endpoint's usual error shape, nothing read or written.
+Legacy turns from before `Conversation.user` existed belong to their
+document's owner.
+
+| Endpoint | Checked against the caller |
+| --- | --- |
+| `POST insert-data/`, `insert-text/`, `insert-url/` | `USER` must be the caller (checked before any upload is parsed or URL fetched); the document goes to the caller's default workspace |
+| `POST open-chat/`, `POST query/` | `USER` must be the caller |
+| `GET job-status/<job_id>/` | the job's owner |
+| `GET document/<username>/`, `GET conversation-history/<username>/` | `<username>` must be the caller |
+| `GET conversation/<id>/` | the legacy turn's owner |
+| `POST start-analysis/` | `conversation_id`'s owner; a `request_id` that belongs to another batch (anyone's) is 409 `request_id_conflict` |
+| `GET analysis-status/<job_id>/` | the batch's owner, checked before `?conversation_id=` (so another user's batch is 404, never 409) |
+| `POST chunk/`, `GET chunk/<document_id>/` | `USER` / the document's owner (a missing document is now 404 too) |
+| `POST ground-truth-chunk/` | the turn's owner; `chunk_id`s outside the caller's documents are ignored |
+| `POST ground-truth-chunk/pool/` | the turn's owner; pooled chunks that are not the caller's are dropped before they are stored or returned |
+| `GET ground-truth-chunk/<id>/`, `POST`/`GET ground-truth-response/…` | the turn's owner (a missing turn is now 404 on the GETs too, instead of an empty list) |
+| `POST evaluate/ground-truth-chunk/` | the turn's owner and `batch_id`'s owner |
+| `POST evaluate/ground-truth-response/` | the turn's owner |
+| `GET analysis-config/` | **Public**: static options and the model catalogue, no user data |
+
+### Analysis WebSocket
+
+`ws/analysis/<job_id>/` authenticates with its first message, so the token
+never appears in a URL or an access log. After the socket opens the client
+sends:
+
+```json
+{"type": "auth", "token": "rr_…"}
+```
+
+Until that token is valid and unexpired and the batch belongs to its user,
+the server sends nothing about the job and does not subscribe the socket to
+the batch's live updates. A first message that is not this, an invalid or
+expired token, or no message within 10 seconds closes the socket with code
+**4401**. A batch that does not exist or belongs to someone else gets the
+usual terminal `job_not_found` error frame and close code **4404**. A
+malformed `job_id` is reported (`invalid_job_id`, 4400) only after the
+token is accepted. After that the protocol is unchanged (`CONFIG` or
+`REPLAYING`, results, `STAGE_PROGRESS`, `WAITING`, `COMPLETE`). The web client
+sends the auth frame on every (re)connect and treats 4401 and 4404 as final:
+it stops reconnecting and asks the user to sign in.
 
 ## Adding documents
 
@@ -331,6 +433,9 @@ Rates are fractions with four decimals, null when nothing was counted.
 | `RAG_MAX_TEXT_CHARS` | 2000000 | Longest pasted text |
 | `RAG_MAX_URL_BYTES` | 10485760 (10 MB) | Largest fetched web page or PDF |
 | `RAG_CHAT_INDEX_CACHE_SIZE` | 8 | Loaded document indexes kept in memory per process |
+| `RAG_TOKEN_TTL_DAYS` | 30 | Days a token stays valid after sign-up/sign-in |
+| `RAG_AUTH_THROTTLE_RATE` | `10/min` | Sign-up + sign-in attempts per client (DRF rate; empty disables) |
+| `RAG_NUM_PROXIES` | unset | Reverse proxies in front of Daphne; picks the client IP from `X-Forwarded-For` for the throttle |
 
 The embedding model and chunking settings are the ingest-time settings in
 `common/constant.py` (`RAG_EMBEDDING_MODEL`, `RAG_CHUNK_*`); chat retrieval
@@ -339,16 +444,29 @@ depth and the prompt version are constants there too (`CHAT_CANDIDATE_K`,
 
 ## Known debt
 
-* **The legacy endpoints are still unauthenticated and id-addressable.**
-  `insert-*`, `open-chat`, `query`, `job-status`, `document/<username>`,
-  `conversation/<id>`, `conversation-history/<username>`, the analysis
-  endpoints, the evaluation endpoints and the analysis WebSocket accept a
-  username or a numeric/UUID id from anyone. The workspace API does not
-  depend on them, but they expose the same data. They should move behind the
-  token before public use.
-* **Identity is a guest identity.** Signing up again with the same username
-  and email returns a new token, so anyone who knows both can sign in as
-  that user. Tokens do not expire; there is no logout endpoint yet.
+* **One-time claim of passwordless accounts.** An account from before
+  passwords — or one created since by a sign-up without `PASSWORD` (legacy
+  clients) — gets its password from the first sign-up that names its exact
+  username and email. Whoever knows both can therefore claim it before its
+  owner does (and sign-in's `password_not_set` tells anyone which usernames
+  are still unclaimed). The claim revokes every earlier token, and afterwards
+  the account needs its password like any other.
+* **Deploying this signs everyone out once.** Tokens issued before
+  passwords were minted from a username and email alone, so migration
+  `workspace/0003_apitoken_expires_at` deletes them; every user signs in
+  (or claims their passwordless account) again.
+* **No email verification or password reset.** The email is not checked
+  for ownership, so an account is only as strong as its password, and a
+  forgotten password cannot be recovered yet. Sign-up reveals whether a
+  username or email is taken (409), as any sign-up form does; the throttle
+  limits how fast that can be probed.
+* **The throttle is per IP address.** Without `RAG_NUM_PROXIES` matching
+  the deployment, either every client behind the proxy shares one budget or
+  a client can rotate a forged `X-Forwarded-For` to get a new one. There is
+  no per-account lockout.
+* **`analysis-config/` is public.** It exposes no user data, but
+  `?refresh=1` bypasses the catalogue cache, so anyone can make the server
+  refetch the model list from OpenRouter on every such request.
 * Every re-index writes a new index file; older versions stay on disk until
   the document is deleted.
 * With `RAG_CHUNK_STRATEGY=semantic` the chunker embeds sentences itself;

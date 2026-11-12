@@ -27,7 +27,10 @@ after both test suites pass.
   `ws/analysis/<job_id>/` WebSocket, candidate pooling, and every endpoint in
   `backend/evaluation/urls.py`.
 - Legacy endpoints in `backend/router/urls.py` and `POST /api/v1/sign-up/` keep
-  their request and response shapes. Sign-up may only *add* fields.
+  their request and success response shapes. Sign-up may only *add* fields.
+  Since the security pass every one of them (except `analysis-config/`), the
+  evaluation endpoints and the analysis WebSocket require the bearer token
+  and serve only the caller's data (see "Identity and ownership").
 - `_build_index` in the three pipelines stays one atomic transaction: a failed
   rebuild must leave the old chunks, ground truth and engines untouched
   (`router/tests_stability.py::IndexStabilityTests::test_failed_embedding_rolls_back_chunk_changes_and_keeps_both_hybrid_indexes`).
@@ -65,7 +68,8 @@ Frontend (from `frontend/`): `npm run lint` (0 errors), `npm run test:modules`,
 Baseline before Phase 1: backend 583 tests OK; frontend lint 0 errors and 1
 pre-existing warning (`src/components/ui/button.tsx`), 47 module tests pass,
 build OK. After Phase 1: backend 699, 91 module tests. After Phase 2: backend
-734, 102 module tests.
+734, 102 module tests. After the security pass (passwords, token on every
+endpoint): backend 776, 118 module tests.
 
 ## Backend layout
 
@@ -142,8 +146,17 @@ detector from expiring long runs.
 
 ### `workspace.ApiToken`
 `user` FK GuestUser (CASCADE, related_name `api_tokens`), `key_hash`
-(sha256 hex, unique), `created_at`, `last_used_at` (null). Plaintext tokens are
-`rr_` + `secrets.token_urlsafe(32)`, returned once, never stored.
+(sha256 hex, unique), `created_at`, `last_used_at` (null), `expires_at`
+(default `workspace.models.default_token_expiry`: now + `RAG_TOKEN_TTL_DAYS`;
+migration `workspace/0003_apitoken_expires_at` gave existing rows one such
+value). Plaintext tokens are `rr_` + `secrets.token_urlsafe(32)`, returned
+once, never stored.
+
+### `router.GuestUser` (new field)
+`password` (max 128, blank, default `""`): a Django `make_password` hash;
+empty means the account predates passwords and can be claimed once
+(migration `router/0017_guestuser_password`). `set_password`,
+`check_password` (upgrades outdated hashes) and `has_password`.
 
 ### `workspace.ChatSession` (API name: conversation)
 `user` FK GuestUser, `workspace` FK (CASCADE, related_name `conversations`),
@@ -172,19 +185,46 @@ atomic build reuses committed vectors instead of calling the provider.
 
 ## Identity and ownership
 
-- Sign-up/sign-in (`POST /api/v1/sign-up/`) adds `"token"` to its `data`
-  object; every call issues a new token.
-- `workspace.auth.GuestTokenAuthentication` reads `Authorization: Bearer <token>`.
-  `authenticate_header()` returns `Bearer`, so missing/invalid credentials give
-  **401**. `GuestUser` gains `is_authenticated = True` / `is_anonymous = False`
-  properties (no migration).
+- Accounts have passwords. `POST /api/v1/sign-up/` (`USERNAME`, `EMAIL`,
+  `PASSWORD`) creates an account (201 + `token` in `data`, legacy envelope),
+  or sets the password of a passwordless legacy account whose username *and*
+  email match exactly (one-time claim, 200 + `token`, `claimed: true`,
+  earlier tokens revoked); otherwise 409 `account_exists`. Passwords go
+  through `validate_password` (400 `invalid_request`, messages in
+  `details.PASSWORD`). Without `PASSWORD` the legacy response comes back with
+  no token.
+- `POST /api/v1/sign-in/` (`USERNAME` or `EMAIL`, `PASSWORD`) → 200
+  `{token, username, email, expires_at}`; unknown account and wrong password
+  give the identical 401 `invalid_credentials` (a dummy hash is checked for
+  unknown accounts); a passwordless account → 409 `password_not_set`.
+  `POST /api/v1/sign-out/` revokes the presenting token (204).
+- Sign-up and sign-in are throttled per client by
+  `workspace.auth.AuthRateThrottle` (a `ScopedRateThrottle`, scope `auth`,
+  rate read per request from `RAG_AUTH_THROTTLE_RATE`, default `10/min`;
+  `RAG_NUM_PROXIES` sets DRF's `NUM_PROXIES`) → 429 `rate_limited`.
+- `workspace.auth.GuestTokenAuthentication` reads `Authorization: Bearer <token>`
+  through `resolve_token` (prefix, SHA-256 lookup, expiry; expired rows are
+  deleted). `authenticate_header()` returns `Bearer`, so missing/invalid
+  credentials give **401**. `GuestUser` has `is_authenticated = True` /
+  `is_anonymous = False` properties.
 - Every new view subclasses `workspace.views.base.OwnedAPIView`
   (`authentication_classes=[GuestTokenAuthentication]`,
   `permission_classes=[IsAuthenticated]`) and loads objects only through its
   helpers (`get_workspace`, `get_document`, `get_session`), which filter by
   `request.user` and raise **404** for objects the user does not own.
-- Legacy endpoints stay unauthenticated (known debt, documented in
-  `docs/workspace-api.md`).
+- Every legacy, deep-analysis and evaluation view mixes in
+  `workspace.auth.TokenRequiredMixin` (same authentication, 401 in the error
+  envelope, other error shapes unchanged), except the public
+  `analysis-config/`. A body/path username must equal `request.user.username`
+  and every id is looked up owner-filtered (`router.views.owned_conversations`
+  for legacy turns, with a fallback to the document's owner for rows without
+  a user); anything else is the endpoint's usual 404.
+- The analysis WebSocket authenticates with its first frame
+  `{"type": "auth", "token"}` (10 s timeout): 4401 for no/invalid auth, a
+  `job_not_found` frame + 4404 for a batch the user does not own; nothing
+  about the job is sent, and no group subscription is made, before that.
+- Test helpers for all of this are in `backend/common/testing.py`
+  (`sign_in(client, user)`, `bearer(user)`, `open_analysis_socket`).
 
 ## Errors (new API)
 
@@ -456,8 +496,14 @@ src/services/streaming/sse.ts   fetch-based POST SSE client
 ```
 
 - Token in `localStorage["token"]`; `apiClient` adds `Authorization: Bearer`.
-  A 401 from the new API sends the user to `/login?next=<path>`; the login page
-  follows `next` only when it starts with `/` and not `//`.
+  A 401 from any token-protected path (`isProtectedApiPath`: the workspace API
+  and every legacy/deep-analysis endpoint; not sign-in/sign-up/sign-out or
+  `analysis-config`) sends the user to `/login?next=<path>`; the login page
+  follows `next` only when it starts with `/` and not `//`. The login page has
+  "Sign in" and "Create account" modes; logout calls `sign-out/` and clears
+  the session. The deep-analysis pages require a token (`useRequireToken`),
+  and `services/websocket.ts` sends the auth frame on every (re)connect and
+  does not retry 4401/4404.
 - Routes: `/workspace`, `/workspace/:workspaceId`,
   `/workspace/:workspaceId/c/:conversationId` (lazy-loaded). `/chat` and
   `/loading` redirect to `/workspace`.

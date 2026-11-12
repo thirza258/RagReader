@@ -7,6 +7,9 @@ This app adds what is new around them — workspaces, API tokens, chat threads
 (`ChatSession`, called "conversation" in the API), the embedding checkpoint
 and, since Phase 2, retrieval runs (one traced RAG request each).
 """
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -56,6 +59,11 @@ def default_workspace_for(user):
     return Workspace.objects.get(user=user, is_default=True)
 
 
+def default_token_expiry():
+    """Now plus RAG_TOKEN_TTL_DAYS (default 30): when a new token stops working."""
+    return timezone.now() + timedelta(days=getattr(settings, "RAG_TOKEN_TTL_DAYS", 30))
+
+
 class ApiToken(models.Model):
     """A bearer token. Only its SHA-256 is stored; the plaintext is shown once."""
 
@@ -63,6 +71,9 @@ class ApiToken(models.Model):
     key_hash = models.CharField(max_length=64, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
+    # Tokens that existed before expiry was introduced got one migration-time
+    # value (the migration evaluates this default once for every row).
+    expires_at = models.DateTimeField(default=default_token_expiry)
 
     def __str__(self):
         return f"ApiToken {self.pk} ({self.user_id})"

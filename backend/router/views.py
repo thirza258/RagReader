@@ -6,6 +6,7 @@ from functools import wraps
 from common.errors import PipelineError, error_payload
 
 from django.db import transaction, OperationalError, connection
+from django.db.models import Q
 from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.generics import GenericAPIView
@@ -22,6 +23,7 @@ from router.models import (
     Conversation, ConversationHistory
 )
 from router.tasks import initialize_rag_task
+from workspace.auth import TokenRequiredMixin
 from workspace.models import default_workspace_for
 
 from rag.rag_service import apply_retrieval_depth, engine_execution, rag_registry
@@ -65,7 +67,17 @@ from common.constant import (
 from common.schema import get_responses
 
 
-class InsertDataView(GenericAPIView):
+def is_caller(request, username) -> bool:
+    """A body or path username names the signed-in user (anything else is a 404)."""
+    return isinstance(username, str) and username == request.user.username
+
+
+def owned_conversations(user):
+    """Legacy turns of `user`; rows from before Conversation.user fall back to the document's owner."""
+    return Conversation.objects.filter(Q(user=user) | Q(user__isnull=True, document__user=user))
+
+
+class InsertDataView(TokenRequiredMixin, GenericAPIView):
     serializer_class = InsertDataSerializer
     parser_classes = [MultiPartParser, FormParser]
 
@@ -88,8 +100,10 @@ class InsertDataView(GenericAPIView):
             username = serializer.validated_data["USER"]
             file = serializer.validated_data["FILE"]
 
-            user = GuestUser.objects.get(username=username)
-            data = get_loader().process_input(file, username)
+            if not is_caller(request, username):
+                raise GuestUser.DoesNotExist
+            user = request.user
+            data = get_loader().process_input(file, user.username)
 
             document = self.create_document(data, user)
             document.save()
@@ -103,11 +117,10 @@ class InsertDataView(GenericAPIView):
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
-class InsertURLView(GenericAPIView):
+class InsertURLView(TokenRequiredMixin, GenericAPIView):
     serializer_class = InsertURLSerializer
 
-    def create_document(self, data: dict) -> Document:
-        user = GuestUser.objects.get(username=data["user"])
+    def create_document(self, data: dict, user: GuestUser) -> Document:
         document = Document.objects.create(
             user=user,
             workspace=default_workspace_for(user),
@@ -127,19 +140,21 @@ class InsertURLView(GenericAPIView):
             username = serializer.validated_data["USER"]
             url = serializer.validated_data["URL"]
 
-            data = get_loader().process_input(url, username)
-            document = self.create_document(data)
+            # Checked before anything is fetched on the caller's behalf.
+            if not is_caller(request, username):
+                return get_responses().response_404(error="User not found")
+            data = get_loader().process_input(url, request.user.username)
+            document = self.create_document(data, request.user)
             document.save()
 
             return get_responses().response_200("Data inserted successfully!")
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
-class InsertTextView(GenericAPIView):
+class InsertTextView(TokenRequiredMixin, GenericAPIView):
     serializer_class = InsertTextSerializer
 
-    def create_document(self, data: dict) -> Document:
-        user = GuestUser.objects.get(username=data.get("user"))
+    def create_document(self, data: dict, user: GuestUser) -> Document:
         document = Document.objects.create(
             user=user,
             workspace=default_workspace_for(user),
@@ -158,8 +173,10 @@ class InsertTextView(GenericAPIView):
             username = serializer.validated_data.get("USER")
             text = serializer.validated_data.get("TEXT")
 
-            data = get_loader().process_text(text, username)
-            document = self.create_document(data)
+            if not is_caller(request, username):
+                return get_responses().response_404(error="User not found")
+            data = get_loader().process_text(text, request.user.username)
+            document = self.create_document(data, request.user)
             document.save()
 
             return get_responses().response_200("Data inserted successfully!")
@@ -200,17 +217,19 @@ def job_payload(job):
             "retryable": job.retryable, "updated_at": job.updated_at}
 
 
-class OpenChatView(APIView):
+class OpenChatView(TokenRequiredMixin, APIView):
     @retry_locked_request
     def post(self, request):
         try:
             username = request.data.get("USER")
             if not isinstance(username, str) or not username.strip():
                 raise PipelineError("invalid_user", "A username is required to initialize a document.", http_status=400)
+            if not is_caller(request, username):
+                raise GuestUser.DoesNotExist
             queue_failure = []
             with transaction.atomic():
                 # Serialize double-clicks, retries and reloads for this user.
-                user = GuestUser.objects.select_for_update().get(username=username)
+                user = GuestUser.objects.select_for_update().get(pk=request.user.pk)
                 document = Document.objects.filter(user=user).order_by("-created_at").first()
                 if not document:
                     raise PipelineError("missing_document", "Upload a document before opening chat.", http_status=404)
@@ -241,12 +260,12 @@ class OpenChatView(APIView):
         except Exception as exc:
             return public_error_response(exc)
 
-class DocumentView(APIView):
+class DocumentView(TokenRequiredMixin, APIView):
     def get(self, request, username):
         try:
-            user = GuestUser.objects.filter(username=username).first()
-            if not user:
+            if not is_caller(request, username):
                 return get_responses().response_404(error="User not found")
+            user = request.user
             
             document = Document.objects.filter(user=user).last()
             if not document:
@@ -264,14 +283,14 @@ class DocumentView(APIView):
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
-class JobStatusView(APIView):
+class JobStatusView(TokenRequiredMixin, APIView):
     def get(self, request, job_id):
         try:
             try:
                 canonical = uuid.UUID(job_id)
             except (ValueError, TypeError, AttributeError):
                 raise PipelineError("invalid_job_id", "Job ID must be a valid UUID.", http_status=400)
-            job = Job.objects.select_related("user").get(pk=canonical)
+            job = Job.objects.select_related("user").get(pk=canonical, user=request.user)
             job.expire_if_stalled()
             return get_responses().response_200(response=job_payload(job))
         except Job.DoesNotExist:
@@ -279,10 +298,12 @@ class JobStatusView(APIView):
         except Exception as exc:
             return public_error_response(exc)
 
-class ConversationView(GenericAPIView):
+class ConversationView(TokenRequiredMixin, GenericAPIView):
     def get(self, request, conversation_id):
         try:
-            conversation = Conversation.objects.get(id=conversation_id)
+            if not str(conversation_id).isdigit():
+                raise Conversation.DoesNotExist
+            conversation = owned_conversations(request.user).select_related("document").get(id=conversation_id)
             data = {
                 "id": conversation.pk,
                 "document_id": conversation.document.pk if conversation.document else None,
@@ -297,10 +318,12 @@ class ConversationView(GenericAPIView):
         except Exception as e:
             return get_responses().response_500(error=str(e))
   
-class ConversationHistoryView(GenericAPIView):
+class ConversationHistoryView(TokenRequiredMixin, GenericAPIView):
     def get(self, request, username):
         try:
-            user = GuestUser.objects.get(username=username)
+            if not is_caller(request, username):
+                raise GuestUser.DoesNotExist
+            user = request.user
             conversation_histories = ConversationHistory.objects.filter(user=user).select_related('conversation').order_by('-created_at')
             data = [{
                 "query": history.conversation.query,
@@ -313,12 +336,10 @@ class ConversationHistoryView(GenericAPIView):
         except Exception as e:
             return get_responses().response_500(error=str(e))
 
-class QueryView(GenericAPIView):
+class QueryView(TokenRequiredMixin, GenericAPIView):
     serializer_class = QuerySerializer
     
-    def save_conversation(self, username: str, query: str, answer: str, context: str, document: Document ) -> Conversation:
-        user = GuestUser.objects.get(username=username)
-        
+    def save_conversation(self, user: GuestUser, query: str, answer: str, context: str, document: Document ) -> Conversation:
         conversation = Conversation.objects.create(
             user=user,
             document=document,
@@ -339,8 +360,10 @@ class QueryView(GenericAPIView):
 
             username = serializer.validated_data["USER"]
             query = serializer.validated_data["QUERY"]
-            
-            last_job = Job.objects.filter(user__username=username).order_by('-created_at').first()
+            if not is_caller(request, username):
+                raise PipelineError("user_not_found", "User not found.", http_status=404)
+
+            last_job = Job.objects.filter(user=request.user).order_by('-created_at').first()
             
             if not last_job:
                 raise PipelineError("job_not_found", "No initialization job found. Please upload a document first.", http_status=404)
@@ -367,13 +390,13 @@ class QueryView(GenericAPIView):
             # left behind instead of DEFAULT_TOP_K.
             with engine_execution(engine):
                 apply_retrieval_depth(engine, DEFAULT_TOP_K)
-                answer = engine.run(username, query, document_id=document_id)
+                answer = engine.run(request.user.username, query, document_id=document_id)
             
             retrieved_chunks = answer.get("context", [])
             llm_answer = answer.get("answer", "")
             
             context_str = "\n\n".join(doc["text"] for doc in retrieved_chunks)
-            answer_record = self.save_conversation(username, query, llm_answer, context_str, document)
+            answer_record = self.save_conversation(request.user, query, llm_answer, context_str, document)
             
             answer["conversation_id"] = answer_record.pk
             answer["document_id"] = document_id
@@ -393,6 +416,10 @@ class AnalysisConfigView(APIView):
     UI can be honest about it. Any well-formed OpenRouter id is runnable
     whether or not it appears in this list.
     """
+
+    # Static options only: the one legacy endpoint that stays public.
+    authentication_classes = []
+    permission_classes = []
 
     def get(self, request):
         catalog = fetch_catalog(force=request.query_params.get("refresh") == "1")
@@ -437,7 +464,7 @@ class AnalysisConfigView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-class StartAnalysisView(GenericAPIView):
+class StartAnalysisView(TokenRequiredMixin, GenericAPIView):
     def create_analysis_batch(
         self,
         user: GuestUser,
@@ -476,7 +503,7 @@ class StartAnalysisView(GenericAPIView):
             conversation_id = request.data.get("conversation_id")
             if isinstance(conversation_id, bool) or not str(conversation_id or "").isdigit():
                 raise PipelineError("invalid_conversation_id", "A valid conversation ID is required.", http_status=400)
-            conversation = Conversation.objects.select_related("user", "document").get(pk=conversation_id)
+            conversation = owned_conversations(request.user).select_related("user", "document").get(pk=conversation_id)
             if not conversation.user or not conversation.document:
                 raise PipelineError("missing_document", "This conversation has no document. Upload a document and start a new conversation.", http_status=400)
             if conversation.document.user_id != conversation.user_id:
@@ -491,10 +518,11 @@ class StartAnalysisView(GenericAPIView):
             except (ValueError, TypeError, AttributeError):
                 raise PipelineError("invalid_request_id", "Analysis request ID must be a valid UUID.", http_status=400)
             batch, created = AnalysisBatch.objects.get_or_create(job_id=batch_id, defaults={
-                "user": conversation.user, "conversation": conversation, "query": conversation.query,
+                "user": request.user, "conversation": conversation, "query": conversation.query,
                 "config": config, "total_variants": len(build_variants(config)),
             })
-            if batch.conversation_id != conversation.pk or normalize_analysis_config(batch.config) != config:
+            if (batch.user_id != request.user.pk or batch.conversation_id != conversation.pk
+                    or normalize_analysis_config(batch.config) != config):
                 raise PipelineError("request_id_conflict", "This request ID belongs to a different analysis. Use a new request ID for a new run.", http_status=409)
             # No cache write is needed to recover a job: the DB holds its inputs.
             return Response({"message": "Analysis initiated" if created else "Analysis resumed",
@@ -507,14 +535,15 @@ class StartAnalysisView(GenericAPIView):
         except Exception as exc:
             return public_error_response(exc)
 
-class AnalysisStatusView(GenericAPIView):
+class AnalysisStatusView(TokenRequiredMixin, GenericAPIView):
     def get(self, request, job_id):
         try:
             try:
                 canonical = uuid.UUID(job_id)
             except (ValueError, TypeError, AttributeError):
                 raise PipelineError("invalid_job_id", "Analysis job ID must be a valid UUID.", http_status=400)
-            batch = AnalysisBatch.objects.select_related("conversation").get(job_id=canonical)
+            # Owner first: another user's batch is "not found", never a 409.
+            batch = AnalysisBatch.objects.select_related("conversation").get(job_id=canonical, user=request.user)
             conversation_id = request.query_params.get("conversation_id")
             if conversation_id is not None and str(batch.conversation_id) != conversation_id:
                 raise PipelineError("job_conversation_mismatch", "This job belongs to a different conversation. Start a new analysis for this conversation.", http_status=409)

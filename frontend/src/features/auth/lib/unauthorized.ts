@@ -2,10 +2,10 @@ import { loginPathFor } from "./redirect.ts";
 import { clearToken } from "./session.ts";
 
 /**
- * What happens when the workspace API answers 401: the stored token is
- * stale, so it is dropped and the user is sent to sign in, with the current
- * page as `next`. The router registers a handler so this stays an in-app
- * navigation; before it does, a full page load is the fallback.
+ * What happens when a token-protected endpoint answers 401: the stored token
+ * is stale, so it is dropped and the user is sent to sign in, with the
+ * current page as `next`. The router registers a handler so this stays an
+ * in-app navigation; before it does, a full page load is the fallback.
  */
 
 type Handler = (loginPath: string) => void;
@@ -17,10 +17,25 @@ export function setUnauthorizedHandler(next: Handler | null) {
   handler = next;
 }
 
-/** Paths (relative to `/api/v1`) that belong to the token-protected API. */
-const PROTECTED = /^\/?(?:api\/v\d+\/)?(?:workspaces|documents|conversations|retrieval)(?:\/|\?|$)/;
+/**
+ * Paths (relative to `/api/v1`) that need the bearer token: the workspace API
+ * and every legacy and deep-analysis endpoint. Left out on purpose:
+ * `sign-in`/`sign-up` (a 401 there means a wrong password, not a stale
+ * session), `sign-out` (the session is ending anyway) and the public
+ * `analysis-config`.
+ */
+const PROTECTED = new RegExp(
+  "^/?(?:api/v\\d+/)?(?:" +
+    [
+      "workspaces", "documents", "conversations", "retrieval",
+      "insert-data", "insert-text", "insert-url", "open-chat", "job-status", "query",
+      "start-analysis", "analysis-status", "document", "conversation-history", "conversation",
+      "chunk", "ground-truth-chunk", "ground-truth-response", "evaluate",
+    ].join("|") +
+    ")(?:/|\\?|$)",
+);
 
-export function isWorkspaceApiPath(url: string | null | undefined): boolean {
+export function isProtectedApiPath(url: string | null | undefined): boolean {
   if (!url) return false;
   let path = url;
   if (/^https?:\/\//i.test(path)) {

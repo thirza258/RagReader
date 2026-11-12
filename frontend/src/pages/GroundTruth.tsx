@@ -7,6 +7,7 @@ import GroundTruthChunk from "../components/GroundTruthChunk";
 import CandidatePool from "../components/CandidatePool";
 import GroundTruthResponse from "../components/GroundTruthResponse";
 import { CandidatePoolResponse, GroundTruthMode } from "../interface";
+import { useRequireToken } from "../features/auth/hooks/useRequireToken";
 
 const POOL_TOP_N = 10;
 
@@ -80,6 +81,8 @@ const GroundTruthSelector: React.FC = () => {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // Ground truth and pooling are token-protected; sign in first, then return.
+  const token = useRequireToken();
 
   const togglePanel = (panel: "chunks" | "response") => {
     setOpenPanels((prev) => ({ ...prev, [panel]: !prev[panel] }));
@@ -133,6 +136,10 @@ const GroundTruthSelector: React.FC = () => {
       setIsSubmitting(false);
     }
   };
+
+  if (!token) {
+    return <p className="p-10 text-center text-sm text-muted-foreground" role="status">Redirecting to sign in…</p>;
+  }
 
   if (!conversationId || !documentId) {
     return (

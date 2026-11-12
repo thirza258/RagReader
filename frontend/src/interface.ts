@@ -98,6 +98,8 @@ export interface NormalizedChunk {
 
 export interface DeepAnalysisServiceOptions {
   url: string;
+  /** Sent as the socket's first frame; without it the server closes with 4401. */
+  token: string | null;
   batchId?: string;
   query?: string;
   onOpen?: () => void;
@@ -109,6 +111,8 @@ export interface DeepAnalysisServiceOptions {
   onWaiting?: (message: string) => void;
   onError?: OnErrorCallback;
   onClose?: () => void;
+  /** 4401 (no or invalid token) or 4404 (not this user's batch): never retried. */
+  onAuthError?: (kind: "unauthenticated" | "not_found") => void;
 }
 
 

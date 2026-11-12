@@ -13,6 +13,8 @@ from common.constant import (
     normalize_analysis_config,
 )
 from common.schema import get_responses
+from router.views import is_caller, owned_conversations
+from workspace.auth import TokenRequiredMixin
 from .candidate_pooler import DEFAULT_RRF_K, build_default_pooler
 from .eval import evaluate_chunks, evaluate_response
 
@@ -33,13 +35,28 @@ def _positive_int(value, default: int, maximum: int | None = None) -> int:
         return default
     return min(parsed, maximum) if maximum is not None else parsed
 
-class ChunkView(APIView):
+
+def owned_conversation(request, conversation_id) -> Conversation | None:
+    """The caller's legacy turn with this id, or None (missing and foreign look alike)."""
+    if isinstance(conversation_id, bool) or not str(conversation_id).strip().isdigit():
+        return None
+    return (
+        owned_conversations(request.user)
+        .select_related("user", "document", "document__user")
+        .filter(pk=int(str(conversation_id).strip()))
+        .first()
+    )
+
+
+CONVERSATION_NOT_FOUND = {"error": "Conversation not found"}
+
+
+class ChunkView(TokenRequiredMixin, APIView):
     def get_document(self, username: str) -> Document | None:
         try:
-            user = GuestUser.objects.filter(username=username).first()
-            if not user:
+            if not is_caller(self.request, username):
                 return None
-            return Document.objects.filter(user=user).last()
+            return Document.objects.filter(user=self.request.user).last()
         except Exception as e:
             logger.error(f"Error getting document for {username}: {e}")
             return None
@@ -89,6 +106,8 @@ class ChunkView(APIView):
 
     def get(self, request, document_id):
         try:
+            if not Document.objects.filter(pk=document_id, user=request.user).exists():
+                return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
             chunks = Chunk.objects.filter(document_id=document_id)
             chunk_data = [{"id": chunk.id, "text": chunk.text, "metadata": chunk.metadata} for chunk in chunks]
             return Response({"chunks": chunk_data}, status=status.HTTP_200_OK)
@@ -96,7 +115,7 @@ class ChunkView(APIView):
             logger.error(f"Error retrieving chunks for document {document_id}: {e}")
             return Response({"error": "Failed to retrieve chunks"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class CreateGroundTruthChunk(APIView):
+class CreateGroundTruthChunk(TokenRequiredMixin, APIView):
     def post(self, request):
         try:
             conversation_id = int(str(request.data.get("conversation_id")).strip())
@@ -105,11 +124,13 @@ class CreateGroundTruthChunk(APIView):
             if not isinstance(chunk_ids, list):
                 chunk_ids = [chunk_ids]
 
-            conversation = Conversation.objects.filter(id=conversation_id).first()
+            conversation = owned_conversation(request, conversation_id)
             if not conversation:
-                return Response({"error": "Conversation not found"}, status=404)
+                return Response(CONVERSATION_NOT_FOUND, status=404)
 
-            chunks = Chunk.objects.filter(id__in=chunk_ids)
+            # Only chunks of the caller's own documents: ground truth is read
+            # back with its text, so a foreign id would leak that chunk.
+            chunks = Chunk.objects.filter(id__in=chunk_ids, document__user=request.user)
 
             if not chunks.exists():
                 return Response({"error": "Chunks not found"}, status=404)
@@ -134,9 +155,11 @@ class CreateGroundTruthChunk(APIView):
             logger.error(f"Error creating GroundTruthChunk: {e}")
             return Response({"error": "Failed to create Ground Truth Chunk"}, status=500)
 
-class GetGroundTruthChunk(APIView):
+class GetGroundTruthChunk(TokenRequiredMixin, APIView):
     def get(self, request, conversation_id):
         try:
+            if owned_conversation(request, conversation_id) is None:
+                return Response(CONVERSATION_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
             gt_chunks = (
                 GroundTruthChunk.objects
                 .filter(conversation_id=conversation_id)
@@ -165,7 +188,7 @@ class GetGroundTruthChunk(APIView):
             return Response({"error": "Failed to retrieve Ground Truth Chunks"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class CandidatePoolView(APIView):
+class CandidatePoolView(TokenRequiredMixin, APIView):
     """Derive the ground-truth chunk set by pooling every retrieval method.
 
     Runs the conversation's query through Dense, Sparse and Hybrid retrieval,
@@ -176,24 +199,20 @@ class CandidatePoolView(APIView):
     unchanged either way.
     """
 
-    def _resolve_username(self, conversation: Conversation) -> str | None:
-        if conversation.user:
-            return conversation.user.username
-        if conversation.document and conversation.document.user:
-            return conversation.document.user.username
-        return None
-
     def _persist(self, conversation: Conversation, pooled) -> list[dict]:
         """Replace the conversation's ground truth with the pooled ranking."""
         chunk_ids = pooled.rrf_chunk_ids
-        chunks_by_id = Chunk.objects.in_bulk(chunk_ids)
+        # Engines are process-wide; whatever they return, only the caller's
+        # own chunks may become (and be echoed back as) ground truth.
+        chunks_by_id = Chunk.objects.filter(document__user=self.request.user).in_bulk(chunk_ids)
 
         rows, payload = [], []
         for rank, chunk_dict in enumerate(pooled.rrf_ranked_chunks, start=1):
             chunk = chunks_by_id.get(chunk_dict.get("chunk_id"))
             if chunk is None:
-                # The index can outlive a re-chunk; skip ids with no DB row.
-                logger.warning(f"Pooled chunk {chunk_dict.get('chunk_id')} has no Chunk row — skipped.")
+                # The index can outlive a re-chunk, and engines are shared:
+                # skip ids with no row of the caller's own.
+                logger.warning(f"Pooled chunk {chunk_dict.get('chunk_id')} is not one of this user's chunks — skipped.")
                 continue
 
             sources = chunk_dict.get("sources", [])
@@ -227,10 +246,9 @@ class CandidatePoolView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            conversation = Conversation.objects.get(id=conversation_id)
-        except (Conversation.DoesNotExist, ValueError, TypeError):
-            return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+        conversation = owned_conversation(request, conversation_id)
+        if conversation is None or (conversation.document is not None and conversation.document.user_id != request.user.pk):
+            return Response(CONVERSATION_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
 
         # Same ceiling normalize_analysis_config applies, so a direct API call
         # and the sidebar agree on this field's bounds.
@@ -252,7 +270,7 @@ class CandidatePoolView(APIView):
         try:
             pooled = pooler.pool(
                 query=conversation.query,
-                username=self._resolve_username(conversation),
+                username=request.user.username,
                 document=conversation.document,
             )
         except Exception as e:
@@ -293,14 +311,16 @@ class CandidatePoolView(APIView):
             "chunks": chunks,
         }, status=status.HTTP_200_OK)
         
-class CreateGroundTruthResponse(APIView):
+class CreateGroundTruthResponse(TokenRequiredMixin, APIView):
     def post(self, request):
         try:
             conversation_id = request.data.get("conversation_id")
             response_text = request.data.get("response")
             metadata = request.data.get("metadata", {})
             
-            conversation = Conversation.objects.get(id=conversation_id)
+            conversation = owned_conversation(request, conversation_id)
+            if conversation is None:
+                raise Conversation.DoesNotExist
             
             GroundTruthResponse.objects.create(conversation=conversation, response=response_text, metadata=metadata)
             return get_responses().response_200("Ground Truth Response Created")
@@ -312,6 +332,8 @@ class CreateGroundTruthResponse(APIView):
         
     def get(self, request, conversation_id):
         try:
+            if owned_conversation(request, conversation_id) is None:
+                return Response(CONVERSATION_NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
             gt_responses = GroundTruthResponse.objects.filter(conversation_id=conversation_id)
             gt_response_data = [{"id": gt_response.id, "response": gt_response.response, "metadata": gt_response.metadata} for gt_response in gt_responses]
             return Response({"ground_truth_responses": gt_response_data}, status=status.HTTP_200_OK)
@@ -319,7 +341,7 @@ class CreateGroundTruthResponse(APIView):
             logger.error(f"Error retrieving GroundTruthResponses for conversation {conversation_id}: {e}")
             return Response({"error": "Failed to retrieve Ground Truth Responses"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-class GroundTruthChunkEvaluationView(APIView):
+class GroundTruthChunkEvaluationView(TokenRequiredMixin, APIView):
     def update_evaluation_metrics(self, conversation: Conversation, new_metrics: dict):
         try:
             current_conversation = Conversation.objects.get(id=conversation.id)
@@ -341,7 +363,9 @@ class GroundTruthChunkEvaluationView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            conversation = Conversation.objects.get(id=conversation_id)
+            conversation = owned_conversation(request, conversation_id)
+            if conversation is None:
+                raise Conversation.DoesNotExist
             
             # Ground truth chunk IDs for this conversation
             gt_chunk_ids = list(
@@ -358,7 +382,8 @@ class GroundTruthChunkEvaluationView(APIView):
 
             logger.info(f"GT chunk IDs: {gt_chunk_ids}")
 
-            results = AnalysisResult.objects.filter(batch__job_id=batch_id)
+            # Results are rewritten below, so only the caller's own batches.
+            results = AnalysisResult.objects.filter(batch__job_id=batch_id, batch__user=request.user)
             if not results.exists():
                 return Response(
                     {"error": "No results found for this batch"},
@@ -406,7 +431,7 @@ class GroundTruthChunkEvaluationView(APIView):
             logger.error(f"Error evaluating Ground Truth: {e}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-class GroundTruthResponseEvaluationView(APIView):
+class GroundTruthResponseEvaluationView(TokenRequiredMixin, APIView):
     def post(self, request):
         try:
             conversation_id = request.data.get("conversation_id")
@@ -418,7 +443,9 @@ class GroundTruthResponseEvaluationView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            conversation = Conversation.objects.get(id=conversation_id)
+            conversation = owned_conversation(request, conversation_id)
+            if conversation is None:
+                raise Conversation.DoesNotExist
             ground_truth = GroundTruthResponse.objects.filter(conversation=conversation).first()
 
             if not ground_truth:

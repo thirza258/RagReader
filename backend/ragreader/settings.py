@@ -69,8 +69,18 @@ INSTALLED_APPS = [
     "workspace",
 ]
 
+def _optional_int(name):
+    value = os.getenv(name, "").strip()
+    return int(value) if value else None
+
+
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # How many reverse proxies sit in front of Daphne. Throttling keys
+    # anonymous clients by IP: with this set, DRF takes the client address
+    # that many hops from the end of X-Forwarded-For; unset, it uses the
+    # whole header, which a client can rotate to dodge the sign-in throttle.
+    'NUM_PROXIES': _optional_int("RAG_NUM_PROXIES"),
 }
 
 SPECTACULAR_SETTINGS = {
@@ -288,3 +298,10 @@ RAG_MAX_TEXT_CHARS = int(os.getenv("RAG_MAX_TEXT_CHARS", 2_000_000))
 RAG_MAX_URL_BYTES = int(os.getenv("RAG_MAX_URL_BYTES", 10 * 1024 * 1024))  # 10 MB
 # How many loaded document indexes chat keeps in memory per process.
 RAG_CHAT_INDEX_CACHE_SIZE = int(os.getenv("RAG_CHAT_INDEX_CACHE_SIZE", 8))
+
+# ── Accounts (PRD §39) ───────────────────────────────
+# Days a bearer token issued at sign-up/sign-in stays valid.
+RAG_TOKEN_TTL_DAYS = int(os.getenv("RAG_TOKEN_TTL_DAYS", 30))
+# Sign-up and sign-in attempts per client (DRF rate syntax, e.g. "10/min";
+# empty disables the throttle). Counted in the default cache.
+RAG_AUTH_THROTTLE_RATE = os.getenv("RAG_AUTH_THROTTLE_RATE", "10/min")

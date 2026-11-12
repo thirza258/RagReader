@@ -20,7 +20,7 @@ RAGReader is a document question answering and evaluation platform that benchmar
 
 ## How to Use RAGReader
 
-1. **Sign in**: Enter a username and email to create or load your document workspace.
+1. **Sign in**: Create an account with a username, email and password, or sign in to load your document workspace.
 2. **Add Document Source**: Upload a PDF, submit a website URL, or paste document text directly.
 3. **Automatic Indexing**: Text is split into chunks, generating Dense vectors and BM25 sparse indices.
 4. **Ask Initial Question**: Query your document to receive a baseline answer using Dense retrieval.

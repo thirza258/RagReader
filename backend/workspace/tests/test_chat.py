@@ -106,7 +106,7 @@ class StreamingTurnTests(ChatTestCase):
         turn = Conversation.objects.get(pk=message["analysis_turn"]["conversation_id"])
         self.assertEqual(message["analysis_turn"]["document_id"], document["id"])
         self.assertEqual((turn.document_id, turn.query, turn.response), (document["id"], "Which letter is alpha?", self.chat.answer))
-        started = self.client.post("/api/v1/start-analysis/", {"conversation_id": turn.pk}, content_type="application/json")
+        started = self.post("/api/v1/start-analysis/", {"conversation_id": turn.pk})
         self.assertEqual(started.status_code, 202)
 
     def test_stream_zero_returns_both_messages_as_json(self):

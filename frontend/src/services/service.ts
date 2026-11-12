@@ -9,10 +9,22 @@ import type {
 } from "../interface";
 
 
-const signUp = async (email: string, username: string) => {
+export interface SignedInUser {
+    token: string;
+    username: string;
+    email: string;
+}
+
+/**
+ * Creates an account, or sets the password of one created before passwords
+ * existed (exact username and email). The body keeps the legacy envelope:
+ * `{status, message, data: {response, username, email, token}}`.
+ */
+const signUp = async (email: string, username: string, password: string) => {
     const response = await apiClient.post("/sign-up/", {
         "USERNAME": username,
         "EMAIL": email,
+        "PASSWORD": password,
     },
     {
         headers: {
@@ -20,6 +32,17 @@ const signUp = async (email: string, username: string) => {
         },
     });
     return response.data;
+};
+
+/** `identifier` is a username or an email; the server matches either. */
+const signIn = async (identifier: string, password: string): Promise<SignedInUser & { expires_at: string }> => {
+    const response = await apiClient.post("/sign-in/", { "USERNAME": identifier, "PASSWORD": password });
+    return response.data;
+};
+
+/** Revokes the token this browser holds (the request carries it). */
+const signOut = async (): Promise<void> => {
+    await apiClient.post("/sign-out/");
 };
 
 const startDeepAnalysis = async (
@@ -176,6 +199,8 @@ const getConversation = async (conversation_id: string) => {
 
 export default {
     signUp,
+    signIn,
+    signOut,
     startDeepAnalysis,
     getAnalysisConfig,
     createChunk,
