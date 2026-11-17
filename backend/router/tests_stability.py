@@ -17,6 +17,7 @@ from openai import OpenAI
 
 from common.embeddings import embed_texts
 from common.errors import PipelineError
+from common.testing import bearer, sign_in
 from dense_rag.dense_rag import DenseRAG
 from evaluation.models import Chunk
 from pipeline.dense_rag_pipeline import DenseRAGPipeline
@@ -126,6 +127,7 @@ class EmbeddingResponseTests(SimpleTestCase):
 class JobIdentityTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="stable", email="stable@example.com")
+        sign_in(self.client, self.user)
         self.document = Document.objects.create(user=self.user, name="doc", source_type="text")
         self.conversation = Conversation.objects.create(user=self.user, document=self.document, query="question", response="answer", context="")
 
@@ -302,10 +304,11 @@ class QueueFailureTests(TransactionTestCase):
         from django.db import close_old_connections
         user = GuestUser.objects.create(username="concurrent", email="concurrent@example.com")
         Document.objects.create(user=user, name="doc", source_type="text")
+        headers = bearer(user)
         def post():
             close_old_connections()
             try:
-                response = Client().post("/api/v1/open-chat/", {"USER": user.username}, content_type="application/json")
+                response = Client(**headers).post("/api/v1/open-chat/", {"USER": user.username}, content_type="application/json")
                 self.assertIn(response.status_code, (200, 202))
                 return response.json()["data"]["job_id"]
             finally:
@@ -319,6 +322,7 @@ class QueueFailureTests(TransactionTestCase):
     def test_unreachable_worker_returns_job_id_and_durable_failure(self):
         user = GuestUser.objects.create(username="queue", email="queue@example.com")
         Document.objects.create(user=user, name="doc", source_type="text")
+        sign_in(self.client, user)
         with mock.patch("router.views.initialize_rag_task.delay", side_effect=ConnectionError("PRIVATE")):
             response = self.client.post("/api/v1/open-chat/", {"USER": "queue"}, content_type="application/json")
         self.assertEqual(response.status_code, 503)

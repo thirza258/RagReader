@@ -1,6 +1,7 @@
 /**
  * The signed-in user as the browser remembers it. `username` and `email`
- * predate the workspace API; `token` is the bearer token sign-up now issues.
+ * predate the workspace API; `token` is the bearer token sign-in and
+ * create-account issue (it expires; sign-out revokes it on the server).
  * Storage access is guarded because private browsing modes can throw.
  */
 
@@ -40,8 +41,19 @@ export function saveSession(session: { username?: string | null; email?: string 
   write(TOKEN_KEY, session.token ?? null);
 }
 
+export function getEmail(): string | null {
+  return read(EMAIL_KEY);
+}
+
 export function clearToken() {
   write(TOKEN_KEY, null);
+}
+
+/** Forget the signed-in user entirely (sign-out). */
+export function clearSession() {
+  write(TOKEN_KEY, null);
+  write(USERNAME_KEY, null);
+  write(EMAIL_KEY, null);
 }
 
 /** `Authorization` header for fetch-based requests (axios adds it itself). */

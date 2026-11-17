@@ -67,10 +67,27 @@ INSTALLED_APPS = [
     "corsheaders",
     "evaluation",
     "workspace",
+    # Phase 4: evaluation datasets and experiments (not the legacy `evaluation` app).
+    "lab",
+    # Phase 5: research tasks (claims, comparisons, extraction, reports).
+    "research",
 ]
+
+def _optional_int(name, default=None):
+    value = os.getenv(name, "").strip()
+    return int(value) if value else default
+
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # How many reverse proxies sit in front of Daphne. Throttling keys
+    # anonymous clients by IP, taking the address that many hops from the end
+    # of X-Forwarded-For. Never left unset: unset, DRF keys on the whole
+    # header, which a client can rotate to dodge the sign-in throttle. The
+    # default 1 matches docker-compose (the frontend nginx appends the real
+    # peer); add one per extra proxy (e.g. 2 behind a TLS terminator), or 0
+    # when clients reach Daphne directly.
+    'NUM_PROXIES': _optional_int("RAG_NUM_PROXIES", default=1),
 }
 
 SPECTACULAR_SETTINGS = {
@@ -288,3 +305,15 @@ RAG_MAX_TEXT_CHARS = int(os.getenv("RAG_MAX_TEXT_CHARS", 2_000_000))
 RAG_MAX_URL_BYTES = int(os.getenv("RAG_MAX_URL_BYTES", 10 * 1024 * 1024))  # 10 MB
 # How many loaded document indexes chat keeps in memory per process.
 RAG_CHAT_INDEX_CACHE_SIZE = int(os.getenv("RAG_CHAT_INDEX_CACHE_SIZE", 8))
+# How many BM25 indexes (one per set of documents searched together) chat
+# keeps built in memory per process.
+RAG_CHAT_BM25_CACHE_SIZE = int(os.getenv("RAG_CHAT_BM25_CACHE_SIZE", 4))
+
+# ── Accounts (PRD §39) ───────────────────────────────
+# Days a bearer token issued at sign-up/sign-in stays valid.
+RAG_TOKEN_TTL_DAYS = int(os.getenv("RAG_TOKEN_TTL_DAYS", 30))
+# Sign-up and sign-in attempts per client (DRF rate syntax, e.g. "10/min";
+# empty disables the throttle). Counted in the default cache.
+RAG_AUTH_THROTTLE_RATE = os.getenv("RAG_AUTH_THROTTLE_RATE", "10/min")
+# Attempts per submitted username/email, across all clients.
+RAG_AUTH_IDENTIFIER_THROTTLE_RATE = os.getenv("RAG_AUTH_IDENTIFIER_THROTTLE_RATE", "20/hour")

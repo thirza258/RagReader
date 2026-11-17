@@ -205,6 +205,9 @@ class WorkspaceTestCase(TestCase):
         settings_patch = override_settings(MEDIA_ROOT=self.media_root, CACHES=LOCMEM_CACHE)
         settings_patch.enable()
         self.addCleanup(settings_patch.disable)
+        # Locmem outlives the override; the sign-in throttle counts in it.
+        from django.core.cache import cache
+        cache.clear()
 
         self.pipeline, self.embeddings, self.chat = make_chat_pipeline(self.vector_store)
         engine_patch = mock.patch.object(rag_service.rag_registry, "get_engine", return_value=self.pipeline)

@@ -41,3 +41,23 @@ class BackfillMigrationTests(TransactionTestCase):
             failed = Document.objects.get(pk=pk)
             self.assertEqual((failed.workspace_id, failed.status, failed.error_code, failed.retryable), (workspace.pk, "FAILED", "not_indexed", True))
             self.assertEqual(failed.error_message, "This document was added before background ingestion. Re-index it to use it in chat.")
+
+
+class TokenExpiryMigrationTests(TransactionTestCase):
+    def test_identifier_only_tokens_are_revoked(self):
+        from workspace.models import ApiToken
+
+        before = [("router", "0016_backfill_document_workspaces"), ("workspace", "0002_retrieval_runs")]
+        executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
+        executor.migrate(before)
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate(latest))
+        old = executor.loader.project_state(before).apps
+        user = old.get_model("router", "GuestUser").objects.create(username="holder", email="holder@example.com")
+        token = old.get_model("workspace", "ApiToken").objects.create(user=user, key_hash="a" * 64)
+
+        MigrationExecutor(connection).migrate(latest)
+
+        # Tokens from the identifier-only sign-up prove no password.
+        self.assertFalse(ApiToken.objects.filter(pk=token.pk).exists())
+        self.assertTrue(old.get_model("router", "GuestUser").objects.filter(pk=user.pk).exists())

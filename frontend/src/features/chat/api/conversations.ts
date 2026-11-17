@@ -12,17 +12,19 @@ export async function listConversations(workspaceId: number, signal?: AbortSigna
   return results<Conversation>(await unwrap(apiClient.get("/conversations/", { params: { workspace_id: workspaceId }, signal })));
 }
 
-export function createConversation(input: { workspaceId: number; title?: string; documentIds?: number[] }): Promise<Conversation> {
+export function createConversation(input: { workspaceId: number; title?: string; documentIds?: number[]; pipelineId?: number | null }): Promise<Conversation> {
   return unwrap(
     apiClient.post<Conversation>("/conversations/", {
       workspace_id: input.workspaceId,
       ...(input.title ? { title: input.title } : {}),
       ...(input.documentIds ? { document_ids: input.documentIds } : {}),
+      ...(input.pipelineId != null ? { pipeline_id: input.pipelineId } : {}),
     }),
   );
 }
 
-export function updateConversation(id: number, patch: { title?: string; document_ids?: number[] }): Promise<Conversation> {
+/** `pipeline_id: null` switches back to the workspace's default pipeline. */
+export function updateConversation(id: number, patch: { title?: string; document_ids?: number[]; pipeline_id?: number | null }): Promise<Conversation> {
   return unwrap(apiClient.patch<Conversation>(`/conversations/${id}/`, patch));
 }
 

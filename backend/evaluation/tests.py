@@ -29,6 +29,7 @@ from evaluation.eval import (
 )
 from evaluation.models import Chunk, GroundTruthChunk, GroundTruthResponse
 from router.models import GuestUser, Document, Conversation, AnalysisBatch, AnalysisResult
+from common.testing import sign_in
 
 TEST_MEDIA_ROOT = tempfile.mkdtemp(prefix="ragreader-test-media-")
 LOCMEM_CACHE = {
@@ -70,6 +71,7 @@ class RetrievalMetricTests(TestCase):
 class ChunkEndpointTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="alice", email="a@example.com")
+        sign_in(self.client, self.user)
         text_path = default_storage.save(
             "documents/user_alice/extracted.txt",
             ContentFile("First paragraph of the doc.\n\nSecond paragraph of the doc."),
@@ -109,6 +111,7 @@ class ChunkEndpointTests(TestCase):
 class GroundTruthEndpointTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="alice", email="a@example.com")
+        sign_in(self.client, self.user)
         self.document = Document.objects.create(
             user=self.user, name="doc", source_type="text"
         )
@@ -164,6 +167,7 @@ class GroundTruthEndpointTests(TestCase):
 class GroundTruthChunkEvaluationTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="alice", email="a@example.com")
+        sign_in(self.client, self.user)
         self.document = Document.objects.create(
             user=self.user, name="doc", source_type="text"
         )
@@ -223,6 +227,7 @@ class GroundTruthChunkEvaluationTests(TestCase):
 class GroundTruthResponseEvaluationTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="alice", email="a@example.com")
+        sign_in(self.client, self.user)
         self.conversation = Conversation.objects.create(
             user=self.user, query="q", response="r", context="c"
         )
@@ -400,6 +405,7 @@ class CandidatePoolerTests(TestCase):
 class CandidatePoolEndpointTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="alice", email="a@example.com")
+        sign_in(self.client, self.user)
         self.document = Document.objects.create(
             user=self.user, name="doc", source_type="text"
         )

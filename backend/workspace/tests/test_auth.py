@@ -1,4 +1,7 @@
 """Token authentication, the sign-up token, and per-user ownership (PRD §39)."""
+from django.test import override_settings
+
+from common.testing import FAST_PASSWORD_HASHERS
 from workspace.auth import hash_token, issue_token, MAX_TOKENS_PER_USER
 from workspace.models import ApiToken, ChatSession, Workspace
 from workspace.tests.helpers import WorkspaceTestCase, bearer, build_pdf, make_user
@@ -40,9 +43,15 @@ class TokenAuthenticationTests(WorkspaceTestCase):
         self.assertEqual(response.status_code, 401)
 
 
+@override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS)
 class SignUpTokenTests(WorkspaceTestCase):
-    def sign_up(self, username, email):
-        return self.client.post("/api/v1/sign-up/", {"EMAIL": email, "USERNAME": username}, content_type="application/json")
+    def sign_up(self, username, email, password="correct horse battery"):
+        return self.client.post("/api/v1/sign-up/", {"EMAIL": email, "USERNAME": username, "PASSWORD": password},
+                                content_type="application/json")
+
+    def sign_in(self, username, password="correct horse battery"):
+        return self.client.post("/api/v1/sign-in/", {"USERNAME": username, "PASSWORD": password},
+                                content_type="application/json")
 
     def test_sign_up_adds_a_working_token_and_keeps_its_shape(self):
         response = self.sign_up("newcomer", "newcomer@example.com")
@@ -58,12 +67,19 @@ class SignUpTokenTests(WorkspaceTestCase):
 
     def test_every_sign_in_issues_a_new_token_and_old_ones_keep_working(self):
         first = self.sign_up("repeat", "repeat@example.com").json()["data"]["token"]
-        again = self.sign_up("repeat", "repeat@example.com")
+        again = self.sign_in("repeat")
         self.assertEqual(again.status_code, 200)
-        second = again.json()["data"]["token"]
+        second = again.json()["token"]
         self.assertNotEqual(first, second)
         for token in (first, second):
             self.assertEqual(self.client.get("/api/v1/workspaces/", HTTP_AUTHORIZATION=f"Bearer {token}").status_code, 200)
+
+    def test_signing_up_again_never_mints_a_token(self):
+        self.sign_up("repeat", "repeat@example.com")
+        again = self.sign_up("repeat", "repeat@example.com", password="another long passphrase")
+        self.assertEqual(again.status_code, 409)
+        self.assertIsNone(again.json()["data"])
+        self.assertEqual(ApiToken.objects.filter(user__username="repeat").count(), 1)
 
 
 class OwnershipTests(WorkspaceTestCase):

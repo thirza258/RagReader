@@ -4,13 +4,20 @@
 question/answer turn `router.Conversation` stay in the router app: the deep
 analysis flow, its migrations and the evaluation app all reference them there.
 This app adds what is new around them — workspaces, API tokens, chat threads
-(`ChatSession`, called "conversation" in the API) and the embedding checkpoint.
+(`ChatSession`, called "conversation" in the API), the embedding checkpoint,
+since Phase 2 retrieval runs (one traced RAG request each) and, since Phase 3,
+retrieval pipelines with immutable versions.
 """
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
+from django.utils import timezone
 
 DEFAULT_WORKSPACE_NAME = "My Workspace"
 DEFAULT_CONVERSATION_TITLE = "New conversation"
+DEFAULT_PIPELINE_NAME = "Default (dense)"
 
 
 class Workspace(models.Model):
@@ -54,6 +61,11 @@ def default_workspace_for(user):
     return Workspace.objects.get(user=user, is_default=True)
 
 
+def default_token_expiry():
+    """Now plus RAG_TOKEN_TTL_DAYS (default 30): when a new token stops working."""
+    return timezone.now() + timedelta(days=getattr(settings, "RAG_TOKEN_TTL_DAYS", 30))
+
+
 class ApiToken(models.Model):
     """A bearer token. Only its SHA-256 is stored; the plaintext is shown once."""
 
@@ -61,6 +73,9 @@ class ApiToken(models.Model):
     key_hash = models.CharField(max_length=64, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
+    # Tokens that existed before expiry was introduced got one migration-time
+    # value (the migration evaluates this default once for every row).
+    expires_at = models.DateTimeField(default=default_token_expiry)
 
     def __str__(self):
         return f"ApiToken {self.pk} ({self.user_id})"
@@ -80,6 +95,11 @@ class ChatSession(models.Model):
     title_is_auto = models.BooleanField(default=True)
     # Empty means "every READY document in the workspace at question time".
     documents = models.ManyToManyField("router.Document", blank=True, related_name="chat_sessions")
+    # Null means the workspace's default pipeline. Each question uses the
+    # pipeline's latest version at question time (Phase 3).
+    pipeline = models.ForeignKey(
+        "workspace.Pipeline", null=True, blank=True, on_delete=models.SET_NULL, related_name="conversations",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -152,3 +172,219 @@ class EmbeddingCacheEntry(models.Model):
 
     def __str__(self):
         return f"Embedding {self.text_hash[:12]} of document {self.document_id}"
+
+
+# ── Retrieval runs (PRD §20, §21, §32) ───────────────────────────────────────
+
+class RetrievalRun(models.Model):
+    """One traced RAG request: provenance, latency, tokens, spans, candidates.
+
+    A chat turn records one run, whether it completed or failed. Later
+    phases record runs from other sources (evaluation, research) with the
+    same shape.
+    """
+
+    class Source(models.TextChoices):
+        CHAT = "chat"
+        EVALUATION = "evaluation"
+        RESEARCH = "research"
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed"
+        FAILED = "failed"
+
+    user = models.ForeignKey("router.GuestUser", on_delete=models.CASCADE, related_name="retrieval_runs")
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="retrieval_runs")
+    # Deleting a conversation deletes its runs: they hold the question text.
+    conversation = models.ForeignKey(
+        ChatSession, null=True, blank=True, on_delete=models.CASCADE, related_name="retrieval_runs",
+    )
+    message = models.ForeignKey(
+        ChatMessage, null=True, blank=True, on_delete=models.CASCADE, related_name="retrieval_runs",
+    )
+    source = models.CharField(max_length=16, choices=Source.choices, default=Source.CHAT, db_index=True)
+    status = models.CharField(max_length=16, choices=Status.choices, db_index=True)
+    # The chat step that failed, as in the SSE error: rewrite, retrieve, generate.
+    error_stage = models.CharField(max_length=16, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.TextField(blank=True)
+
+    query_original = models.TextField()
+    query_rewritten = models.TextField(blank=True)
+    rewrite_applied = models.BooleanField(default=False)
+    # first_question, rewritten, unchanged, unusable or failed.
+    rewrite_reason = models.CharField(max_length=32, blank=True)
+
+    # Strategy, parameters, models, prompt and index versions (§20).
+    provenance = models.JSONField(default=dict, blank=True)
+    # The pipeline version that answered (Phase 3). Null for runs from before
+    # pipelines, and after the pipeline is deleted; `provenance.pipeline`
+    # keeps the full configuration either way.
+    pipeline_version = models.ForeignKey(
+        "workspace.PipelineVersion", null=True, blank=True, on_delete=models.SET_NULL, related_name="retrieval_runs",
+    )
+
+    # Milliseconds; null when the step did not run or did not complete.
+    total_ms = models.PositiveIntegerField(null=True, blank=True)
+    rewrite_ms = models.PositiveIntegerField(null=True, blank=True)
+    retrieval_ms = models.PositiveIntegerField(null=True, blank=True)
+    rerank_ms = models.PositiveIntegerField(null=True, blank=True)
+    generation_ms = models.PositiveIntegerField(null=True, blank=True)
+    first_token_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    prompt_tokens = models.PositiveIntegerField(null=True, blank=True)
+    completion_tokens = models.PositiveIntegerField(null=True, blank=True)
+    total_tokens = models.PositiveIntegerField(null=True, blank=True)
+
+    candidate_count = models.PositiveIntegerField(default=0)
+    context_count = models.PositiveIntegerField(default=0)
+    cited_count = models.PositiveIntegerField(default=0)
+
+    started_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-started_at", "-id"]
+        indexes = [
+            models.Index(fields=["workspace", "-started_at"], name="run_workspace_started"),
+            models.Index(fields=["user", "-started_at"], name="run_user_started"),
+        ]
+
+    def __str__(self):
+        return f"Run {self.pk} ({self.source}, {self.status})"
+
+
+class RetrievalSpan(models.Model):
+    """One node of a run's trace. The tree is stored in pre-order:
+    `ordinal` is the position, `parent_ordinal` the parent's (null for the root)."""
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed"
+        SKIPPED = "skipped"
+        FAILED = "failed"
+        # Failed, but replaced by a fallback the request could use (Phase 3:
+        # a reranker failure keeps the fused order).
+        FALLBACK = "fallback"
+
+    run = models.ForeignKey(RetrievalRun, on_delete=models.CASCADE, related_name="spans")
+    ordinal = models.PositiveIntegerField()
+    parent_ordinal = models.PositiveIntegerField(null=True, blank=True)
+    depth = models.PositiveSmallIntegerField(default=0)
+    name = models.CharField(max_length=64)
+    label = models.CharField(max_length=200, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.COMPLETED)
+    # Milliseconds from the start of the run (monotonic clock).
+    start_ms = models.FloatField(default=0.0)
+    duration_ms = models.FloatField(null=True, blank=True)
+    detail = models.CharField(max_length=255, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["run", "ordinal"]
+        constraints = [
+            models.UniqueConstraint(fields=["run", "ordinal"], name="unique_span_ordinal_per_run"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} of run {self.run_id}"
+
+
+class RetrievalCandidate(models.Model):
+    """A passage retrieval returned for a run, in rank order."""
+
+    run = models.ForeignKey(RetrievalRun, on_delete=models.CASCADE, related_name="candidates")
+    rank = models.PositiveIntegerField()
+    document = models.ForeignKey(
+        "router.Document", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+    )
+    # Kept when the document is deleted later.
+    document_title = models.CharField(max_length=255, blank=True)
+    # Plain ids, not foreign keys: a re-index may replace the chunk rows,
+    # and a trace must not stop being storable because of it.
+    index_version_id = models.BigIntegerField(null=True, blank=True)
+    chunk_id = models.BigIntegerField(null=True, blank=True)
+    # The score the passage was retrieved by: cosine (dense), BM25 (bm25) or
+    # the fused score (hybrid strategies). The components are kept as well.
+    retrieval_score = models.FloatField(null=True, blank=True)
+    dense_score = models.FloatField(null=True, blank=True)
+    bm25_score = models.FloatField(null=True, blank=True)
+    fused_score = models.FloatField(null=True, blank=True)
+    rerank_score = models.FloatField(null=True, blank=True)
+    # Rank by retrieval score, before any reranking; `rank` is the final one.
+    retrieval_rank = models.PositiveIntegerField(null=True, blank=True)
+    selected_for_context = models.BooleanField(default=False)
+    cited = models.BooleanField(default=False)
+    # The [n] the passage had in the prompt; null when not in the context.
+    citation_id = models.PositiveSmallIntegerField(null=True, blank=True)
+    page_start = models.PositiveIntegerField(null=True, blank=True)
+    page_end = models.PositiveIntegerField(null=True, blank=True)
+    char_start = models.PositiveIntegerField(null=True, blank=True)
+    char_end = models.PositiveIntegerField(null=True, blank=True)
+    snippet = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["run", "rank"]
+
+    def __str__(self):
+        return f"Candidate {self.rank} of run {self.run_id}"
+
+
+# ── Retrieval pipelines (PRD §17–19, Phase 3) ────────────────────────────────
+
+class Pipeline(models.Model):
+    """A named retrieval + generation configuration in a workspace.
+
+    Its configuration lives in `PipelineVersion` rows: editing a pipeline adds
+    a version, and versions never change, so every answer can name exactly
+    what produced it. Every workspace has one default pipeline, created on
+    first need (`default_pipeline_for`), equivalent to Phase 1 chat.
+    """
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="pipelines")
+    name = models.CharField(max_length=120)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-is_default", "created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace"], condition=Q(is_default=True),
+                name="one_default_pipeline_per_workspace",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} (workspace {self.workspace_id})"
+
+
+class ImmutableVersionError(Exception):
+    """A saved pipeline version was about to be changed."""
+
+
+class PipelineVersion(models.Model):
+    """One immutable configuration snapshot of a pipeline (PRD §19)."""
+
+    pipeline = models.ForeignKey(Pipeline, on_delete=models.CASCADE, related_name="versions")
+    number = models.PositiveIntegerField()
+    # The full configuration (see workspace.services.pipelines.CONFIG_KEYS).
+    config = models.JSONField()
+    # sha256 of the canonical JSON of `config`.
+    config_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pipeline", "-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["pipeline", "number"], name="unique_pipeline_version_number"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ImmutableVersionError("Pipeline versions cannot be changed; edit the pipeline to add a version.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.pipeline_id} v{self.number}"

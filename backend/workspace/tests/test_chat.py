@@ -19,7 +19,7 @@ MESSAGE_KEYS = {"id", "conversation_id", "role", "content", "status", "citations
 EVIDENCE_KEYS = {"citation_id", "document_id", "document_title", "index_version_id", "chunk_id", "page_number",
                  "page_end", "char_start", "char_end", "text", "retrieval_score", "rerank_score", "cited"}
 CONVERSATION_KEYS = {"id", "workspace_id", "title", "document_ids", "message_count", "last_message_preview",
-                     "created_at", "updated_at"}
+                     "created_at", "updated_at", "pipeline_id"}
 
 
 class ChatTestCase(WorkspaceTestCase):
@@ -106,7 +106,7 @@ class StreamingTurnTests(ChatTestCase):
         turn = Conversation.objects.get(pk=message["analysis_turn"]["conversation_id"])
         self.assertEqual(message["analysis_turn"]["document_id"], document["id"])
         self.assertEqual((turn.document_id, turn.query, turn.response), (document["id"], "Which letter is alpha?", self.chat.answer))
-        started = self.client.post("/api/v1/start-analysis/", {"conversation_id": turn.pk}, content_type="application/json")
+        started = self.post("/api/v1/start-analysis/", {"conversation_id": turn.pk})
         self.assertEqual(started.status_code, 202)
 
     def test_stream_zero_returns_both_messages_as_json(self):

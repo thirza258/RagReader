@@ -1,8 +1,9 @@
-import { Loader2, Microscope, RotateCcw } from "lucide-react";
+import { ListPlus, Loader2, Microscope, RotateCcw } from "lucide-react";
 import ErrorNotice from "../../../components/ui/ErrorNotice";
 import { buttonOutline } from "../../../components/ui/classes";
 import { isTurnFinished, type StreamingTurn } from "../lib/chatStream";
 import { formatRetrievalSummary } from "../lib/retrievalSummary";
+import { runIdOf } from "../../runs/lib/runMetrics";
 import type { ChatMessage, Evidence, MessageError } from "../types";
 import AnswerMarkdown from "./AnswerMarkdown";
 import SourcesList from "./SourcesList";
@@ -46,10 +47,12 @@ interface AssistantMessageProps {
   /** Offered on the latest failed answer: asks the same question again. */
   onRetry?: () => void;
   onDeepAnalysis: (conversationId: number, documentId: number) => void;
+  /** Phase 4: turn this question and its cited evidence into an evaluation question. */
+  onAddToDataset?: (message: ChatMessage) => void;
 }
 
 /** A stored answer: markdown with citations, sources, "Why this answer?". */
-export function AssistantMessage({ message, onOpenSource, documentTitle, onRetry, onDeepAnalysis }: AssistantMessageProps) {
+export function AssistantMessage({ message, onOpenSource, documentTitle, onRetry, onDeepAnalysis, onAddToDataset }: AssistantMessageProps) {
   const summary = formatRetrievalSummary(message.retrieval, message.latency_ms);
   return (
     <article className="border-l-2 border-border pl-3" aria-label="Answer">
@@ -77,9 +80,17 @@ export function AssistantMessage({ message, onOpenSource, documentTitle, onRetry
               Deep analysis
             </button>
           )}
+          {onAddToDataset && (
+            <button type="button" className={`${buttonOutline} px-2 py-1 text-xs`} onClick={() => onAddToDataset(message)}>
+              <ListPlus aria-hidden="true" className="h-3.5 w-3.5" />
+              Add to dataset
+            </button>
+          )}
         </div>
       )}
-      {message.status === "complete" && <WhyThisAnswer message={message} documentTitle={documentTitle} />}
+      {(message.status === "complete" || (message.status === "failed" && runIdOf(message) != null)) && (
+        <WhyThisAnswer message={message} documentTitle={documentTitle} onOpenSource={onOpenSource} />
+      )}
     </article>
   );
 }

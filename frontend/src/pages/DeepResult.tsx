@@ -7,8 +7,11 @@ import type { LiveAnalysisProgress } from "../lib/liveAnalysis";
 import { analysisFailureSummary, analysisRequestId } from "../lib/analysisRequest";
 import { errorMessage } from "../lib/utils";
 import { buildWebSocketUrl, connectDeepAnalysisWebSocket } from "../services/websocket";
+import { socketAuthMessage } from "../services/analysisSocketAuth";
 import service from "../services/service";
-import { useLocation, useOutletContext, useParams } from "react-router-dom";
+import { getToken } from "../features/auth/lib/session";
+import { loginPathFor } from "../features/auth/lib/redirect";
+import { Link, useLocation, useOutletContext, useParams } from "react-router-dom";
 import type { DeepResultContextType } from "../types/types";
 import type { AnalysisResult, DeepAnalysisConfig, NormalizedChunk } from "../interface";
 
@@ -37,6 +40,8 @@ const DeepResult: React.FC = () => {
   const [liveProgress, setLiveProgress] = useState<LiveAnalysisProgress>({});
   const [isConnected, setIsConnected] = useState(false);
   const [runError, setRunError] = useState("");
+  // Set when the stream refused this session (4401/4404): only signing in helps.
+  const [authPrompt, setAuthPrompt] = useState("");
   const [notice, setNotice] = useState("");
   const [activeBatchId, setActiveBatchId] = useState("");
   const [activeConfig, setActiveConfig] = useState<DeepAnalysisConfig | null>(null);
@@ -79,8 +84,10 @@ const DeepResult: React.FC = () => {
     const epoch = epochRef.current;
     setRunError("");
     setNotice("");
+    setAuthPrompt("");
     setActiveBatchId(batchId);
     let serverError = "";
+    let authFailed = false;
     const current = () => epochRef.current === epoch;
     const refreshStatus = async () => {
       const data = await service.getAnalysisStatus(batchId, conversationId);
@@ -90,7 +97,7 @@ const DeepResult: React.FC = () => {
       return data;
     };
     cleanupRef.current = connectDeepAnalysisWebSocket({
-      url: buildWebSocketUrl(batchId), batchId, query,
+      url: buildWebSocketUrl(batchId), token: getToken(), batchId, query,
       onOpen: () => {
         if (!current()) return;
         setIsConnected(true);
@@ -115,6 +122,15 @@ const DeepResult: React.FC = () => {
         setNotice("");
         setLiveProgress(interruptLiveProgress);
       },
+      onAuthError: (kind) => {
+        if (!current()) return;
+        authFailed = true;
+        setIsConnected(false);
+        setNotice("");
+        setRunError("");
+        setLiveProgress(interruptLiveProgress);
+        setAuthPrompt(socketAuthMessage(kind));
+      },
       onReconnecting: () => {
         if (!current()) return;
         setIsConnected(false);
@@ -138,6 +154,7 @@ const DeepResult: React.FC = () => {
         setIsConnected(false);
         setNotice("");
         setRunState({ isRunning: false, completed: resultsRef.current.filter((r) => !r.error).length, total });
+        if (authFailed) return;
         try {
           // Errors and the Stop button must not unlock modules.
           const status = await refreshStatus();
@@ -191,7 +208,8 @@ const DeepResult: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     async function resume() {
-      if (!conversationId) return;
+      // The layout sends a signed-out visitor to sign in before this mounts.
+      if (!conversationId || !getToken()) return;
       setLiveProgress({});
       setFlowVariant("");
       setRunError("");
@@ -258,7 +276,7 @@ const DeepResult: React.FC = () => {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border pb-3 text-sm text-muted-foreground">
         <span className="flex items-center gap-2">
           <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${isConnected ? "bg-status-success" : "bg-border"}`} />
-          {isConnected ? "Receiving results" : runState.isRunning ? "Preparing analysis" : runError ? "Analysis needs attention" : runState.total > 0 && results.filter((result) => !result.error).length >= runState.total ? "Analysis complete" : "Analysis stopped"}
+          {isConnected ? "Receiving results" : runState.isRunning ? "Preparing analysis" : runError || authPrompt ? "Analysis needs attention" : runState.total > 0 && results.filter((result) => !result.error).length >= runState.total ? "Analysis complete" : "Analysis stopped"}
         </span>
         {activeConfig && (
           <span className="font-mono text-xs">
@@ -270,6 +288,14 @@ const DeepResult: React.FC = () => {
       {activeBatchId && <p className="break-all font-mono text-xs text-muted-foreground">Batch {activeBatchId}{results.some((result) => result.error) && ` · ${results.filter((result) => result.error).length} failed`}</p>}
       {notice && <p role="status" className="border border-border p-3 text-sm text-muted-foreground">{notice}</p>}
       {runError && <div role="alert" className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{runError}</div>}
+      {authPrompt && (
+        <div role="alert" className="border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {authPrompt}{" "}
+          <Link to={loginPathFor(`${location.pathname}${location.search}`)} className="font-medium underline underline-offset-2">
+            Sign in
+          </Link>
+        </div>
+      )}
       {activeConfig && <AnalysisFlow config={activeConfig} options={analysisOptions} results={results} runState={runState} liveProgress={liveProgress} streaming={isConnected && runState.isRunning} selectedVariant={flowVariant} onVariantChange={setFlowVariant} />}
       {results.length === 0 && isConnected && <div className="py-12 text-center text-sm text-muted-foreground">Waiting for analysis results…</div>}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

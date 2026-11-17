@@ -39,8 +39,8 @@ export function useConversations(workspaceId: number) {
   }, []);
 
   const create = useCallback(
-    async (documentIds: number[], title?: string) => {
-      const conversation = await createConversation({ workspaceId, documentIds, title });
+    async (documentIds: number[], title?: string, pipelineId?: number | null) => {
+      const conversation = await createConversation({ workspaceId, documentIds, title, pipelineId });
       store(conversation);
       return conversation;
     },
@@ -48,7 +48,7 @@ export function useConversations(workspaceId: number) {
   );
 
   const update = useCallback(
-    async (id: number, patch: { title?: string; document_ids?: number[] }) => {
+    async (id: number, patch: { title?: string; document_ids?: number[]; pipeline_id?: number | null }) => {
       const conversation = await updateConversation(id, patch);
       store(conversation);
       return conversation;

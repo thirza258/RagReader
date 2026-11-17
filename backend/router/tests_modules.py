@@ -10,6 +10,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from common.analysis_modules import RAG_MODULE_IDS, normalize_modules
 from common.constant import build_pipeline_config, normalize_analysis_config
+from common.testing import sign_in
 from pipeline.analysis_modules import AnalysisModules, context_text, fuse_rankings, pack_context
 from pipeline.base_pipeline import BasePipeline
 from rag.rag_service import config_fingerprint
@@ -291,6 +292,7 @@ class ModuleBehaviorTests(SimpleTestCase):
 class ModuleRunBoundaryTests(TestCase):
     def setUp(self):
         self.user = GuestUser.objects.create(username="module-user", email="modules@example.com")
+        sign_in(self.client, self.user)
         self.document = Document.objects.create(user=self.user, name="solar.txt", source_type="text")
         self.conversation = Conversation.objects.create(user=self.user, document=self.document, query="solar", response="chat", context="source")
         self.config = normalize_analysis_config({"methods": ["Dense Retrieval"], "models": ["openai/gpt-4o-mini"]})

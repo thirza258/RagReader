@@ -11,6 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import service from "../services/service";
+import { clearSession, getToken } from "../features/auth/lib/session";
 
 const SECTIONS = [
   { id: "how-it-works", label: "How it works" },
@@ -29,9 +31,17 @@ const Navbar: React.FC = () => {
   );
   const [email] = useState<string | null>(() => localStorage.getItem("email"));
 
-  const handleLogout = () => {
-    localStorage.removeItem("username");
-    localStorage.removeItem("token");
+  const handleLogout = async () => {
+    // Revoke the token on the server first (the request carries it), then
+    // forget the session even if that call failed.
+    if (getToken()) {
+      try {
+        await service.signOut();
+      } catch {
+        // Best effort: the token still expires on its own.
+      }
+    }
+    clearSession();
     setUsername(null);
     navigate("/login");
   };

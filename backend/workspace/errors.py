@@ -58,6 +58,11 @@ def describe_exception(exc):
         )
     if isinstance(exc, exceptions.ParseError):
         return status.HTTP_400_BAD_REQUEST, error_object("invalid_request", str(exc.detail))
+    if isinstance(exc, exceptions.Throttled):
+        wait = f" Try again in {int(exc.wait)} seconds." if exc.wait else " Try again shortly."
+        return status.HTTP_429_TOO_MANY_REQUESTS, error_object(
+            "rate_limited", "Too many attempts." + wait, retryable=True,
+        )
     if isinstance(exc, RequestDataTooBig):
         return status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, error_object("file_too_large", "The request body is too large.")
     if isinstance(exc, exceptions.APIException):

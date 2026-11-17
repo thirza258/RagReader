@@ -122,7 +122,8 @@ executed inside the backend Docker image by `./deploy.sh` before every deploy.
 
 ## Workspace (documents, conversations, citations)
 
-The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`)
+The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`,
+`/retrieval/runs/`, `/pipelines/`, `/indexes/`, `/evaluations/`, `/experiments/`, `/research/`)
 turns RAGReader into a persistent research workspace:
 
 *   **Documents** — upload PDF, DOCX, TXT or Markdown, add a web page by URL,
@@ -136,8 +137,50 @@ turns RAGReader into a persistent research workspace:
     server-sent events. Every claim cites a numbered source; each citation
     resolves to the document, page, character range and passage text, so the
     reader can jump to and highlight the evidence.
+*   **Why this answer?** — every question is traced and stored as a
+    retrieval run: the rewritten query, every retrieved candidate with its
+    score and whether it was used and cited, a latency waterfall of each
+    step, token usage, and the exact models, prompt and index versions that
+    produced the answer. The workspace's **Runs** view lists recent runs and
+    reports failure rates, p50/p95 latency and ingestion success
+    (`/api/v1/retrieval/runs/`).
+*   **Retrieval pipelines** — each conversation answers with a versioned
+    pipeline: dense, BM25, hybrid (weighted or reciprocal rank fusion) or
+    hybrid + reranking (Ollama or an LLM reranker), with configurable
+    candidate and final top-k, hybrid weight, generation model and
+    temperature. Editing a pipeline adds an immutable version, and every
+    answer records the version, the dense/BM25/fused/rerank scores of each
+    candidate and how reranking moved it (`/api/v1/pipelines/`). Each
+    document's index versions are listed at `/api/v1/indexes/`.
+*   **Evaluation lab** — build evaluation datasets (question, expected
+    answer, expected sources by chunk, character range or page) with
+    immutable versions, CSV/JSON import and export, or straight from a chat
+    answer with **Add to dataset**. Run a dataset version through a pipeline
+    version as an experiment in the background: Recall@K, Precision@K, Hit
+    Rate, MRR, nDCG, context recall/precision, and — reported separately —
+    faithfulness, answer relevance, answer correctness (LLM judge) and
+    citation correctness/completeness. Each experiment records its
+    configuration, index versions, seed, environment and git commit, labels
+    every failed question (retrieval, generation or dataset problem), and
+    can be resumed or rerun. Compare up to six experiments side by side with
+    baseline deltas, paired bootstrap confidence intervals, win/loss counts
+    and latency/token trade-offs (`/api/v1/evaluations/datasets/`,
+    `/api/v1/experiments/`).
+*   **Research** — evidence-backed research tasks: verify a claim
+    (supporting and contradicting passages, a verdict and a confidence
+    computed from them), ask one question across documents (an answer per
+    document, a comparison and a synthesis), compare 2–4 documents on
+    dimensions such as methodology, dataset and limitations, extract
+    structured fields (each value with its source), find contradictions,
+    and write a cited report. Findings without a citation are dropped
+    rather than shown, and every task exports as Markdown
+    (`/api/v1/research/tasks/`).
 
-Requests use a bearer token, which `POST /api/v1/sign-up/` now returns.
+Accounts have a password: `POST /api/v1/sign-up/` creates one and
+`POST /api/v1/sign-in/` signs in, each returning a bearer token that expires
+after 30 days (`RAG_TOKEN_TTL_DAYS`); `POST /api/v1/sign-out/` revokes it.
+Every endpoint, including the legacy and deep-analysis ones and the analysis
+WebSocket, requires that token and only serves the caller's own data.
 URL ingestion is protected against SSRF, and uploads are checked by content.
 Endpoints, event formats, the ingestion lifecycle, security rules and known
 limitations are documented in [Workspace API](docs/workspace-api.md).

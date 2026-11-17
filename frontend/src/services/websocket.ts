@@ -1,5 +1,7 @@
-import type { AnalysisResult, DeepAnalysisServiceOptions } from "../interface";
+import type { AnalysisResult, DeepAnalysisServiceOptions, WebSocketMessage } from "../interface";
 import { processRawFrame } from "./analysisFrames";
+import { authFrame, classifySocketClose, isBatchNotFoundFrame } from "./analysisSocketAuth";
+import type { SocketAuthFailure } from "./analysisSocketAuth";
 
 export function getWsBaseUrl(): string {
   const envWs = import.meta.env.VITE_WS_URL;
@@ -34,12 +36,13 @@ export type OnErrorCallback = (error: Event) => void;
 
 /**
  * Opens a WebSocket connection for deep analysis results.
- * Handles auto-reconnect and clean teardown.
+ * Authenticates with the first frame on every (re)connect, reconnects after
+ * unexpected drops, and never retries an authentication failure.
  */
 export function connectDeepAnalysisWebSocket(
   options: DeepAnalysisServiceOptions
 ): () => void {
-  const { url, onOpen, onError, onClose, onReconnecting } = options;
+  const { url, token, onOpen, onError, onClose, onReconnecting, onAuthError } = options;
 
   let ws: WebSocket | null = null;
   let isManuallyClosed = false;
@@ -47,9 +50,31 @@ export function connectDeepAnalysisWebSocket(
   let retryCount = 0;
   const maxRetries = 3;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let authFailed = false;
+
+  function failAuth(kind: SocketAuthFailure) {
+    if (authFailed) return;
+    authFailed = true;
+    isCompleted = true;
+    onAuthError?.(kind);
+  }
+
+  const frameOptions = {
+    ...options,
+    onServerError: (message: WebSocketMessage) => {
+      // The server's answer for a batch that is missing or not ours.
+      if (isBatchNotFoundFrame(message)) failAuth("not_found");
+      else options.onServerError?.(message);
+    },
+  };
 
   function initSocket() {
     if (isManuallyClosed || isCompleted) return;
+    if (!token) {
+      failAuth("unauthenticated");
+      onClose?.();
+      return;
+    }
 
     try {
       ws = new WebSocket(url);
@@ -62,16 +87,18 @@ export function connectDeepAnalysisWebSocket(
     }
 
     ws.onopen = () => {
-      if (!isManuallyClosed) {
-        onOpen?.();
-      }
+      if (isManuallyClosed) return;
+      // Before anything else, on every connect: the server sends nothing
+      // about the batch until this frame is accepted.
+      ws?.send(authFrame(token));
+      onOpen?.();
     };
 
     ws.onmessage = (event: MessageEvent) => {
       if (isManuallyClosed || isCompleted) return;
       const raw: string = typeof event.data === "string" ? event.data : String(event.data);
       processRawFrame(
-        raw, options,
+        raw, frameOptions,
         () => {
           isCompleted = true;
           if (ws) {
@@ -91,7 +118,13 @@ export function connectDeepAnalysisWebSocket(
     ws.onclose = (event: CloseEvent) => {
       if (isManuallyClosed) return;
 
-      if (isCompleted || event.code === 1000) {
+      const kind = classifySocketClose(event.code, isCompleted);
+      if (kind === "unauthenticated" || kind === "not_found") {
+        failAuth(kind);
+        onClose?.();
+        return;
+      }
+      if (kind === "finished") {
         onClose?.();
         return;
       }

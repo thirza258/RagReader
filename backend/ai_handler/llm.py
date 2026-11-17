@@ -214,14 +214,14 @@ class OpenRouterLLM(BaseLLM):
         for free_model in get_shuffled_free_models():
             try:
                 logger.info("Retrying stream with free fallback model: %s", free_model)
-                yield from self._stream_model(free_model, messages, temperature)
+                yield from self._stream_model(free_model, messages, temperature, fallback=True)
                 logger.info("Fallback stream succeeded with free model: %s", free_model)
                 return
             except _FailedBeforeFirstToken as failure:
                 logger.warning("Free model %s failed: %s", free_model, failure.cause)
         raise provider_error(original, "Answer generation", self.model) from original
 
-    def _stream_model(self, model, messages, temperature):
+    def _stream_model(self, model, messages, temperature, fallback=False):
         started = False
         stream = None
         try:
@@ -243,7 +243,7 @@ class OpenRouterLLM(BaseLLM):
                     finish_reason = getattr(choice, "finish_reason", None) or finish_reason
             if not started:
                 raise PipelineError("empty_model_response", f"OpenRouter returned an empty answer for {model}. Try again.", retryable=True, http_status=502)
-            yield StreamResult(model=answered_by, usage=usage, finish_reason=finish_reason)
+            yield StreamResult(model=answered_by, usage=usage, finish_reason=finish_reason, fallback=fallback, requested_model=model)
         except Exception as exc:
             if not started:
                 raise _FailedBeforeFirstToken(exc) from exc
@@ -258,14 +258,21 @@ class OpenRouterLLM(BaseLLM):
 
 
 class StreamResult:
-    """The end of a `stream_chat` stream."""
+    """The end of a `stream_chat` stream.
 
-    __slots__ = ("model", "usage", "finish_reason")
+    `model` is the id the provider reports (it may carry a version suffix);
+    `requested_model` is the id that was asked for; `fallback` is True when
+    the configured model ran out of credits and a free model answered.
+    """
 
-    def __init__(self, model, usage=None, finish_reason=None):
+    __slots__ = ("model", "usage", "finish_reason", "fallback", "requested_model")
+
+    def __init__(self, model, usage=None, finish_reason=None, fallback=False, requested_model=None):
         self.model = model
         self.usage = usage
         self.finish_reason = finish_reason
+        self.fallback = fallback
+        self.requested_model = requested_model
 
 
 class _FailedBeforeFirstToken(Exception):

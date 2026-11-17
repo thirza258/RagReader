@@ -7,9 +7,14 @@ from it visible in review.
 from rest_framework import serializers
 
 from router.models import Document, Job
-from workspace.models import ChatMessage
+from workspace.models import ChatMessage, RetrievalRun
+from workspace.services.tracing import build_tree
 from workspace.views.base import MAX_ID
 MAX_SCOPE_DOCUMENTS = 200
+RUN_LIST_DEFAULT_LIMIT = 50
+RUN_LIST_MAX_LIMIT = 200
+SUMMARY_DEFAULT_DAYS = 30
+SUMMARY_MAX_DAYS = 365
 MAX_QUESTION_CHARS = 4000
 PREVIEW_CHARS = 140
 
@@ -76,16 +81,45 @@ class ConversationCreateInput(serializers.Serializer):
     title = serializers.CharField(max_length=200, required=False, allow_blank=True)
     workspace_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
     document_ids = _ids_field(required=False)
+    # Null or absent: the workspace's default pipeline.
+    pipeline_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
 
 
 class ConversationPatchInput(serializers.Serializer):
     title = serializers.CharField(max_length=200, required=False)
     document_ids = _ids_field(required=False)
+    # Null switches back to the workspace's default pipeline.
+    pipeline_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
+
+
+class PipelineCreateInput(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    workspace_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
+    # Any subset of the pipeline settings; the rest are the defaults.
+    config = serializers.JSONField(required=False)
+
+
+class PipelinePatchInput(serializers.Serializer):
+    name = serializers.CharField(max_length=120, required=False)
+    # Any subset of the settings, merged onto the latest version.
+    config = serializers.JSONField(required=False)
 
 
 class MessageInput(serializers.Serializer):
     content = serializers.CharField(max_length=MAX_QUESTION_CHARS)
     document_ids = _ids_field(required=False, allow_null=True)
+
+
+class RunListQuery(serializers.Serializer):
+    """Query parameters of GET retrieval/runs/ (ids are checked by the view)."""
+    status = serializers.ChoiceField(choices=RetrievalRun.Status.values, required=False)
+    source = serializers.ChoiceField(choices=RetrievalRun.Source.values, required=False)
+    limit = serializers.IntegerField(min_value=1, max_value=RUN_LIST_MAX_LIMIT, required=False, default=RUN_LIST_DEFAULT_LIMIT)
+
+
+class RunSummaryQuery(serializers.Serializer):
+    days = serializers.IntegerField(min_value=1, max_value=SUMMARY_MAX_DAYS, required=False, default=SUMMARY_DEFAULT_DAYS)
+    source = serializers.ChoiceField(choices=RetrievalRun.Source.values, required=False)
 
 
 def validated(serializer_class, data):
@@ -221,7 +255,7 @@ def preview(text):
     return text if len(text) <= PREVIEW_CHARS else text[:PREVIEW_CHARS - 1].rstrip() + "…"
 
 
-def conversation_payload(session, message_count=None, last_message=None):
+def conversation_payload(session, message_count=None, last_message=None, default_pipeline_id=None):
     if message_count is None:
         message_count = getattr(session, "message_count", None)
     if message_count is None:
@@ -232,11 +266,19 @@ def conversation_payload(session, message_count=None, last_message=None):
         else:
             latest = session.messages.order_by("-created_at", "-id").values_list("content", flat=True).first()
             last_message = latest or ""
+    pipeline_id = session.pipeline_id
+    if pipeline_id is None:
+        if default_pipeline_id is None:
+            from workspace.services.pipelines import default_pipeline_for
+            default_pipeline_id = default_pipeline_for(session.workspace).pk
+        pipeline_id = default_pipeline_id
     return {
         "id": session.pk,
         "workspace_id": session.workspace_id,
         "title": session.title,
         "document_ids": sorted(document.pk for document in session.documents.all()),
+        # The pipeline questions run with: the conversation's, else the default.
+        "pipeline_id": pipeline_id,
         "message_count": message_count,
         "last_message_preview": preview(last_message),
         "created_at": session.created_at,
@@ -276,3 +318,166 @@ def message_payload(message):
 
 def job_is_live(job):
     return job is not None and job.status in (Job.Status.PENDING, Job.Status.PROCESSING)
+
+
+# ── Retrieval runs (Phase 2) ─────────────────────────────────────────────────
+
+def run_payload(run):
+    """A run as listed: what happened, how long it took, what it cost."""
+    provenance = run.provenance or {}
+    usage = None
+    if run.total_tokens is not None or run.prompt_tokens is not None or run.completion_tokens is not None:
+        usage = {"prompt_tokens": run.prompt_tokens, "completion_tokens": run.completion_tokens, "total_tokens": run.total_tokens}
+    error = None
+    if run.status == RetrievalRun.Status.FAILED:
+        error = {
+            "code": run.error_code or "run_failed",
+            "message": run.error_message or "The request failed.",
+            "stage": run.error_stage or None,
+        }
+    return {
+        "id": run.pk,
+        "workspace_id": run.workspace_id,
+        "conversation_id": run.conversation_id,
+        "message_id": run.message_id,
+        "source": run.source,
+        "status": run.status,
+        "query": {
+            "original": run.query_original,
+            "rewritten": run.query_rewritten or run.query_original,
+            "rewrite_applied": run.rewrite_applied,
+            "rewrite_reason": run.rewrite_reason or None,
+        },
+        "error": error,
+        "latency_ms": {
+            "total": run.total_ms, "rewrite": run.rewrite_ms, "retrieval": run.retrieval_ms,
+            "rerank": run.rerank_ms, "generation": run.generation_ms, "first_token": run.first_token_ms,
+        },
+        "token_usage": usage,
+        "candidate_count": run.candidate_count,
+        "context_count": run.context_count,
+        "cited_count": run.cited_count,
+        "strategy": provenance.get("strategy"),
+        "generation_model": provenance.get("generation_model"),
+        # Phase 3: the pipeline version that ran (null before pipelines, and
+        # after the pipeline was deleted); `pipeline` is kept from provenance.
+        "pipeline_version_id": run.pipeline_version_id,
+        "pipeline": run_pipeline(provenance),
+        "started_at": run.started_at,
+        "created_at": run.created_at,
+    }
+
+
+def run_pipeline(provenance):
+    pipeline = provenance.get("pipeline")
+    if not isinstance(pipeline, dict):
+        return None
+    return {
+        "id": pipeline.get("pipeline_id"), "name": pipeline.get("name"),
+        "version": pipeline.get("version"), "version_id": pipeline.get("version_id"),
+    }
+
+
+def span_rows(spans):
+    return [
+        {
+            "ordinal": span.ordinal, "parent_ordinal": span.parent_ordinal, "depth": span.depth,
+            "name": span.name, "label": span.label, "status": span.status,
+            "start_ms": span.start_ms, "duration_ms": span.duration_ms,
+            "detail": span.detail, "error_code": span.error_code or None, "data": span.data or {},
+        }
+        for span in spans
+    ]
+
+
+def candidate_payload(candidate, text=None):
+    document = candidate.document if candidate.document_id else None
+    return {
+        "rank": candidate.rank,
+        "document_id": candidate.document_id,
+        "document_title": (document.name if document is not None else "") or candidate.document_title,
+        "document_available": document is not None,
+        "index_version_id": candidate.index_version_id,
+        "chunk_id": candidate.chunk_id,
+        "page_number": candidate.page_start,
+        "page_end": candidate.page_end,
+        "char_start": candidate.char_start,
+        "char_end": candidate.char_end,
+        # The whole passage while its chunk exists, else the stored snippet.
+        "text": text if text is not None else candidate.snippet,
+        "retrieval_score": candidate.retrieval_score,
+        "rerank_score": candidate.rerank_score,
+        # Phase 3: the score components and the rank before reranking.
+        "dense_score": candidate.dense_score,
+        "bm25_score": candidate.bm25_score,
+        "fused_score": candidate.fused_score,
+        "retrieval_rank": candidate.retrieval_rank,
+        "selected_for_context": candidate.selected_for_context,
+        "cited": candidate.cited,
+        "citation_id": candidate.citation_id,
+    }
+
+
+def run_detail_payload(run, spans, candidates, texts=None):
+    """The full trace: provenance, span tree, candidates."""
+    texts = texts or {}
+    return {
+        **run_payload(run),
+        "provenance": run.provenance or {},
+        "spans": build_tree(span_rows(spans)),
+        "candidates": [candidate_payload(candidate, texts.get(candidate.pk)) for candidate in candidates],
+    }
+
+
+# ── Pipelines and index versions (Phase 3) ───────────────────────────────────
+
+def version_payload(version):
+    return {
+        "id": version.pk,
+        "pipeline_id": version.pipeline_id,
+        "number": version.number,
+        "config": version.config,
+        "config_hash": version.config_hash,
+        "created_at": version.created_at,
+    }
+
+
+def pipeline_payload(pipeline, latest, versions=None):
+    """A pipeline with its latest version and (newest first) every version's id and number."""
+    if versions is None:
+        versions = list(pipeline.versions.order_by("-number").values("id", "number", "created_at"))
+    return {
+        "id": pipeline.pk,
+        "workspace_id": pipeline.workspace_id,
+        "name": pipeline.name,
+        "is_default": pipeline.is_default,
+        "version": version_payload(latest),
+        "version_count": len(versions),
+        "versions": [{"id": row["id"], "number": row["number"], "created_at": row["created_at"]} for row in versions],
+        "created_at": pipeline.created_at,
+        "updated_at": pipeline.updated_at,
+    }
+
+
+def index_version_payload(vector, document):
+    """A DocumentVector as an index version (PRD §19).
+
+    The build settings (embedding model, chunk configuration, chunk count)
+    are recorded on the document at ingest time, so they are known for the
+    current index only; older versions report null.
+    """
+    metadata = document.metadata or {}
+    current = vector.pk == document.current_index_id
+    return {
+        "id": vector.pk,
+        "document_id": document.pk,
+        "document_title": document.name,
+        "method": vector.method,
+        "status": vector.status,
+        "is_current": current,
+        "embedding_model": metadata.get("embedding_model") if current else None,
+        "chunk_config": metadata.get("chunk_config") if current else None,
+        "chunk_count": metadata.get("chunk_count") if current else None,
+        "created_at": vector.created_at,
+        "updated_at": vector.updated_at,
+    }

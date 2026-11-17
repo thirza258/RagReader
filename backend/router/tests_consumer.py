@@ -29,6 +29,11 @@ from django.core.cache import cache
 from django.test import TransactionTestCase, override_settings
 from common.analysis_progress import progress_stage, report_progress
 from common.errors import PipelineError
+from django.utils import timezone
+
+from common.testing import open_analysis_socket
+from workspace.auth import hash_token, issue_token
+from workspace.models import ApiToken
 
 import router.consumers as consumers
 import router.urls
@@ -76,6 +81,7 @@ class AnalysisConsumerTests(TransactionTestCase):
         self.user = GuestUser.objects.create(
             username="alice", email="alice@example.com"
         )
+        self.token = issue_token(self.user)
         self.document = Document.objects.create(
             user=self.user, name="doc.txt", source_type="text"
         )
@@ -123,7 +129,7 @@ class AnalysisConsumerTests(TransactionTestCase):
                 URLRouter(router.urls.websocket_urlpatterns),
                 f"/ws/analysis/{job_id}/",
             )
-            connected, _ = await communicator.connect()
+            connected = await open_analysis_socket(communicator, self.token)
             self.assertTrue(connected)
 
             frames = []
@@ -219,13 +225,13 @@ class AnalysisConsumerTests(TransactionTestCase):
             app = URLRouter(router.urls.websocket_urlpatterns)
             first = WebsocketCommunicator(app, f"/ws/analysis/{batch.job_id}/")
             second = WebsocketCommunicator(app, f"/ws/analysis/{batch.job_id}/")
-            await first.connect()
+            await open_analysis_socket(first, self.token)
             try:
                 while True:
                     frame = await first.receive_json_from(timeout=5)
                     if frame.get("event", {}).get("id") == "search":
                         break
-                await second.connect()
+                await open_analysis_socket(second, self.token)
                 while True:
                     frame = await second.receive_json_from(timeout=5)
                     if frame.get("status") == "WAITING":
@@ -357,7 +363,9 @@ class AnalysisConsumerTests(TransactionTestCase):
             frames = self.collect(batch.job_id)
         streamed = self.results_in(frames)[0]["evaluation"]
         replayed = self.results_in(self.collect(batch.job_id))[0]["evaluation"]
-        restored = self.client.get(f"/api/v1/analysis-status/{batch.job_id}/").json()["results"][0]["evaluation"]
+        restored = self.client.get(
+            f"/api/v1/analysis-status/{batch.job_id}/", HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        ).json()["results"][0]["evaluation"]
         for evaluation in (streamed, replayed, restored):
             self.assertEqual(evaluation["response_evaluation_details"], details)
             self.assertIsNone(evaluation["response_evaluation"]["faithfulness"])
@@ -464,7 +472,7 @@ class AnalysisConsumerTests(TransactionTestCase):
 
         async def run():
             communicator = WebsocketCommunicator(URLRouter(router.urls.websocket_urlpatterns), f"/ws/analysis/{batch.job_id}/")
-            await communicator.connect()
+            await open_analysis_socket(communicator, self.token)
             frames = []
             try:
                 for _ in range(100):
@@ -574,3 +582,122 @@ class AnalysisConsumerTests(TransactionTestCase):
         self.assertEqual(frames[0]["expected_count"], 9)
         self.assertEqual(len(self.results_in(frames)), 9)
         self.assertEqual(AnalysisResult.objects.filter(batch=batch).count(), 9)
+
+
+@override_settings(CHANNEL_LAYERS=IN_MEMORY_CHANNELS, CACHES=LOCMEM_CACHE)
+class AnalysisSocketAuthTests(TransactionTestCase):
+    """The first frame authenticates; nothing about the job is sent before it."""
+
+    def setUp(self):
+        cache.clear()
+        self.user = GuestUser.objects.create(username="alice", email="alice@example.com")
+        self.document = Document.objects.create(user=self.user, name="doc.txt", source_type="text")
+        self.conversation = Conversation.objects.create(
+            user=self.user, document=self.document, query="what about alpha?", response="", context="",
+        )
+        self.batch = AnalysisBatch.objects.create(
+            user=self.user, conversation=self.conversation, query=self.conversation.query, total_variants=1,
+            config={"methods": [DENSE], "models": [GPT], "top_k": 3, "ground_truth_mode": "manual", "pool_top_n": 10},
+        )
+        self.token = issue_token(self.user)
+        self.mallory = GuestUser.objects.create(username="mallory", email="mallory@example.com")
+        self.mallory_token = issue_token(self.mallory)
+        timeout = mock.patch.object(consumers, "AUTH_TIMEOUT_SECONDS", 0.3)
+        timeout.start()
+        self.addCleanup(timeout.stop)
+
+    def socket(self, job_id=None):
+        return WebsocketCommunicator(URLRouter(router.urls.websocket_urlpatterns), f"/ws/analysis/{job_id or self.batch.job_id}/")
+
+    def outputs_until_close(self, first_frame=None, job_id=None):
+        """Every ASGI message the server sends, up to and including its close."""
+
+        async def run():
+            communicator = self.socket(job_id)
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            if first_frame is not None:
+                if isinstance(first_frame, str):
+                    await communicator.send_to(text_data=first_frame)
+                else:
+                    await communicator.send_json_to(first_frame)
+            outputs = []
+            try:
+                while True:
+                    output = await communicator.receive_output(timeout=5)
+                    outputs.append(output)
+                    if output["type"] == "websocket.close":
+                        return outputs
+            finally:
+                await communicator.disconnect()
+
+        return async_to_sync(run)()
+
+    def assert_closed_without_data(self, outputs, code):
+        self.assertEqual([output["type"] for output in outputs], ["websocket.close"])
+        self.assertEqual(outputs[0]["code"], code)
+
+    def test_no_auth_frame_closes_4401_without_job_data(self):
+        with mock.patch.object(consumers.rag_registry, "get_engine") as get_engine:
+            outputs = self.outputs_until_close()
+        self.assert_closed_without_data(outputs, 4401)
+        get_engine.assert_not_called()
+
+    def test_a_bad_first_frame_closes_4401(self):
+        expired = issue_token(self.user)
+        ApiToken.objects.filter(key_hash=hash_token(expired)).update(expires_at=timezone.now())
+        for frame in ("not json", {"type": "subscribe"}, {"token": self.token}, {"type": "auth"},
+                      {"type": "auth", "token": "rr_unknown"}, {"type": "auth", "token": 42},
+                      {"type": "auth", "token": expired}):
+            with self.subTest(frame=frame):
+                self.assert_closed_without_data(self.outputs_until_close(frame), 4401)
+
+    def test_a_malformed_job_id_is_only_reported_after_auth(self):
+        self.assert_closed_without_data(self.outputs_until_close(job_id="invalid-id"), 4401)
+        outputs = self.outputs_until_close({"type": "auth", "token": self.token}, job_id="invalid-id")
+        self.assertEqual(json.loads(outputs[0]["text"])["error_code"], "invalid_job_id")
+        self.assertEqual(outputs[-1]["code"], 4400)
+
+    def test_another_users_batch_is_4404_and_looks_like_a_missing_one(self):
+        with mock.patch.object(consumers.rag_registry, "get_engine") as get_engine:
+            foreign = self.outputs_until_close({"type": "auth", "token": self.mallory_token})
+            missing = self.outputs_until_close({"type": "auth", "token": self.mallory_token},
+                                               job_id="33333333-3333-3333-3333-333333333333")
+        get_engine.assert_not_called()
+        for outputs in (foreign, missing):
+            self.assertEqual([output["type"] for output in outputs], ["websocket.send", "websocket.close"])
+            self.assertEqual(outputs[-1]["code"], 4404)
+        frames = [json.loads(outputs[0]["text"]) for outputs in (foreign, missing)]
+        for frame in frames:
+            frame.pop("batch_id")
+        self.assertEqual(frames[0], frames[1])
+        self.assertEqual(frames[0]["error_code"], "job_not_found")
+        self.assertNotIn(self.conversation.query, foreign[0]["text"])
+
+    def test_the_owner_gets_the_normal_stream(self):
+        with mock.patch.object(consumers.rag_registry, "get_engine", return_value=make_engine()):
+            outputs = self.outputs_until_close({"type": "auth", "token": self.token})
+        frames = [json.loads(output["text"]) for output in outputs if output["type"] == "websocket.send"]
+        self.assertEqual(frames[0]["status"], "CONFIG")
+        self.assertEqual(frames[-1]["status"], "COMPLETE")
+
+    def test_an_unauthenticated_socket_receives_no_live_updates(self):
+        # Live results are fanned out to every socket subscribed to the batch;
+        # a socket only subscribes once it has authenticated as the owner.
+        async def run():
+            idle = self.socket()
+            owner = self.socket()
+            await idle.connect()
+            await open_analysis_socket(owner, self.token)
+            try:
+                while (await owner.receive_json_from(timeout=5)).get("status") != "COMPLETE":
+                    pass
+                return await idle.receive_output(timeout=5)
+            finally:
+                await owner.disconnect()
+                await idle.disconnect()
+
+        with mock.patch.object(consumers, "AUTH_TIMEOUT_SECONDS", 2), \
+                mock.patch.object(consumers.rag_registry, "get_engine", return_value=make_engine()):
+            first = async_to_sync(run)()
+        self.assertEqual(first, {"type": "websocket.close", "code": 4401})

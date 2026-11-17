@@ -21,16 +21,42 @@ import NewConversation from "../features/chat/components/NewConversation";
 import { formatRetrievalSummary } from "../features/chat/lib/retrievalSummary";
 import type { ChatMessage, Evidence } from "../features/chat/types";
 import DocumentReader from "../features/reader/components/DocumentReader";
+import RunsPanel from "../features/runs/components/RunsPanel";
+import { usePipelines } from "../features/pipelines/hooks/usePipelines";
+import PipelineBar from "../features/pipelines/components/PipelineBar";
+import PipelinePanel from "../features/pipelines/components/PipelinePanel";
+import { pipelineVersionLabel } from "../features/pipelines/lib/pipelineConfig";
+import EvaluationPanel from "../features/evaluation/components/EvaluationPanel";
+import AddToDatasetDialog from "../features/evaluation/components/AddToDatasetDialog";
+import ResearchPanel from "../features/research/components/ResearchPanel";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-type Pane = "documents" | "reader" | "chat";
+type Pane = "documents" | "reader" | "chat" | "runs" | "pipelines" | "evaluation" | "research";
+/** What the right-hand column shows on wide screens. */
+type SidePane = "chat" | "runs" | "pipelines" | "evaluation" | "research";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "documents", label: "Documents" },
   { id: "reader", label: "Reader" },
   { id: "chat", label: "Chat" },
+  { id: "runs", label: "Runs" },
+  { id: "pipelines", label: "Pipelines" },
+  { id: "evaluation", label: "Evaluation" },
+  { id: "research", label: "Research" },
 ];
+
+const SIDE_PANES: { id: SidePane; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "runs", label: "Runs" },
+  { id: "pipelines", label: "Pipelines" },
+  { id: "evaluation", label: "Evaluation" },
+  { id: "research", label: "Research" },
+];
+
+function isSidePane(id: Pane): id is SidePane {
+  return id === "chat" || id === "runs" || id === "pipelines" || id === "evaluation" || id === "research";
+}
 
 function parseId(value: string | null | undefined): number | null {
   return value && /^\d+$/.test(value) ? Number(value) : null;
@@ -165,6 +191,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   } = useDocuments(workspaceId);
   const conversations = useConversations(workspaceId);
   const { refresh: refreshConversations } = conversations;
+  const pipelines = usePipelines(workspaceId);
 
   const conversationId = parseId(conversationParam);
   const activeConversation = conversations.list.find((conversation) => conversation.id === conversationId) ?? null;
@@ -179,6 +206,29 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const [scopeError, setScopeError] = useState<ApiRequestError | null>(null);
   const [pending, setPending] = useState<{ conversationId: number; content: string } | null>(null);
   const [latestAnswer, setLatestAnswer] = useState<ChatMessage | null>(null);
+  const [sidePane, setSidePane] = useState<SidePane>("chat");
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [runsVersion, setRunsVersion] = useState(0);
+  /** The pipeline for the next new conversation; null = the workspace default. */
+  const [draftPipelineId, setDraftPipelineId] = useState<number | null>(null);
+  const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [pipelineError, setPipelineError] = useState<ApiRequestError | null>(null);
+  /** Phase 4: the answer being added to a dataset, and what the lab should re-read. */
+  const [datasetMessage, setDatasetMessage] = useState<ChatMessage | null>(null);
+  const [datasetsVersion, setDatasetsVersion] = useState(0);
+  const [datasetNotice, setDatasetNotice] = useState<string | null>(null);
+  /** The lab stays mounted once opened, so its place (dataset, experiment) survives tab switches. */
+  const [evaluationOpened, setEvaluationOpened] = useState(false);
+  /** Research stays mounted once opened too, so a task being followed keeps its place. */
+  const [researchOpened, setResearchOpened] = useState(false);
+
+  /** Chat, Runs, Pipelines or Evaluation: a mobile tab, or the right-hand column on wide screens. */
+  const showPane = useCallback((id: Pane) => {
+    setPane(id);
+    if (isSidePane(id)) setSidePane(id);
+    if (id === "evaluation") setEvaluationOpened(true);
+    if (id === "research") setResearchOpened(true);
+  }, []);
 
   const search = searchParams.toString();
   const pathFor = useCallback(
@@ -251,15 +301,36 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
         : "No document in this conversation's scope is ready yet."
       : null;
 
+  // ---- pipelines (PRD §17) ---------------------------------------------
+  const defaultPipelineId = pipelines.list.find((pipeline) => pipeline.is_default)?.id ?? null;
+  const draftPipeline = pipelines.list.some((pipeline) => pipeline.id === draftPipelineId) ? draftPipelineId : null;
+  const selectedPipelineId = activeConversation ? (activeConversation.pipeline_id ?? defaultPipelineId) : (draftPipeline ?? defaultPipelineId);
+  const selectPipeline = async (id: number) => {
+    setPipelineError(null);
+    if (!activeConversation) {
+      setDraftPipelineId(id === defaultPipelineId ? null : id);
+      return;
+    }
+    setPipelineBusy(true);
+    try {
+      await conversations.update(activeConversation.id, { pipeline_id: id });
+    } catch (caught) {
+      setPipelineError(toApiError(caught));
+      throw caught;
+    } finally {
+      setPipelineBusy(false);
+    }
+  };
+
   // ---- conversations ---------------------------------------------------
   const selectConversation = (id: number | null) => {
     setScopeError(null);
     navigate(pathFor(id));
-    setPane("chat");
+    showPane("chat");
   };
 
   const createEmptyConversation = async () => {
-    const conversation = await conversations.create(activeConversation ? [] : draftScope);
+    const conversation = await conversations.create(activeConversation ? [] : draftScope, undefined, activeConversation ? null : draftPipeline);
     refreshWorkspaces();
     setDraftScope([]);
     navigate(pathFor(conversation.id));
@@ -267,10 +338,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   };
 
   const startConversation = async (question: string) => {
-    const conversation = await conversations.create(draftScope);
+    const conversation = await conversations.create(draftScope, undefined, draftPipeline);
     refreshWorkspaces();
     setPending({ conversationId: conversation.id, content: question });
     setDraftScope([]);
+    setDraftPipelineId(null);
     navigate(pathFor(conversation.id));
   };
 
@@ -282,8 +354,15 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
 
   const onInitialQuestionSent = useCallback(() => setPending(null), []);
   const { refresh: refreshWorkspaces } = workspaces;
-  const onTurnFinished = useCallback(() => refreshConversations(), [refreshConversations]);
+  const onTurnFinished = useCallback(() => {
+    refreshConversations();
+    setRunsVersion((value) => value + 1);
+  }, [refreshConversations]);
   const onDeepAnalysis = useCallback((legacyConversationId: number, documentId: number) => navigate(`/ground-truth/${legacyConversationId}/${documentId}`), [navigate]);
+  const onAddToDataset = useCallback((message: ChatMessage) => {
+    setDatasetNotice(null);
+    setDatasetMessage(message);
+  }, []);
 
   // ---- documents -------------------------------------------------------
   const onCreated = (document: WorkspaceDocument) => {
@@ -329,7 +408,18 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   if (missing) return <MissingWorkspace />;
 
   const summary = formatRetrievalSummary(latestAnswer?.retrieval, latestAnswer?.latency_ms);
+  const answeredWith = pipelineVersionLabel(latestAnswer?.retrieval?.pipeline_version);
   const paneClass = (id: Pane) => `${isDesktop || pane === id ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden`;
+  // The chat stays mounted (only hidden) while Runs is shown: unmounting it
+  // would abort an answer that is still streaming.
+  const side: SidePane = isDesktop ? sidePane : isSidePane(pane) ? pane : "chat";
+  const sideVisible = isDesktop || isSidePane(pane);
+  // The lab's tables need room: its column widens while it is shown.
+  const gridColumns =
+    isDesktop && (side === "evaluation" || side === "research")
+      ? "lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.25fr)]"
+      : "lg:grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(330px,420px)] xl:grid-cols-[320px_minmax(0,1fr)_460px]";
+  const sideLabelledBy = (id: SidePane) => (isDesktop ? `side-tab-${id}` : `tab-${id}`);
   const paneProps = (id: Pane, label: string) =>
     isDesktop
       ? { id: `pane-${id}`, "aria-label": label }
@@ -346,8 +436,17 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
     const next = targets[event.key];
     if (next === undefined) return;
     event.preventDefault();
-    setPane(PANES[next].id);
+    showPane(PANES[next].id);
     window.document.getElementById(`tab-${PANES[next].id}`)?.focus();
+  };
+
+  const onSideTabKeyDown = (event: React.KeyboardEvent) => {
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = SIDE_PANES.findIndex((item) => item.id === sidePane);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? SIDE_PANES.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + SIDE_PANES.length) % SIDE_PANES.length;
+    showPane(SIDE_PANES[next].id);
+    window.document.getElementById(`side-tab-${SIDE_PANES[next].id}`)?.focus();
   };
 
   return (
@@ -366,7 +465,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
       </header>
 
       {!isDesktop && (
-        <div role="tablist" aria-label="Workspace panes" className="flex shrink-0 border-b border-border" onKeyDown={onTabKeyDown}>
+        <div role="tablist" aria-label="Workspace panes" className="flex shrink-0 overflow-x-auto border-b border-border" onKeyDown={onTabKeyDown}>
           {PANES.map((item) => (
             <button
               key={item.id}
@@ -376,8 +475,8 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
               aria-selected={pane === item.id}
               aria-controls={`pane-${item.id}`}
               tabIndex={pane === item.id ? 0 : -1}
-              onClick={() => setPane(item.id)}
-              className={`flex-1 border-b-2 px-3 py-2 text-sm transition-colors ${focusRing} ${
+              onClick={() => showPane(item.id)}
+              className={`flex-1 shrink-0 whitespace-nowrap border-b-2 px-2.5 py-2 text-sm transition-colors ${focusRing} ${
                 pane === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -388,7 +487,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
       )}
 
       {/* One row that fills the height, so each pane scrolls inside itself. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(330px,420px)] xl:grid-cols-[320px_minmax(0,1fr)_460px]">
+      <div className={`grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden ${gridColumns}`}>
         <section {...paneProps("documents", "Documents")} className={`${paneClass("documents")} border-border lg:border-r`}>
           <DocumentLibrary
             workspaceId={workspaceId}
@@ -421,60 +520,171 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
           />
         </section>
 
-        <section {...paneProps("chat", "Chat")} className={`${paneClass("chat")} border-border lg:border-l`}>
-          <ConversationBar
-            conversations={conversations.list}
-            loaded={conversations.loaded}
-            activeId={conversationId}
-            onSelect={selectConversation}
-            onCreate={createEmptyConversation}
-            onRename={async (id, title) => {
-              await conversations.update(id, { title });
-            }}
-            onDelete={deleteConversation}
-          />
-          {conversations.error && (
-            <div className="border-b border-border p-3">
-              <ErrorNotice
-                title="Could not load the conversations"
-                code={conversations.error.code}
-                message={conversations.error.message}
-                actions={
-                  <button type="button" className={buttonOutline} onClick={refreshConversations}>
-                    Try again
-                  </button>
-                }
-              />
+        <section
+          aria-label={isDesktop ? "Chat, runs, pipelines, evaluation and research" : undefined}
+          className={`${sideVisible ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden border-border lg:border-l`}
+        >
+          {isDesktop && (
+            <div role="tablist" aria-label="Chat, runs, pipelines, evaluation or research" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
+              {SIDE_PANES.map((item) => (
+                <button
+                  key={item.id}
+                  id={`side-tab-${item.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={sidePane === item.id}
+                  aria-controls={`pane-${item.id}`}
+                  tabIndex={sidePane === item.id ? 0 : -1}
+                  onClick={() => showPane(item.id)}
+                  className={`flex-1 border-b-2 px-3 py-1.5 text-sm transition-colors ${focusRing} ${
+                    sidePane === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           )}
-          {conversationId != null ? (
-            <ChatThread
-              key={conversationId}
-              conversationId={conversationId}
-              initialQuestion={pending?.conversationId === conversationId ? pending.content : null}
-              onInitialQuestionSent={onInitialQuestionSent}
-              onOpenSource={openSource}
-              onTurnFinished={onTurnFinished}
-              onLatestAnswer={setLatestAnswer}
-              onMissing={() => selectConversation(null)}
-              onDeepAnalysis={onDeepAnalysis}
-              documentTitle={documentTitle}
-              composerDisabledReason={composerDisabledReason}
-            />
-          ) : (
-            <NewConversation
+          <div id="pane-chat" role="tabpanel" aria-labelledby={sideLabelledBy("chat")} className={`${side === "chat" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            <ConversationBar
               conversations={conversations.list}
-              onSelect={(id) => selectConversation(id)}
-              onStart={startConversation}
-              composerDisabledReason={composerDisabledReason}
+              loaded={conversations.loaded}
+              activeId={conversationId}
+              onSelect={selectConversation}
+              onCreate={createEmptyConversation}
+              onRename={async (id, title) => {
+                await conversations.update(id, { title });
+              }}
+              onDelete={deleteConversation}
             />
-          )}
+            <PipelineBar
+              pipelines={pipelines.list}
+              loaded={pipelines.loaded}
+              selectedId={selectedPipelineId}
+              busy={pipelineBusy || waitingForConversation}
+              onSelect={(id) => void selectPipeline(id).catch(() => undefined)}
+              onConfigure={() => showPane("pipelines")}
+            />
+            {pipelineError && (
+              <div className="border-b border-border p-3">
+                <ErrorNotice
+                  title="Could not switch the pipeline"
+                  code={pipelineError.code}
+                  message={pipelineError.message}
+                  actions={
+                    <button type="button" className={buttonOutline} onClick={() => setPipelineError(null)}>
+                      Dismiss
+                    </button>
+                  }
+                />
+              </div>
+            )}
+            {datasetNotice && (
+              <p role="status" className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5 text-xs">
+                <span className="text-foreground">{datasetNotice}</span>
+                <button type="button" className="link" onClick={() => showPane("evaluation")}>
+                  Open Evaluation
+                </button>
+                <button type="button" className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => setDatasetNotice(null)}>
+                  Dismiss
+                </button>
+              </p>
+            )}
+            {conversations.error && (
+              <div className="border-b border-border p-3">
+                <ErrorNotice
+                  title="Could not load the conversations"
+                  code={conversations.error.code}
+                  message={conversations.error.message}
+                  actions={
+                    <button type="button" className={buttonOutline} onClick={refreshConversations}>
+                      Try again
+                    </button>
+                  }
+                />
+              </div>
+            )}
+            {conversationId != null ? (
+              <ChatThread
+                key={conversationId}
+                conversationId={conversationId}
+                initialQuestion={pending?.conversationId === conversationId ? pending.content : null}
+                onInitialQuestionSent={onInitialQuestionSent}
+                onOpenSource={openSource}
+                onTurnFinished={onTurnFinished}
+                onLatestAnswer={setLatestAnswer}
+                onMissing={() => selectConversation(null)}
+                onDeepAnalysis={onDeepAnalysis}
+                onAddToDataset={onAddToDataset}
+                documentTitle={documentTitle}
+                composerDisabledReason={composerDisabledReason}
+              />
+            ) : (
+              <NewConversation
+                conversations={conversations.list}
+                onSelect={(id) => selectConversation(id)}
+                onStart={startConversation}
+                composerDisabledReason={composerDisabledReason}
+              />
+            )}
+          </div>
+          <div id="pane-runs" role="tabpanel" aria-labelledby={sideLabelledBy("runs")} className={`${side === "runs" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {side === "runs" && sideVisible && (
+              <RunsPanel
+                workspaceId={workspaceId}
+                pipelines={pipelines.list}
+                version={runsVersion}
+                selectedRunId={selectedRunId}
+                onSelectRun={setSelectedRunId}
+                onOpenCandidate={openSource}
+                onOpenConversation={(id) => selectConversation(id)}
+              />
+            )}
+          </div>
+          <div id="pane-pipelines" role="tabpanel" aria-labelledby={sideLabelledBy("pipelines")} className={`${side === "pipelines" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {side === "pipelines" && sideVisible && (
+              <PipelinePanel
+                pipelines={pipelines}
+                selectedId={selectedPipelineId}
+                conversationTitle={activeConversation ? activeConversation.title || "Untitled conversation" : null}
+                onSelect={selectPipeline}
+                onDeleted={refreshConversations}
+              />
+            )}
+          </div>
+          <div id="pane-evaluation" role="tabpanel" aria-labelledby={sideLabelledBy("evaluation")} className={`${side === "evaluation" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {evaluationOpened && (
+              <EvaluationPanel workspaceId={workspaceId} documents={documents} pipelines={pipelines} datasetsVersion={datasetsVersion} onOpenCandidate={openSource} />
+            )}
+          </div>
+          <div id="pane-research" role="tabpanel" aria-labelledby={sideLabelledBy("research")} className={`${side === "research" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {researchOpened && (
+              <ResearchPanel workspaceId={workspaceId} documents={documents} pipelines={pipelines} onOpenEvidence={openSource} />
+            )}
+          </div>
         </section>
       </div>
 
+      {datasetMessage && (
+        <AddToDatasetDialog
+          workspaceId={workspaceId}
+          message={datasetMessage}
+          onClose={() => setDatasetMessage(null)}
+          onSaved={(dataset, version) => {
+            setDatasetMessage(null);
+            setDatasetsVersion((value) => value + 1);
+            setDatasetNotice(`Added to “${dataset.name}” as version ${version}.`);
+          }}
+        />
+      )}
+
       <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-0.5 border-t border-border bg-muted px-4 py-1.5 font-mono text-[11px] text-muted-foreground">
         <span>{summary ?? "Retrieval: no answer yet in this conversation"}</span>
-        {latestAnswer?.retrieval?.pipeline?.generation_model && <span className="truncate">{latestAnswer.retrieval.pipeline.generation_model}</span>}
+        {(answeredWith || latestAnswer?.retrieval?.pipeline?.generation_model) && (
+          <span className="truncate">
+            {[answeredWith, latestAnswer?.retrieval?.pipeline?.generation_model].filter(Boolean).join(" · ")}
+          </span>
+        )}
       </footer>
     </div>
   );

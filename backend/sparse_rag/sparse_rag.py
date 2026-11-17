@@ -17,6 +17,22 @@ except LookupError:
     nltk.download('punkt', quiet=True)
     nltk.download('punkt_tab', quiet=True)
 
+def english_stop_words():
+    """The stop words BM25 drops by default (NLTK's English list)."""
+    return set(stopwords.words('english'))
+
+
+def tokenize(text: str, stop_words=frozenset()) -> List[str]:
+    """Lowercase, remove punctuation, tokenize and drop `stop_words`.
+
+    The BM25 tokenizer, shared by SparseRAG and the workspace chat's BM25
+    retrieval so both index and query text the same way.
+    """
+    text = re.sub(r'[^a-zA-Z0-9\s]', '', (text or '').lower())
+    tokens = word_tokenize(text)
+    return [w for w in tokens if w not in stop_words]
+
+
 class SparseRAG(BaseRAG):
     def __init__(self, config: Dict[str, Any]):
         """
@@ -29,7 +45,7 @@ class SparseRAG(BaseRAG):
         self.top_k = config.get("top_k", 3)
         
         if config.get("remove_stop_words", True):
-            self.stop_words = set(stopwords.words('english'))
+            self.stop_words = english_stop_words()
         else:
             self.stop_words = set()
         self.document_metadata = []
@@ -38,9 +54,7 @@ class SparseRAG(BaseRAG):
         """
         Helper to lowercase, remove punctuation, and tokenize text.
         """
-        text = re.sub(r'[^a-zA-Z0-9\s]', '', text.lower())
-        tokens = word_tokenize(text)
-        return [w for w in tokens if w not in self.stop_words]
+        return tokenize(text, self.stop_words)
 
     def index_documents(self, documents: List[str]) -> None:
         """

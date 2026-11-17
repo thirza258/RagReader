@@ -1,4 +1,14 @@
-"""Analysis streaming with durable outcomes and one owner per batch."""
+"""Analysis streaming with durable outcomes and one owner per batch.
+
+Authentication happens in-band so the token never appears in a URL or an
+access log: after the socket opens, the client's first frame must be
+`{"type": "auth", "token": "rr_…"}`. Until that token is valid and the batch
+belongs to its user, nothing about the job is sent and the socket is not
+subscribed to the batch's live updates. A missing, malformed or invalid auth
+frame (or none within AUTH_TIMEOUT_SECONDS) closes the socket with 4401; a
+batch that does not exist or belongs to someone else gets a `job_not_found`
+error frame and close code 4404.
+"""
 import asyncio
 import json
 import logging
@@ -16,10 +26,14 @@ from router.analysis import (
     format_metrics, release_batch, renew_batch, result_frame, save_variant,
 )
 from router.models import AnalysisBatch
+from workspace.auth import resolve_token
 
 logger = logging.getLogger(__name__)
 format_evaluation_metrics = format_metrics  # Historical import used by callers.
 FOLLOW_INTERVAL_SECONDS = 1
+AUTH_TIMEOUT_SECONDS = 10
+CLOSE_UNAUTHENTICATED = 4401
+CLOSE_NOT_FOUND = 4404
 # Orchestration/heartbeats must not queue behind a long synchronous model call.
 def db_call(function):
     return database_sync_to_async(function, thread_sensitive=False)
@@ -29,15 +43,53 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.stream_available = True
         self.group_available = False
+        self.authenticated = False
+        self.auth_started = False
+        self.user = None
         self.job_id = self.scope['url_route']['kwargs']['job_id']
         await self.accept()
+        self.auth_deadline = asyncio.create_task(self.expire_unauthenticated())
+
+    async def expire_unauthenticated(self):
+        await asyncio.sleep(AUTH_TIMEOUT_SECONDS)
+        if not self.authenticated and self.stream_available:
+            await self.reject(CLOSE_UNAUTHENTICATED)
+
+    async def reject(self, code):
+        self.stream_available = False
+        await self.close(code=code)
+
+    async def receive(self, text_data=None, bytes_data=None):
+        # Only the first frame means anything: it must authenticate.
+        if self.auth_started or not self.stream_available:
+            return
+        self.auth_started = True
+        self.auth_deadline.cancel()
+        try:
+            message = json.loads(text_data) if text_data else None
+        except ValueError:
+            message = None
+        token = message.get("token") if isinstance(message, dict) and message.get("type") == "auth" else None
+        record = await db_call(resolve_token)(token) if isinstance(token, str) else None
+        if record is None:
+            await self.reject(CLOSE_UNAUTHENTICATED)
+            return
+        self.user = record.user
         try:
             self.job_id = str(UUID(self.job_id))
         except (ValueError, TypeError, AttributeError):
             await self.send_frame({"status": "ERROR", **error_payload(PipelineError(
                 "invalid_job_id", "Analysis job ID must be a valid UUID.", http_status=400)), "terminal": True})
-            await self.close(code=4400)
+            await self.reject(4400)
             return
+        owned = await db_call(lambda: AnalysisBatch.objects.filter(job_id=self.job_id, user=self.user).exists())()
+        if not owned:
+            # The same answer for a batch that does not exist.
+            await self.send_frame({"status": "ERROR", **error_payload(PipelineError(
+                "job_not_found", "Analysis batch not found. Start a new analysis.", http_status=404)), "terminal": True})
+            await self.reject(CLOSE_NOT_FOUND)
+            return
+        self.authenticated = True
         self.group_name = f"analysis_{self.job_id}"
         if self.channel_layer is not None:
             try:
@@ -49,6 +101,9 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         self.stream_available = False
+        deadline = getattr(self, "auth_deadline", None)
+        if deadline is not None:
+            deadline.cancel()
         if self.group_available:
             try:
                 await self.channel_layer.group_discard(self.group_name, self.channel_name)
@@ -72,7 +127,7 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
                 logger.warning("Analysis subscribers will recover saved outcomes by polling.")
 
     async def analysis_update(self, event):
-        if event["sender"] == self.channel_name or not self.stream_available:
+        if event["sender"] == self.channel_name or not self.stream_available or not self.authenticated:
             return
         await self.send_frame(event["payload"])
         if event["payload"].get("status") == "COMPLETE":
@@ -136,7 +191,7 @@ class AnalysisConsumer(AsyncWebsocketConsumer):
             try:
                 batch = await db_call(lambda: AnalysisBatch.objects.select_related(
                     "user", "conversation", "conversation__document",
-                ).get(job_id=self.job_id))()
+                ).get(job_id=self.job_id, user=self.user))()
             except AnalysisBatch.DoesNotExist:
                 raise PipelineError("job_not_found", "Analysis batch not found. Start a new analysis.", http_status=404)
             # Cached request data is optional and never overrides the DB binding.
