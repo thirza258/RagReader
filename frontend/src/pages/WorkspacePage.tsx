@@ -28,12 +28,13 @@ import PipelinePanel from "../features/pipelines/components/PipelinePanel";
 import { pipelineVersionLabel } from "../features/pipelines/lib/pipelineConfig";
 import EvaluationPanel from "../features/evaluation/components/EvaluationPanel";
 import AddToDatasetDialog from "../features/evaluation/components/AddToDatasetDialog";
+import ResearchPanel from "../features/research/components/ResearchPanel";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-type Pane = "documents" | "reader" | "chat" | "runs" | "pipelines" | "evaluation";
+type Pane = "documents" | "reader" | "chat" | "runs" | "pipelines" | "evaluation" | "research";
 /** What the right-hand column shows on wide screens. */
-type SidePane = "chat" | "runs" | "pipelines" | "evaluation";
+type SidePane = "chat" | "runs" | "pipelines" | "evaluation" | "research";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "documents", label: "Documents" },
@@ -42,6 +43,7 @@ const PANES: { id: Pane; label: string }[] = [
   { id: "runs", label: "Runs" },
   { id: "pipelines", label: "Pipelines" },
   { id: "evaluation", label: "Evaluation" },
+  { id: "research", label: "Research" },
 ];
 
 const SIDE_PANES: { id: SidePane; label: string }[] = [
@@ -49,10 +51,11 @@ const SIDE_PANES: { id: SidePane; label: string }[] = [
   { id: "runs", label: "Runs" },
   { id: "pipelines", label: "Pipelines" },
   { id: "evaluation", label: "Evaluation" },
+  { id: "research", label: "Research" },
 ];
 
 function isSidePane(id: Pane): id is SidePane {
-  return id === "chat" || id === "runs" || id === "pipelines" || id === "evaluation";
+  return id === "chat" || id === "runs" || id === "pipelines" || id === "evaluation" || id === "research";
 }
 
 function parseId(value: string | null | undefined): number | null {
@@ -216,12 +219,15 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const [datasetNotice, setDatasetNotice] = useState<string | null>(null);
   /** The lab stays mounted once opened, so its place (dataset, experiment) survives tab switches. */
   const [evaluationOpened, setEvaluationOpened] = useState(false);
+  /** Research stays mounted once opened too, so a task being followed keeps its place. */
+  const [researchOpened, setResearchOpened] = useState(false);
 
   /** Chat, Runs, Pipelines or Evaluation: a mobile tab, or the right-hand column on wide screens. */
   const showPane = useCallback((id: Pane) => {
     setPane(id);
     if (isSidePane(id)) setSidePane(id);
     if (id === "evaluation") setEvaluationOpened(true);
+    if (id === "research") setResearchOpened(true);
   }, []);
 
   const search = searchParams.toString();
@@ -410,7 +416,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const sideVisible = isDesktop || isSidePane(pane);
   // The lab's tables need room: its column widens while it is shown.
   const gridColumns =
-    isDesktop && side === "evaluation"
+    isDesktop && (side === "evaluation" || side === "research")
       ? "lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.25fr)]"
       : "lg:grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(330px,420px)] xl:grid-cols-[320px_minmax(0,1fr)_460px]";
   const sideLabelledBy = (id: SidePane) => (isDesktop ? `side-tab-${id}` : `tab-${id}`);
@@ -515,11 +521,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
         </section>
 
         <section
-          aria-label={isDesktop ? "Chat, runs, pipelines and evaluation" : undefined}
+          aria-label={isDesktop ? "Chat, runs, pipelines, evaluation and research" : undefined}
           className={`${sideVisible ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden border-border lg:border-l`}
         >
           {isDesktop && (
-            <div role="tablist" aria-label="Chat, runs, pipelines or evaluation" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
+            <div role="tablist" aria-label="Chat, runs, pipelines, evaluation or research" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
               {SIDE_PANES.map((item) => (
                 <button
                   key={item.id}
@@ -649,6 +655,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
           <div id="pane-evaluation" role="tabpanel" aria-labelledby={sideLabelledBy("evaluation")} className={`${side === "evaluation" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
             {evaluationOpened && (
               <EvaluationPanel workspaceId={workspaceId} documents={documents} pipelines={pipelines} datasetsVersion={datasetsVersion} onOpenCandidate={openSource} />
+            )}
+          </div>
+          <div id="pane-research" role="tabpanel" aria-labelledby={sideLabelledBy("research")} className={`${side === "research" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {researchOpened && (
+              <ResearchPanel workspaceId={workspaceId} documents={documents} pipelines={pipelines} onOpenEvidence={openSource} />
             )}
           </div>
         </section>

@@ -186,7 +186,11 @@ def resolve_pipeline_version(workspace, data, errors):
 
 def corpus_documents(workspace, version):
     """The READY documents a dataset version is evaluated against (409 otherwise)."""
-    ids = list(version.document_ids or [])
+    return corpus_documents_from_ids(workspace, list(version.document_ids or []))
+
+
+def corpus_documents_from_ids(workspace, ids):
+    """`ids` (all of them READY, else 409), or every READY document of the workspace when empty."""
     owned = Document.objects.filter(workspace=workspace, user=workspace.user)
     if ids:
         documents = {document.pk: document for document in owned.filter(pk__in=ids)}

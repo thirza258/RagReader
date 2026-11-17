@@ -69,6 +69,8 @@ INSTALLED_APPS = [
     "workspace",
     # Phase 4: evaluation datasets and experiments (not the legacy `evaluation` app).
     "lab",
+    # Phase 5: research tasks (claims, comparisons, extraction, reports).
+    "research",
 ]
 
 def _optional_int(name, default=None):

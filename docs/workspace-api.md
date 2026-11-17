@@ -579,6 +579,29 @@ resumed. When `query_rewrite` is off, items with history still compute the
 rewrite (one non-generating call) so `query_mismatch` can be detected;
 their runs record `rewrite_reason: "disabled"`.
 
+## Research tasks
+
+Evidence-backed research over a workspace's documents (PRD §22–25, §47).
+Every task gathers passages with the chosen pipeline, numbers them like
+chat citations, and returns a result whose findings cite them; uncited
+claims are dropped (`not_stated`, `uncited`). Kinds, inputs, result shapes
+and the verdict rule are in
+[the implementation contract](prd-implementation.md#phase-5--research-platform-prd-2225-47).
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `research/options/` | Kinds, default comparison dimensions, field types, limits |
+| GET / POST | `research/tasks/` | List (`?workspace_id=&kind=&status=`) / create `{kind, …}` → 202 queued (503 `job_queue_unavailable` with the failed task) |
+| GET / PATCH / DELETE | `research/tasks/{id}/` | Result and evidence; PATCH title/notes; DELETE also deletes its run |
+| POST | `research/tasks/{id}/cancel/`, `retry/` | Cancel a queued/running task; re-run a failed/cancelled one |
+| GET | `research/tasks/{id}/export/?format=md\|json` | The result as Markdown with references, or JSON |
+
+Kinds: `verify_claim` (`claim`), `ask` (`question`, per-document answers +
+comparison + synthesis), `compare` (2–4 `document_ids`, `dimensions`),
+`extract` (`fields`), `contradictions` (`topic`), `report` (`question`).
+Tasks run in the Celery worker (`research.tasks.run_research_task`, 15 min
+soft limit) and are recorded as retrieval runs with `source="research"`.
+
 ## Configuration
 
 | Variable | Default | Meaning |

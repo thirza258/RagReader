@@ -123,7 +123,7 @@ executed inside the backend Docker image by `./deploy.sh` before every deploy.
 ## Workspace (documents, conversations, citations)
 
 The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`,
-`/retrieval/runs/`, `/pipelines/`, `/indexes/`, `/evaluations/`, `/experiments/`)
+`/retrieval/runs/`, `/pipelines/`, `/indexes/`, `/evaluations/`, `/experiments/`, `/research/`)
 turns RAGReader into a persistent research workspace:
 
 *   **Documents** — upload PDF, DOCX, TXT or Markdown, add a web page by URL,
@@ -166,6 +166,15 @@ turns RAGReader into a persistent research workspace:
     baseline deltas, paired bootstrap confidence intervals, win/loss counts
     and latency/token trade-offs (`/api/v1/evaluations/datasets/`,
     `/api/v1/experiments/`).
+*   **Research** — evidence-backed research tasks: verify a claim
+    (supporting and contradicting passages, a verdict and a confidence
+    computed from them), ask one question across documents (an answer per
+    document, a comparison and a synthesis), compare 2–4 documents on
+    dimensions such as methodology, dataset and limitations, extract
+    structured fields (each value with its source), find contradictions,
+    and write a cited report. Findings without a citation are dropped
+    rather than shown, and every task exports as Markdown
+    (`/api/v1/research/tasks/`).
 
 Accounts have a password: `POST /api/v1/sign-up/` creates one and
 `POST /api/v1/sign-in/` signs in, each returning a bearer token that expires

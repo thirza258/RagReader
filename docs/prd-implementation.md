@@ -1521,6 +1521,130 @@ the "Add to dataset" dialog.
 - Judge token usage: Ragas does not report it.
 - LLM sampling is not seeded; the seed drives the bootstrap.
 
+## Phase 5 — Research platform (PRD §22–25, §47)
+
+Research tasks: evidence-backed work over a workspace's documents, run in
+the background and recorded as retrieval runs with `source="research"`.
+Every Phase 1–4 shape is unchanged.
+
+### App and model
+
+New app **`research`** (`backend/research/`): `models.py`, `services/engine.py`
+(what each kind does), `services/runner.py` (validation, lifecycle, Markdown
+export), `tasks.py` (`run_research_task`, 15 min soft limit), `views.py`,
+`serializers.py`. Migration `research/0001_initial` depends on
+`workspace/0004_pipelines`.
+
+`ResearchTask`: `workspace` FK (CASCADE, `research_tasks`), `kind`
+(`verify_claim`, `ask`, `compare`, `extract`, `contradictions`, `report`),
+`title` (≤ 200), `input` JSON (validated, kind-specific), `document_ids`
+JSON (the corpus, resolved at creation: the ids given, all READY, or every
+READY document of the workspace), `pipeline_version` FK (null, SET_NULL) +
+`pipeline` JSON (`pipelines.snapshot`), `status` (`queued`, `running`,
+`completed`, `failed`, `cancelled`), `progress` JSON (`{stage, detail}`),
+`result` JSON, `evidence` JSON (Evidence objects, PRD §14, numbered `[n]`
+like chat citations, `cited` set from the result), `run` FK RetrievalRun
+(null, SET_NULL), `error_code`, `error_message`, `error_stage`,
+`retryable`, `run_token`, `heartbeat_at`, `latency_ms`, `notes`,
+timestamps.
+
+### How a task runs
+
+Evidence is gathered with `run_retrieval` and the task's pipeline version
+(`top_k` = the per-search depth below, `candidate_k` at least that),
+de-duplicated by (document, chunk) and capped at 40 passages. The model
+(the pipeline's generation model, `llm.generate`, prompt version
+`research-v1`) answers with one JSON object over the numbered passages;
+a reply that is not that shape is retried once with the reason, then the
+task fails `research_output_invalid` (retryable). Anything the model states
+without a valid citation is downgraded, never shown as fact.
+
+| Kind | Input | Evidence | Result |
+| --- | --- | --- | --- |
+| `verify_claim` (§22) | `claim` ≤ 1000 | claim, depth 6 + one model-written counter-query, depth 4 | `{claim, verdict, confidence, conclusion, counter_query, supporting, contradicting, neutral, assessments: [{citation_id, stance, rationale}]}` |
+| `ask` (§23) | `question` ≤ 2000 | per document, depth 3 | `{question, per_document: [{document_id, document_title, answer, found, citation_ids}], comparison, synthesis}` — an answer with no valid citation is `found: false` |
+| `compare` (§24) | 2–4 documents, `dimensions` ≤ 10 (default methodology, dataset, retrieval, reranking, evaluation, limitations, conclusions) | per dimension × document, depth 2 | `{documents, dimensions: [{name, findings: [{document_id, finding, citation_ids, status: found \| not_stated}], difference}], summary}` — an uncited finding is `not_stated` |
+| `extract` (§25) | `fields` 1–20 of `{name, type: text \| number \| list \| boolean, description?}` (or a bare name) | per field, depth 3 | `{fields: [{name, type, value, citation_ids, status: found \| not_found \| uncited \| invalid}], data: {name: value}}` — a value without a citation is `uncited` and null |
+| `contradictions` | `topic` ≤ 500 | topic depth 8, plus per document depth 3 when several | `{topic, contradictions: [{a, b, severity: direct \| partial, explanation, cross_document}], summary}` — pairs of valid, distinct ids, de-duplicated |
+| `report` | `question` ≤ 2000 | a model-planned outline (2–6 sections, each with a search query; a fixed outline if the plan is unreadable), depth 4 per section | `{question, title, summary, sections: [{heading, body}], limitations}` |
+
+**Verdicts are computed, not generated.** The model labels each passage
+`supports`, `contradicts` or `neutral` (unlabelled passages count as
+neutral); `engine.verdict_for(supporting, contradicting)`:
+
+- none either way → `insufficient_evidence`, `low`;
+- nothing against, or at least twice as many supporting → `supported`
+  (and symmetrically `contradicted`); otherwise `mixed`, `low`;
+- confidence `high` for ≥ 3 on the winning side and none against,
+  `moderate` for ≥ 2 on the winning side, else `low`.
+
+So the PRD's example (3 supporting, 1 contradicting) is *supported,
+moderate confidence*.
+
+Lifecycle as the lab's: a queued task is claimed with its token; progress
+updates are heartbeats and ownership checks; the result, evidence and the
+run are written in one transaction that re-checks ownership. A task that
+stops beating for 15 minutes fails `task_stalled` on read. Cancel
+(queued/running), retry (failed/cancelled, re-runs from scratch). A worker
+that cannot be reached: 503 `job_queue_unavailable` with the failed task.
+
+The run record: one `RetrievalRun` per task, `source="research"`, the
+task's primary text as `query_original`, spans `research.task` → a
+`retrieve` span per search (with its retrieval children) and a `generate`
+span per model call, the evidence as candidates (cited flags), latency
+`total`/`retrieval`/`generation`, provenance as chat's plus
+`"research": {"task_id", "kind"}` and `prompt_version: "research-v1"`.
+Research runs count in the reliability summary (they are user traffic).
+
+### API (token required, owner-scoped 404s, error envelope)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `research/options/` | Kinds with labels, default dimensions, field types, limits |
+| GET | `research/tasks/?workspace_id=&kind=&status=` | Newest first (≤ 100), without `result`/`evidence` |
+| POST | `research/tasks/` | `{kind, title?, workspace_id?, document_ids?, pipeline_id? \| pipeline_version_id?, …kind input}` → 202 Task |
+| GET / PATCH / DELETE | `research/tasks/{id}/` | Task with `result` and `evidence`; PATCH `{title?, notes?}`; DELETE also deletes its run |
+| POST | `research/tasks/{id}/cancel/`, `retry/` | 409 `task_not_running` / `task_not_retryable` otherwise |
+| GET | `research/tasks/{id}/export/?format=md\|json` | Attachment `research-<id>.md\|json`: the result as Markdown with a references list of the cited passages |
+
+New error codes: `research_output_invalid` (502, retryable),
+`task_not_running`, `task_not_retryable` (409), `task_stalled`,
+`task_timeout`; `documents_not_ready`, `no_ready_documents`,
+`embedding_model_mismatch` and `job_queue_unavailable` are reused.
+
+Task:
+
+```json
+{"id": 7, "workspace_id": 3, "kind": "verify_claim", "kind_label": "Verify a claim", "title": "…",
+ "status": "completed", "input": {"claim": "…"}, "documents": [{"id": 12, "title": "Paper A"}],
+ "pipeline": {"id": 4, "name": "Default", "version_id": 11, "version": 1, "strategy": "dense", "available": true},
+ "progress": {}, "error": null, "run_id": 88, "latency_ms": 5400, "notes": "",
+ "created_at": "…", "updated_at": "…", "started_at": "…", "finished_at": "…",
+ "result": {…}, "evidence": [Evidence]}
+```
+
+### Frontend
+
+`src/features/research/` — `api/research.ts`, `types/`, `hooks/useResearch.ts`
+(list and task, re-read every 2.5 s while queued/running), `lib/research.ts`
+(kinds, verdict wording, form rules mirroring the server, field-spec and
+dimension parsing), components `ResearchPanel` (tasks list + new task),
+`ResearchForm`, `ResearchResult` (per-kind views: verdict and grouped
+evidence, per-document answers, comparison table, extracted-field table with
+JSON, contradiction pairs side by side, report). Every `[n]` and passage
+opens the evidence in the reader. The workspace gains a **Research** tab
+(desktop right column, widened like Evaluation, and a mobile tab);
+`research` paths are token-protected.
+
+### Deferred
+
+- "AI Research Copilot" (§47) is not specified further than the features
+  above; the Research tab is that copilot. There is no free-form agent.
+- Research tasks do not yet start from a chat answer, and a report is
+  exported as Markdown only (no PDF/DOCX).
+- Token usage of research model calls is not reported (`llm.generate`
+  returns text only).
+
 ## Reserved for later phases
 
 - Phase 2 (done) added persisted retrieval runs and per-stage telemetry;
@@ -1532,5 +1656,6 @@ the "Add to dataset" dialog.
 - Phase 4 (done) added evaluation datasets, metrics and an experiment
   registry that reference pipeline and index versions, recording runs with
   `source="evaluation"`.
-- Phase 5 adds Research Mode, comparison, extraction and reports on top of the
-  chat and evidence model.
+- Phase 5 (done) added research tasks (claims, multi-document answers,
+  comparison, extraction, contradictions, reports) on top of the retrieval
+  and evidence model, recording runs with `source="research"`.
