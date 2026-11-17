@@ -105,6 +105,16 @@ class TracerTests(SimpleTestCase):
         self.assertEqual((rows[2]["status"], rows[2]["error_code"]), ("failed", "rewrite_failed"))
         self.assertEqual(rows[0]["status"], "completed")
 
+    def test_a_fallback_keeps_its_status_and_code_and_does_not_fail_the_parent(self):
+        tracer, _clock = tracer_with_clock()
+        with tracer.span("retrieve"):
+            with tracer.span("retrieve.rerank") as span:
+                span.fallback("reranker_unavailable", "Kept the fused order")
+        rows = tracer.export()
+        self.assertEqual((rows[2]["status"], rows[2]["error_code"], rows[2]["detail"]),
+                         ("fallback", "reranker_unavailable", "Kept the fused order"))
+        self.assertEqual((rows[0]["status"], rows[1]["status"]), ("completed", "completed"))
+
     def test_finishing_twice_or_a_foreign_span_does_nothing(self):
         tracer, clock = tracer_with_clock()
         span = tracer.start("a")

@@ -205,6 +205,50 @@ CHAT_HISTORY_MESSAGES = 6
 # common.prompt_builder.cited_chat_messages changes what the model is told.
 CHAT_PROMPT_VERSION = "chat-cited-v1"
 
+# ── Workspace retrieval pipelines (PRD §17–19, Phase 3) ──────────────────────
+# A pipeline version is an immutable snapshot of these choices. The default
+# pipeline every workspace gets is Phase 1's behaviour: dense retrieval,
+# CHAT_CANDIDATE_K candidates, CHAT_CONTEXT_K sources, the chat model at
+# DEFAULT_TEMPERATURE. Ranges reuse the per-run (Tier A) constants above:
+# candidate_k is CHILD_TOP_K_*, top_k is TOP_K_*, rrf_k is RRF_K_*.
+PIPELINE_STRATEGIES = [
+    {"id": "dense", "label": "Dense", "description": "Cosine similarity between the query embedding and every passage.", "uses": ["dense"]},
+    {"id": "bm25", "label": "BM25", "description": "Keyword search: BM25 over the passages of every document in scope.", "uses": ["bm25"]},
+    {"id": "hybrid", "label": "Hybrid", "description": "Dense and BM25 candidates fused into one ranking.", "uses": ["dense", "bm25", "fusion"]},
+    {"id": "hybrid_rerank", "label": "Hybrid + reranking", "description": "Hybrid candidates reordered by a reranker before the top passages are chosen.", "uses": ["dense", "bm25", "fusion", "rerank"]},
+]
+PIPELINE_STRATEGY_IDS = [strategy["id"] for strategy in PIPELINE_STRATEGIES]
+DEFAULT_PIPELINE_STRATEGY = "dense"
+
+FUSION_METHODS = [
+    {"id": "weighted", "label": "Weighted scores", "description": "Each retriever's scores are min-max normalised, then mixed: hybrid weight × dense + (1 − hybrid weight) × BM25."},
+    {"id": "rrf", "label": "Reciprocal rank fusion", "description": "Each passage scores Σ 1 / (rrf_k + rank) over the retrievers that returned it."},
+]
+FUSION_METHOD_IDS = [method["id"] for method in FUSION_METHODS]
+DEFAULT_FUSION_METHOD = "weighted"
+
+# The dense share of a weighted fusion (PRD §17 "Hybrid Weight 0.60").
+DEFAULT_HYBRID_WEIGHT = 0.6
+HYBRID_WEIGHT_MIN = 0.0
+HYBRID_WEIGHT_MAX = 1.0
+
+# Rerankers: the Ollama models above (a closed set, served locally) or any
+# OpenRouter chat model asked to score the candidates (an open set, like
+# generation models).
+RERANKER_PROVIDERS = [
+    {"id": "ollama", "label": "Ollama embedding reranker", "description": "Ollama embeds the query and each candidate and ranks by cosine similarity.", "open": False},
+    {"id": "llm", "label": "LLM reranker (OpenRouter)", "description": "A chat model scores every candidate's relevance from 0 to 10 in one request.", "open": True},
+]
+RERANKER_PROVIDER_IDS = [provider["id"] for provider in RERANKER_PROVIDERS]
+DEFAULT_LLM_RERANKER_MODEL = DEFAULT_CHAT_MODEL
+# Bounds of one LLM rerank request: each passage is cut to at most
+# LLM_RERANK_PASSAGE_CHARS, and to less when the candidates would otherwise
+# exceed LLM_RERANK_PROMPT_CHARS together.
+LLM_RERANK_PASSAGE_CHARS = 700
+LLM_RERANK_PROMPT_CHARS = 16000
+LLM_RERANK_QUERY_CHARS = 500
+LLM_RERANK_MAX_SCORE = 10
+
 INGEST_CONFIG = {
     "embedding_model": DEFAULT_EMBEDDING_MODEL,
     "chunk_strategy": DEFAULT_CHUNK_STRATEGY,

@@ -17,14 +17,14 @@ interface OverviewState {
  * A workspace's recent runs and its reliability summary (PRD §32, §49),
  * read together. `version` re-reads them, e.g. after a chat turn finishes.
  */
-export function useRunsOverview(workspaceId: number, days: number, version: number) {
-  const key = `${workspaceId}:${days}:${version}`;
+export function useRunsOverview(workspaceId: number, days: number, version: number, pipelineVersionId: number | null = null) {
+  const key = `${workspaceId}:${days}:${version}:${pipelineVersionId ?? ""}`;
   const [state, setState] = useState<OverviewState | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      listRuns({ workspaceId, limit: RUN_LIST_LIMIT }, controller.signal),
+      listRuns({ workspaceId, limit: RUN_LIST_LIMIT, pipelineVersionId }, controller.signal),
       getRunSummary(workspaceId, days, controller.signal),
     ]).then(
       ([list, summary]) => setState({ key, runs: list.results, hasMore: list.has_more, summary, error: null }),
@@ -33,7 +33,7 @@ export function useRunsOverview(workspaceId: number, days: number, version: numb
       },
     );
     return () => controller.abort();
-  }, [workspaceId, days, key]);
+  }, [workspaceId, days, pipelineVersionId, key]);
 
   return {
     runs: state?.runs ?? [],

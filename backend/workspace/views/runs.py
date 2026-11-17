@@ -7,7 +7,8 @@ from evaluation.models import Chunk
 from workspace.models import RetrievalRun
 from workspace.serializers import RunListQuery, RunSummaryQuery, run_detail_payload, run_payload, validated
 from workspace.services.runs import reliability_summary
-from workspace.views.base import OwnedAPIView
+from workspace.errors import ApiError
+from workspace.views.base import OwnedAPIView, parse_id
 
 TAGS = ["Retrieval runs"]
 WORKSPACE_PARAM = OpenApiParameter("workspace_id", OpenApiTypes.INT, description="Defaults to the user's default workspace (or the conversation's, when conversation_id is given).")
@@ -16,6 +17,7 @@ LIST_PARAMS = [
     OpenApiParameter("conversation_id", OpenApiTypes.INT),
     OpenApiParameter("status", OpenApiTypes.STR, enum=RetrievalRun.Status.values),
     OpenApiParameter("source", OpenApiTypes.STR, enum=RetrievalRun.Source.values),
+    OpenApiParameter("pipeline_version_id", OpenApiTypes.INT, description="Only runs of this pipeline version."),
     OpenApiParameter("limit", OpenApiTypes.INT, description="1–200, default 50."),
 ]
 SUMMARY_PARAMS = [
@@ -40,6 +42,12 @@ class RetrievalRunListView(OwnedAPIView):
             runs = runs.filter(status=values["status"])
         if values.get("source"):
             runs = runs.filter(source=values["source"])
+        version_id = params.get("pipeline_version_id")
+        if version_id not in (None, ""):
+            if parse_id(version_id) is None:
+                raise ApiError("invalid_request", "The request contains invalid or missing fields.",
+                               details={"pipeline_version_id": ["A valid integer is required."]})
+            runs = runs.filter(pipeline_version=self.get_pipeline_version(version_id))
         limit = values["limit"]
         rows = list(runs.order_by("-started_at", "-id")[:limit + 1])
         return Response({"results": [run_payload(run) for run in rows[:limit]], "has_more": len(rows) > limit})

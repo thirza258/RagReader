@@ -13,6 +13,7 @@ from workspace.serializers import (
     ConversationCreateInput, ConversationPatchInput, MessageInput,
     conversation_payload, message_payload, validated,
 )
+from workspace.services import pipelines
 from workspace.services.chat import INTERRUPTED_MESSAGE, run_chat_turn
 from workspace.services.sse import event_stream_response
 from workspace.views.base import OwnedAPIView
@@ -61,16 +62,20 @@ class ConversationListView(OwnedAPIView):
     def get(self, request):
         workspace = self.resolve_workspace(request.query_params.get("workspace_id"))
         sessions = annotated(ChatSession.objects.filter(user=request.user, workspace=workspace)).order_by("-updated_at", "-id")
-        return Response({"results": [conversation_payload(session) for session in sessions]})
+        default_id = pipelines.default_pipeline_for(workspace).pk
+        return Response({"results": [conversation_payload(session, default_pipeline_id=default_id) for session in sessions]})
 
     @extend_schema(tags=TAGS, operation_id="conversations_create", summary="Start a conversation", request=ConversationCreateInput, responses={201: OpenApiTypes.OBJECT})
     def post(self, request):
         values = validated(ConversationCreateInput, request.data)
         workspace = self.resolve_workspace(values.get("workspace_id"))
         documents = self.documents_in_workspace(workspace, values.get("document_ids"))
+        pipeline = None
+        if values.get("pipeline_id") is not None:
+            pipeline = pipelines.pipeline_in_workspace(workspace, values["pipeline_id"])
         title = (values.get("title") or "").strip()
         session = ChatSession.objects.create(
-            user=request.user, workspace=workspace,
+            user=request.user, workspace=workspace, pipeline=pipeline,
             title=title or DEFAULT_CONVERSATION_TITLE, title_is_auto=not title,
         )
         if documents:
@@ -92,6 +97,11 @@ class ConversationDetailView(OwnedAPIView):
         values = validated(ConversationPatchInput, request.data)
         if "document_ids" in values:
             session.documents.set(self.documents_in_workspace(session.workspace, values["document_ids"]))
+        if "pipeline_id" in values:
+            session.pipeline = (
+                pipelines.pipeline_in_workspace(session.workspace, values["pipeline_id"])
+                if values["pipeline_id"] is not None else None
+            )
         if "title" in values:
             title = values["title"].strip()
             if not title:
@@ -130,10 +140,13 @@ class ConversationMessagesView(OwnedAPIView):
             raise ApiError("no_ready_documents",
                            "No document in this conversation is ready yet. Wait for ingestion to finish, or add a document.",
                            status=409, retryable=True)
+        # The pipeline's latest version at question time (Phase 3).
+        _pipeline, version = pipelines.session_pipeline(session)
+        pipelines.check_documents(version, documents)
         user = request.user
 
         def producer():
-            return run_chat_turn(session, user, question, documents)
+            return run_chat_turn(session, user, question, documents, pipeline_version=version)
 
         if request.query_params.get("stream") in ("0", "false"):
             user_message = assistant_message = None

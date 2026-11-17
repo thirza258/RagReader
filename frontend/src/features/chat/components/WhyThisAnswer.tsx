@@ -4,6 +4,7 @@ import { buttonOutline, focusRing } from "../../../components/ui/classes";
 import RunTrace from "../../runs/components/RunTrace";
 import { useRunDetail } from "../../runs/hooks/useRunDetail";
 import { runIdOf } from "../../runs/lib/runMetrics";
+import { pipelineVersionLabel } from "../../pipelines/lib/pipelineConfig";
 import { formatDuration, formatScore } from "../lib/retrievalSummary";
 import type { ChatMessage, Evidence } from "../types";
 
@@ -18,7 +19,7 @@ interface WhyThisAnswerProps {
 const TIMING_LABELS: [keyof NonNullable<NonNullable<ChatMessage["retrieval"]>["timings_ms"]>, string][] = [
   ["rewrite", "Query rewrite"],
   ["embed_query", "Query embedding"],
-  ["search", "Vector search"],
+  ["search", "Search"],
   ["first_token", "First token"],
   ["generation", "Generation"],
   ["total", "Total"],
@@ -49,10 +50,11 @@ function MetadataPanel({ message, documentTitle }: Pick<WhyThisAnswerProps, "mes
   const sources = [...message.citations].sort((a, b) => a.citation_id - b.citation_id);
   const titleFor = (id: number) => sources.find((source) => source.document_id === id)?.document_title || documentTitle(id) || `Document ${id}`;
   const funnel = [
-    retrieval.candidate_count != null ? `${retrieval.candidate_count} candidates` : null,
-    retrieval.context_count != null ? `${retrieval.context_count} in context` : null,
-    retrieval.cited_count != null ? `${retrieval.cited_count} cited` : null,
+    retrieval.candidate_count != null ? `Retrieved ${retrieval.candidate_count}` : null,
+    retrieval.context_count != null ? `${retrieval.rerank?.applied ? "Reranked to" : "Selected"} ${retrieval.context_count}` : null,
+    retrieval.cited_count != null ? `Used ${retrieval.cited_count}` : null,
   ].filter(Boolean);
+  const pipelineLabel = pipelineVersionLabel(retrieval.pipeline_version);
 
   return (
     <div className="mt-2 space-y-3">
@@ -68,6 +70,14 @@ function MetadataPanel({ message, documentTitle }: Pick<WhyThisAnswerProps, "mes
           )}
         </Row>
         {funnel.length > 0 && <Row label="Retrieval">{funnel.join(" → ")}</Row>}
+        {pipelineLabel && <Row label="Pipeline">{pipelineLabel}</Row>}
+        {retrieval.rerank?.fallback && (
+          <Row label="Reranker">
+            <span className="text-status-warning">
+              {retrieval.rerank.provider} · {retrieval.rerank.model} failed{retrieval.rerank.error_code ? ` (${retrieval.rerank.error_code})` : ""}; the fused order was kept.
+            </span>
+          </Row>
+        )}
         <Row label="Strategy">
           {pipeline.strategy ?? "dense"}
           {pipeline.candidate_k != null && pipeline.top_k != null ? ` · top ${pipeline.top_k} of ${pipeline.candidate_k}` : ""}

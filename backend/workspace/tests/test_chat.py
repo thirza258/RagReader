@@ -19,7 +19,7 @@ MESSAGE_KEYS = {"id", "conversation_id", "role", "content", "status", "citations
 EVIDENCE_KEYS = {"citation_id", "document_id", "document_title", "index_version_id", "chunk_id", "page_number",
                  "page_end", "char_start", "char_end", "text", "retrieval_score", "rerank_score", "cited"}
 CONVERSATION_KEYS = {"id", "workspace_id", "title", "document_ids", "message_count", "last_message_preview",
-                     "created_at", "updated_at"}
+                     "created_at", "updated_at", "pipeline_id"}
 
 
 class ChatTestCase(WorkspaceTestCase):

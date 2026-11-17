@@ -15,6 +15,7 @@ import {
   runLine,
   stageName,
   summaryCards,
+  wasReranked,
 } from "../src/features/runs/lib/runMetrics.ts";
 import { isProtectedApiPath } from "../src/features/auth/lib/unauthorized.ts";
 
@@ -98,10 +99,20 @@ test("latencies, percentiles, rates and counts are formatted for people", () => 
 
 test("the funnel reads candidates, context and cited from runs and Phase 1 metadata", () => {
   const steps = runFunnel({ candidate_count: 20, context_count: 5, cited_count: 3 });
-  assert.equal(funnelText(steps), "Retrieved candidates 20 → Context 5 → Cited 3");
+  assert.equal(funnelText(steps), "Retrieved 20 → Selected 5 → Used 3");
   assert.equal(funnelShort(steps), "20 → 5 → 3");
-  assert.equal(funnelText(runFunnel({ candidate_count: 4 })), "Retrieved candidates 4 → Context — → Cited —");
+  assert.equal(funnelText(runFunnel({ candidate_count: 4 })), "Retrieved 4 → Selected — → Used —");
   assert.equal(funnelShort(runFunnel(null)), "— → — → —");
+});
+
+test("the §21 funnel says Reranked to only when a reranker reordered the candidates", () => {
+  const counts = { candidate_count: 20, context_count: 5, cited_count: 3 };
+  assert.equal(funnelText(runFunnel(counts, { reranked: true })), "Retrieved 20 → Reranked to 5 → Used 3");
+  assert.equal(wasReranked({ reranker: { provider: "ollama", model: "m", applied: true, fallback: false, error_code: null } }), true);
+  assert.equal(wasReranked({ reranker: { provider: "ollama", model: "m", applied: false, fallback: true, error_code: "reranker_unavailable" } }), false);
+  assert.equal(wasReranked({ reranker: null }), false);
+  assert.equal(wasReranked({ reranker: "legacy string" }), false);
+  assert.equal(wasReranked(null), false);
 });
 
 test("the rewrite explains itself when it did not happen", () => {

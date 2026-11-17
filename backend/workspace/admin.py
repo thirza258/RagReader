@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from workspace.models import (
-    ApiToken, ChatMessage, ChatSession, RetrievalCandidate, RetrievalRun, RetrievalSpan, Workspace,
+    ApiToken, ChatMessage, ChatSession, Pipeline, PipelineVersion, RetrievalCandidate, RetrievalRun, RetrievalSpan,
+    Workspace,
 )
 
 
@@ -49,7 +50,7 @@ class RetrievalSpanInline(_ReadOnlyInline):
 
 class RetrievalCandidateInline(_ReadOnlyInline):
     model = RetrievalCandidate
-    fields = ("rank", "document_title", "chunk_id", "page_start", "retrieval_score", "rerank_score", "selected_for_context", "cited", "citation_id")
+    fields = ("rank", "retrieval_rank", "document_title", "chunk_id", "page_start", "retrieval_score", "dense_score", "bm25_score", "fused_score", "rerank_score", "selected_for_context", "cited", "citation_id")
     readonly_fields = fields
 
 
@@ -58,7 +59,7 @@ class RetrievalRunAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "workspace", "source", "status", "error_stage", "error_code", "total_ms", "first_token_ms", "total_tokens", "started_at")
     list_filter = ("source", "status", "error_stage")
     search_fields = ("query_original", "error_code")
-    raw_id_fields = ("user", "workspace", "conversation", "message")
+    raw_id_fields = ("user", "workspace", "conversation", "message", "pipeline_version")
     date_hierarchy = "started_at"
     inlines = [RetrievalSpanInline, RetrievalCandidateInline]
 
@@ -75,3 +76,30 @@ class RetrievalCandidateAdmin(admin.ModelAdmin):
     list_display = ("id", "run", "rank", "document_title", "retrieval_score", "selected_for_context", "cited")
     list_filter = ("selected_for_context", "cited")
     raw_id_fields = ("run", "document")
+
+
+class PipelineVersionInline(_ReadOnlyInline):
+    model = PipelineVersion
+    fields = ("number", "config_hash", "config", "created_at")
+    readonly_fields = fields
+
+
+@admin.register(Pipeline)
+class PipelineAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "workspace", "is_default", "updated_at")
+    list_filter = ("is_default",)
+    raw_id_fields = ("workspace",)
+    inlines = [PipelineVersionInline]
+
+
+@admin.register(PipelineVersion)
+class PipelineVersionAdmin(admin.ModelAdmin):
+    """Versions are immutable: viewable, never editable."""
+    list_display = ("id", "pipeline", "number", "config_hash", "created_at")
+    readonly_fields = ("pipeline", "number", "config", "config_hash", "created_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

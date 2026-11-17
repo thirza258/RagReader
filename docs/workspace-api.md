@@ -2,8 +2,9 @@
 
 The workspace API is RAGReader's resource-oriented API for persistent
 documents, background ingestion, conversations and cited, streamed answers
-(PRD Phase 1), and the retrieval runs that make every answer inspectable
-(Phase 2). It lives in the `workspace` Django app, under `/api/v1/`, next
+(PRD Phase 1), the retrieval runs that make every answer inspectable
+(Phase 2), and versioned retrieval pipelines — dense, BM25, hybrid and
+hybrid + reranking — chosen per conversation (Phase 3). It lives in the `workspace` Django app, under `/api/v1/`, next
 to the legacy endpoints, which keep their request and response shapes but,
 like everything else, now require the bearer token.
 
@@ -96,6 +97,8 @@ stage or chat step where that applies.
 | `url_not_allowed` | 400 | URL refused by the SSRF rules below |
 | `ingestion_in_progress` | 409 | Re-index while a run is live; reader text not extracted yet |
 | `no_ready_documents` | 409 | Question with no READY document in scope |
+| `embedding_model_mismatch` | 409 | Question whose pipeline embeds with another model than a document's index |
+| `default_pipeline` | 409 | Deleting a workspace's default pipeline |
 | `last_workspace` | 409 | Deleting the only workspace |
 | `no_original_file` | 404 | `file/` of a web page or pasted text |
 | `text_unavailable` | 404 | `text/` of a finished document without extracted text |
@@ -130,16 +133,24 @@ All paths are under `/api/v1/` and require the token, except `sign-up/` and
 | GET | `documents/{id}/file/` | The original upload, `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`. |
 | GET | `documents/{id}/text/` | `{"document_id", "text", "pages", "char_count", "truncated"}` for the reader. `pages` is `[{"number", "start", "end"}]` (PDF content only). |
 | GET | `conversations/?workspace_id=` | Most recently active first. |
-| POST | `conversations/` | `{title?, workspace_id?, document_ids?}` → 201. |
-| GET, PATCH, DELETE | `conversations/{id}/` | PATCH `{title?, document_ids?}`. Renaming stops automatic titles. |
+| POST | `conversations/` | `{title?, workspace_id?, document_ids?, pipeline_id?}` → 201. |
+| GET, PATCH, DELETE | `conversations/{id}/` | PATCH `{title?, document_ids?, pipeline_id?}`. Renaming stops automatic titles; `pipeline_id: null` returns to the default pipeline. |
 | GET | `conversations/{id}/messages/` | Oldest first. |
 | POST | `conversations/{id}/messages/` | `{content, document_ids?}` → `text/event-stream`; `?stream=0` → 201 `{"user_message", "assistant_message"}`. |
-| GET | `retrieval/runs/` | Recent runs, newest first. `?workspace_id=&conversation_id=&status=completed\|failed&source=chat&limit=1–200` (default 50) → `{"results", "has_more"}`. See [Retrieval runs](#retrieval-runs). |
+| GET | `retrieval/runs/` | Recent runs, newest first. `?workspace_id=&conversation_id=&status=completed\|failed&source=chat&pipeline_version_id=&limit=1–200` (default 50) → `{"results", "has_more"}`. See [Retrieval runs](#retrieval-runs). |
 | GET | `retrieval/runs/{id}/` | One run's trace: provenance, span tree, candidates. |
 | GET | `retrieval/runs/summary/` | Reliability for `?workspace_id=&days=1–365` (default 30): failure rates, latency percentiles, tokens, ingestion. |
+| GET | `pipelines/` | A workspace's pipelines, default first (`?workspace_id=`; creates the default). See [Pipelines](#pipelines). |
+| POST | `pipelines/` | `{name, workspace_id?, config?}` → 201; version 1 is the defaults plus `config`. |
+| GET | `pipelines/options/` | Strategies, fusion methods, rerankers, models, ranges and defaults for a pipeline form. |
+| GET, PATCH, DELETE | `pipelines/{id}/` | PATCH `{name?, config?}`: a changed configuration adds a version (`version_created`). DELETE → 204; the default is 409 `default_pipeline`. |
+| GET | `pipelines/{id}/versions/` | Every version, newest first. |
+| GET | `indexes/?document_id=` | A document's index versions, newest first (without `document_id`: every index in `?workspace_id=`). |
+| GET | `indexes/{id}/` | One index version. |
 
-`document_ids` must belong to the conversation's workspace (otherwise 400
-`invalid_request`). Interactive OpenAPI docs are at `/api/docs/`.
+`document_ids` and `pipeline_id` must belong to the conversation's workspace
+(otherwise 400 `invalid_request`, with the same message for another
+workspace's, another user's or an unknown id). Interactive OpenAPI docs are at `/api/docs/`.
 
 ## Legacy and deep-analysis endpoints
 
@@ -307,14 +318,18 @@ One turn:
    into a standalone search query from the last 6 completed messages. A
    rewrite that is not one line of at most 200 characters, or that fails, is
    ignored. The first question is searched as asked.
-3. **Retrieve.** The query is embedded once and scored by cosine similarity
-   against each document's current dense index; candidates from all
-   documents are merged by score, identical passages are kept once, 20
-   candidates are kept and the top 5 become numbered sources. Loaded indexes
-   are cached per process (`RAG_CHAT_INDEX_CACHE_SIZE`, default 8). A document
-   whose index cannot be loaded fails the turn with `index_unavailable` naming
-   it; chat never builds an index itself.
-4. **Generate.** The model is told to answer only from the numbered sources,
+3. **Retrieve**, with the conversation's pipeline (its latest version when
+   the question is asked; see [Pipelines](#pipelines)). With the default
+   pipeline — Phase 1 behaviour — the query is embedded once and scored by
+   cosine similarity against each document's current dense index;
+   candidates from all documents are merged by score, identical passages are
+   kept once, 20 candidates are kept and the top 5 become numbered sources.
+   BM25, hybrid and reranking pipelines rank differently (below). Loaded
+   indexes are cached per process (`RAG_CHAT_INDEX_CACHE_SIZE`, default 8). A
+   document whose index cannot be loaded fails the turn with
+   `index_unavailable` naming it; chat never builds an index itself.
+4. **Generate** with the pipeline's generation model and temperature (the
+   query rewrite uses the same model). The model is told to answer only from the numbered sources,
    to cite `[n]` after each supported claim, to say when the sources are
    insufficient and never to invent a citation (prompt version
    `chat-cited-v1`). The answer is streamed. If OpenRouter reports exhausted
@@ -381,33 +396,48 @@ A run records:
   why it was not rewritten when it was not (`first_question`, `unchanged`,
   `unusable`, `failed`).
 * **Provenance** (§20) — strategy, retrieval parameters (`candidate_k`,
-  `context_k`, cosine similarity, de-duplication, history), embedding model,
-  reranker (none until Phase 3), the generation model that answered and the
+  `context_k`, similarity — cosine, bm25 or cosine+bm25 —, the fusion
+  method and its hybrid weight or RRF k, de-duplication, history), embedding
+  model, reranker (provider, model, whether it reordered the candidates or
+  fell back, and the error code), the pipeline version with its full
+  configuration and hash, the generation model that answered and the
   configured one (they differ when the free-model fallback was used;
   `fallback_used` says so), generation parameters, prompt version, and every
   index version searched (DocumentVector id, method, build time, embedding
   model, whether it loaded).
-* **Latency** — total (= the message's `latency_ms`), rewrite, retrieval,
-  rerank (null), generation and first token (from the question), each null
-  when that step did not run or complete.
+* **Latency** — total (= the message's `latency_ms`), rewrite, retrieval
+  (the whole retrieve stage, reranking included), rerank (the reranker
+  alone; null without one), generation and first token (from the
+  question), each null when that step did not run or complete.
 * **Tokens** — prompt, completion and total for the answer (the rewrite call
   reports none).
 * **The span tree** — `chat.turn` → `prepare`, `rewrite`, `retrieve`
   (`retrieve.load_indexes` with one `index.load` per document and its cache
-  hit or miss, `retrieve.embed_query`, `retrieve.search`, `retrieve.select`),
+  hit or miss, `retrieve.embed_query`, `retrieve.search`, `retrieve.select`,
+  and for other strategies `retrieve.bm25`, `retrieve.fusion` and
+  `retrieve.rerank`),
   `generate` (`generate.first_token`), `citations`, `persist`. Offsets are
   milliseconds from the start of the turn. A failure closes the failing span
-  and its parents as `failed` with the error code.
-* **Candidates** — every retrieved passage in rank order (at most 50 are
-  stored; chat retrieves 20): document, page and character range, retrieval
-  score, rerank score (null), whether it was in the context and under which
-  `[n]`, and whether the answer cited it.
+  and its parents as `failed` with the error code. A reranker failure is
+  marked `fallback` (with its code) and fails nothing.
+* **Candidates** — every retrieved passage in final rank order (at most 50
+  are stored; the default pipeline retrieves 20): document, page and
+  character range, the retrieval score (the score it was retrieved by) and
+  its dense, BM25 and fused components, the rerank score, the rank before
+  reranking, whether it was in the context and under which `[n]`, and
+  whether the answer cited it.
 
 `GET retrieval/runs/{id}/` returns all of it. A candidate's `text` is the
 whole passage while its chunk still exists, otherwise the stored 300-character
 snippet; after the document is deleted, `document_id` is null,
 `document_available` false and the title is kept. Deleting a conversation
 deletes its runs (they contain the question).
+
+`?pipeline_version_id=` lists only the runs of one pipeline version (400 if
+malformed, 404 if it is not the caller's). Each run names its pipeline
+(`pipeline`: id, name, version) and `pipeline_version_id` (null for runs
+from before pipelines and after the pipeline was deleted; its provenance
+keeps the configuration).
 
 `GET retrieval/runs/summary/` reports a workspace's reliability (§49) over the
 last `days`:
@@ -425,6 +455,89 @@ last `days`:
 
 Rates are fractions with four decimals, null when nothing was counted.
 
+## Pipelines
+
+A pipeline is a named retrieval and generation configuration (PRD §17). Its
+settings live in immutable **versions**: editing a setting adds version
+n + 1 and no version ever changes, so an answer that names "v2" names an
+exact configuration (§19). Every workspace has a default pipeline,
+"Default (dense)", created on first use, whose version 1 is Phase 1 chat.
+Conversations use the default unless they choose another
+(`pipeline_id`); every question runs with the chosen pipeline's latest
+version at that moment, and the answer records it
+(`retrieval.pipeline_version_id`, `retrieval.pipeline_version`, the run's
+`pipeline_version_id` and `provenance.pipeline`).
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| `strategy` | `dense`, `bm25`, `hybrid`, `hybrid_rerank` | `dense` |
+| `fusion` | `weighted`, `rrf` (hybrid strategies) | `weighted` |
+| `hybrid_weight` | 0–1, the dense share of a weighted fusion | 0.6 |
+| `rrf_k` | 1–1000 | 60 |
+| `candidate_k` | 1–50 passages retrieved | 20 |
+| `top_k` | 1–20 passages given to the model, ≤ `candidate_k` | 5 |
+| `reranker` | `null`, or `{"provider": "ollama", "model": <RERANKER_MODELS id>}` / `{"provider": "llm", "model": <OpenRouter id>}`; `hybrid_rerank` only | `null` (`hybrid_rerank`: Ollama `nomic-embed-text`) |
+| `generation_model` | any OpenRouter id | `openai/gpt-4o-mini` |
+| `temperature` | 0–2 | 0 |
+| `prompt_version` | `chat-cited-v1` | `chat-cited-v1` |
+| `embedding_model` | the ingest-time model only | `RAG_EMBEDDING_MODEL` |
+
+`POST pipelines/` merges `config` onto the defaults; `PATCH` merges it onto
+the latest version. Out-of-range or malformed values are refused, not
+clamped: 400 `invalid_request` with one message per field in
+`details["config.<setting>"]`. A configuration identical to the latest
+version (same hash) adds no version, and neither does a rename; the
+response says `version_created`. Switching to `hybrid_rerank` without a
+reranker picks the default Ollama reranker; switching away drops it.
+
+**Embedding model.** Indexes are built at ingest time with
+`RAG_EMBEDDING_MODEL`, and a query embedded with any other model would be
+compared against vectors from a different space. So a pipeline must name
+that model, and a question is refused before streaming with 409
+`embedding_model_mismatch` when a document in scope was indexed with
+another one. BM25 pipelines embed no query and skip that check, but they
+still load each document's index, and an index whose file was built with
+another model than the server's fails to load (`index_unavailable`).
+
+**Strategies.**
+
+* **Dense** — cosine similarity, as above.
+* **BM25** — keyword search with one BM25 index built over the passages of
+  every document in scope together, so scores are comparable across
+  documents (English stop words removed; passages without a query term are
+  not candidates). The built index is cached per set of documents
+  (`RAG_CHAT_BM25_CACHE_SIZE`, default 4). No query embedding is made.
+* **Hybrid** — the dense and BM25 rankings fused: weighted (each
+  retriever's scores min-max normalised over the passages being fused,
+  then `w × dense + (1 − w) × BM25`; a weight of 1 or 0 gives exactly the
+  dense or BM25 ranking) or reciprocal rank fusion (`Σ 1 / (k + rank)`).
+* **Hybrid + reranking** — hybrid, then a reranker scores every candidate
+  and the top `top_k` by that score become the sources. The Ollama reranker
+  ranks by embedding similarity; the LLM reranker asks an OpenRouter model
+  once for a 0–10 score per numbered passage (each passage is cut to 700
+  characters, and shorter when needed so all passages together stay under
+  16,000; the query adds at most 500) and accepts only a reply that
+  is exactly the requested JSON. If the reranker fails in any way, the
+  fused order is kept, the answer completes, and the `retrieve.rerank` span
+  is marked `fallback` with the error code.
+
+Deleting a pipeline (not the default) moves its conversations to the
+default; recorded runs keep its configuration in their provenance.
+`GET pipelines/options/` returns everything a form needs: strategies,
+fusion methods, reranker providers with their models, generation models,
+the embedding model, prompt versions, ranges and defaults.
+
+### Index versions
+
+Every ingestion or re-index builds a new index version (a
+`DocumentVector`), and chat searches the document's current one.
+`GET indexes/?document_id=` lists them newest first with `method`,
+`status`, `is_current`, `created_at` and, for the current version, the
+embedding model, chunk configuration and chunk count recorded at ingest
+time (older versions report null). Building several index versions with
+different chunk settings side by side is not supported yet (see Known
+debt).
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -433,14 +546,18 @@ Rates are fractions with four decimals, null when nothing was counted.
 | `RAG_MAX_TEXT_CHARS` | 2000000 | Longest pasted text |
 | `RAG_MAX_URL_BYTES` | 10485760 (10 MB) | Largest fetched web page or PDF |
 | `RAG_CHAT_INDEX_CACHE_SIZE` | 8 | Loaded document indexes kept in memory per process |
+| `RAG_CHAT_BM25_CACHE_SIZE` | 4 | Built BM25 indexes (one per set of documents searched together) kept per process |
 | `RAG_TOKEN_TTL_DAYS` | 30 | Days a token stays valid after sign-up/sign-in |
 | `RAG_AUTH_THROTTLE_RATE` | `10/min` | Sign-up + sign-in attempts per client (DRF rate; empty disables) |
 | `RAG_NUM_PROXIES` | unset | Reverse proxies in front of Daphne; picks the client IP from `X-Forwarded-For` for the throttle |
 
 The embedding model and chunking settings are the ingest-time settings in
 `common/constant.py` (`RAG_EMBEDDING_MODEL`, `RAG_CHUNK_*`); chat retrieval
-depth and the prompt version are constants there too (`CHAT_CANDIDATE_K`,
-`CHAT_CONTEXT_K`, `CHAT_HISTORY_MESSAGES`, `CHAT_PROMPT_VERSION`).
+depth and the prompt version of the default pipeline are constants there too
+(`CHAT_CANDIDATE_K`, `CHAT_CONTEXT_K`, `CHAT_HISTORY_MESSAGES`,
+`CHAT_PROMPT_VERSION`), as are the pipeline choices and ranges
+(`PIPELINE_STRATEGIES`, `FUSION_METHODS`, `DEFAULT_HYBRID_WEIGHT`,
+`RERANKER_PROVIDERS`, `LLM_RERANK_*`).
 
 ## Known debt
 
@@ -473,7 +590,16 @@ depth and the prompt version are constants there too (`CHAT_CANDIDATE_K`,
   those calls are not checkpointed and repeat in `_build_index`.
 * The chat index cache is per process; a document deleted through another
   process stays cached there (unreachable, never served) until evicted.
-* Phase 1 chat is dense-only; BM25, hybrid and reranking arrive in Phase 3.
+* Index versions cannot yet be built side by side with different chunk
+  settings or embedding models: `_sync_chunks` replaces every chunk of
+  another configuration (deleting the ground truth attached to it), so
+  chunking and the embedding model stay ingest-time settings. Only the
+  current index version records its build settings.
+* A BM25 index is built in the process that answers, the first time a set
+  of documents is searched with a BM25 or hybrid pipeline (tokenising every
+  passage); large scopes make that first question slower.
+* The workspace's default pipeline cannot be changed to another one (edit
+  it instead).
 * Runs are kept until their conversation or workspace is deleted; there is
   no age-based clean-up yet. Each run is bounded (≤ 100 spans of ≤ 2 KB data,
   ≤ 50 candidates with 300-character snippets).

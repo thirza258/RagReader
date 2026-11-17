@@ -4,9 +4,10 @@ import ErrorNotice from "../../../components/ui/ErrorNotice";
 import { buttonOutline, buttonQuiet, eyebrow, focusRing, inputSmall } from "../../../components/ui/classes";
 import type { Evidence } from "../../chat/types";
 import { formatDateTime } from "../../documents/lib/format";
+import type { Pipeline } from "../../pipelines/types";
 import { useRunDetail } from "../hooks/useRunDetail";
 import { RUN_LIST_LIMIT, useRunsOverview } from "../hooks/useRunsOverview";
-import { runLine, stageName, summaryCards } from "../lib/runMetrics";
+import { runLine, runPipelineLabel, stageName, summaryCards } from "../lib/runMetrics";
 import type { RetrievalRun } from "../types";
 import RunTrace from "./RunTrace";
 
@@ -27,6 +28,7 @@ function RunRow({ run, onSelect }: { run: RetrievalRun; onSelect: (id: number) =
         </span>
         <span className="mt-0.5 line-clamp-2 block text-sm text-foreground">{run.query?.original || "Untitled question"}</span>
         <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">{runLine(run)}</span>
+        {runPipelineLabel(run) && <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{runPipelineLabel(run)}</span>}
         {failed && run.error && (
           <span className="mt-0.5 block text-[11px] text-destructive">
             Failed during {stageName(run.error.stage)} · <span className="font-mono">{run.error.code}</span>
@@ -82,6 +84,8 @@ function RunDetail({ runId, onBack, onOpenCandidate, onOpenConversation }: { run
 
 interface RunsPanelProps {
   workspaceId: number;
+  /** The workspace's pipelines, for the version filter. */
+  pipelines: Pipeline[];
   /** Changes after every chat turn, so the list stays current. */
   version: number;
   selectedRunId: number | null;
@@ -94,10 +98,11 @@ interface RunsPanelProps {
  * The workspace's runs (PRD §32, §49): reliability over a window, then the
  * recent runs; choosing one opens its full trace.
  */
-const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, version, selectedRunId, onSelectRun, onOpenCandidate, onOpenConversation }) => {
+const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, selectedRunId, onSelectRun, onOpenCandidate, onOpenConversation }) => {
   const [days, setDays] = useState(30);
   const [refresh, setRefresh] = useState(0);
-  const overview = useRunsOverview(workspaceId, days, version + refresh);
+  const [pipelineVersionId, setPipelineVersionId] = useState<number | null>(null);
+  const overview = useRunsOverview(workspaceId, days, version + refresh, pipelineVersionId);
 
   if (selectedRunId != null) {
     return <RunDetail runId={selectedRunId} onBack={() => onSelectRun(null)} onOpenCandidate={onOpenCandidate} onOpenConversation={onOpenConversation} />;
@@ -161,9 +166,35 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, version, selectedRun
         </p>
       )}
 
-      <h3 className="mt-4 text-sm font-medium">Recent runs</h3>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">Recent runs</h3>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <label className="shrink-0 text-xs text-muted-foreground" htmlFor={`runs-pipeline-${workspaceId}`}>
+            Pipeline
+          </label>
+          <select
+            id={`runs-pipeline-${workspaceId}`}
+            className={`${inputSmall} min-w-0 max-w-[14rem] text-xs`}
+            value={pipelineVersionId ?? ""}
+            onChange={(event) => setPipelineVersionId(event.target.value ? Number(event.target.value) : null)}
+          >
+            <option value="">All versions</option>
+            {pipelines.map((pipeline) => (
+              <optgroup key={pipeline.id} label={pipeline.name}>
+                {pipeline.versions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {pipeline.name} v{item.number}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+      </div>
       {overview.everLoaded && overview.runs.length === 0 && !overview.error && (
-        <p className="mt-1 text-xs text-muted-foreground">No runs yet. Every question asked in this workspace is recorded here with its trace.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {pipelineVersionId != null ? "No runs with this pipeline version." : "No runs yet. Every question asked in this workspace is recorded here with its trace."}
+        </p>
       )}
       {overview.runs.length > 0 && (
         <ul className="mt-1.5 space-y-1">

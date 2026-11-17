@@ -1,9 +1,11 @@
 /** Shapes of the retrieval-run endpoints (docs/prd-implementation.md, Phase 2). */
 import type { TokenUsage } from "../../chat/types/index.ts";
+import type { PipelineConfig } from "../../pipelines/types/index.ts";
 
 export type RunStatus = "completed" | "failed";
 export type RunSource = "chat" | "evaluation" | "research";
-export type SpanStatus = "completed" | "skipped" | "failed";
+/** `fallback`: the step failed but the request went on with a fallback (Phase 3: reranking kept the fused order). */
+export type SpanStatus = "completed" | "skipped" | "failed" | "fallback";
 
 /** One step of a run's trace; offsets are milliseconds from the run's start. */
 export interface RunSpan {
@@ -31,12 +33,38 @@ export interface RunCandidate {
   char_start: number | null;
   char_end: number | null;
   text: string;
+  /** The score it was retrieved by: cosine (dense), BM25 (bm25) or fused (hybrid strategies). */
   retrieval_score: number | null;
   rerank_score: number | null;
+  /** Phase 3: score components (null when the strategy did not compute one). */
+  dense_score?: number | null;
+  bm25_score?: number | null;
+  fused_score?: number | null;
+  /** Phase 3: rank before reranking; `rank` is the final one. Null on runs from before Phase 3. */
+  retrieval_rank?: number | null;
   selected_for_context: boolean;
   cited: boolean;
   /** The `[n]` the passage had in the prompt; null when it was not in the context. */
   citation_id: number | null;
+}
+
+/** Phase 3: the reranker in a run's provenance. */
+export interface RerankerProvenance {
+  provider: string | null;
+  model: string | null;
+  applied: boolean;
+  fallback: boolean;
+  error_code: string | null;
+}
+
+/** Phase 3: the pipeline version in a run's provenance (kept after the pipeline is deleted). */
+export interface PipelineProvenance {
+  pipeline_id: number | null;
+  name: string | null;
+  version_id: number | null;
+  version: number | null;
+  config: PipelineConfig | null;
+  config_hash: string | null;
 }
 
 export interface IndexVersion {
@@ -56,7 +84,8 @@ export interface RunProvenance {
   strategy?: string;
   retrieval_parameters?: Record<string, unknown>;
   embedding_model?: string | null;
-  reranker?: string | null;
+  /** Null without a reranker (and on runs from before Phase 3). */
+  reranker?: RerankerProvenance | string | null;
   generation_model?: string | null;
   configured_generation_model?: string | null;
   fallback_used?: boolean;
@@ -64,6 +93,7 @@ export interface RunProvenance {
   prompt_version?: string | null;
   index_versions?: IndexVersion[];
   index_version_count?: number;
+  pipeline?: PipelineProvenance | null;
 }
 
 export interface RunQuery {
@@ -107,6 +137,9 @@ export interface RetrievalRun {
   cited_count: number;
   strategy: string | null;
   generation_model: string | null;
+  /** Phase 3: null before pipelines and after the pipeline was deleted. */
+  pipeline_version_id?: number | null;
+  pipeline?: { id: number | null; name: string | null; version: number | null; version_id: number | null } | null;
   started_at: string;
   created_at: string;
 }

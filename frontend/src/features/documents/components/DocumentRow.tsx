@@ -7,6 +7,7 @@ import { formatBytes } from "../lib/uploadValidation";
 import { documentMetaLine, formatDateTime, sourceLabel } from "../lib/format";
 import { isTerminalStatus } from "../lib/ingestionStages";
 import type { WorkspaceDocument } from "../types";
+import IndexVersions from "./IndexVersions";
 import IngestionChecklist from "./IngestionChecklist";
 import DocumentErrorPanel from "./DocumentErrorPanel";
 
@@ -120,6 +121,7 @@ const DocumentRow: React.FC<DocumentRowProps> = ({
             </button>
           )}
           <p className="mt-0.5 text-xs text-muted-foreground">{documentMetaLine(document)}</p>
+          {ready && <IndexVersions documentId={document.id} currentIndexId={document.index?.id ?? null} />}
 
           {!terminal && <IngestionChecklist document={document} />}
           {document.status === "FAILED" && (

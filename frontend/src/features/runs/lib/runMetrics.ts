@@ -45,17 +45,31 @@ export interface FunnelStep {
   value: number | null;
 }
 
-/** Retrieved candidates → context → cited, from a run or Phase 1 metadata. */
-export function runFunnel(source: Pick<RetrievalRun, "candidate_count" | "context_count" | "cited_count"> | RetrievalMetadata | null | undefined): FunnelStep[] {
+/**
+ * The §21 funnel: retrieved candidates → context (the top-k after
+ * reranking, when a reranker ran) → used (cited), from a run or an answer's
+ * metadata. `reranked` names the middle step "Reranked to"; otherwise it is
+ * "Selected".
+ */
+export function runFunnel(
+  source: Pick<RetrievalRun, "candidate_count" | "context_count" | "cited_count"> | RetrievalMetadata | null | undefined,
+  options: { reranked?: boolean } = {},
+): FunnelStep[] {
   const pick = (value: unknown) => (isNumber(value) ? value : null);
   return [
-    { key: "candidates", label: "Retrieved candidates", value: pick(source?.candidate_count) },
-    { key: "context", label: "Context", value: pick(source?.context_count) },
-    { key: "cited", label: "Cited", value: pick(source?.cited_count) },
+    { key: "candidates", label: "Retrieved", value: pick(source?.candidate_count) },
+    { key: "context", label: options.reranked ? "Reranked to" : "Selected", value: pick(source?.context_count) },
+    { key: "cited", label: "Used", value: pick(source?.cited_count) },
   ];
 }
 
-/** "Retrieved candidates 20 → Context 5 → Cited 3". */
+/** Whether a run's reranker actually reordered its candidates (not configured-but-fell-back). */
+export function wasReranked(provenance: { reranker?: unknown } | null | undefined): boolean {
+  const reranker = provenance?.reranker;
+  return typeof reranker === "object" && reranker !== null && (reranker as { applied?: unknown }).applied === true;
+}
+
+/** "Retrieved 20 → Reranked to 5 → Used 3". */
 export function funnelText(steps: readonly FunnelStep[]): string {
   return steps.map((step) => `${step.label} ${step.value == null ? DASH : step.value.toLocaleString("en-US")}`).join(" → ");
 }
@@ -108,7 +122,7 @@ export function summaryCards(summary: ReliabilitySummary | null | undefined): Su
     },
     { key: "total", label: "Total latency", value: formatPercentiles(latency.total), detail: `${formatCount(latency.total.count)} completed runs` },
     { key: "first_token", label: "First token", value: formatPercentiles(latency.first_token), detail: "from question to first token" },
-    { key: "retrieval", label: "Retrieval", value: formatPercentiles(latency.retrieval), detail: "load indexes, embed, search, select" },
+    { key: "retrieval", label: "Retrieval", value: formatPercentiles(latency.retrieval), detail: "load indexes, search, fuse, rerank, select" },
     { key: "generation", label: "Generation", value: formatPercentiles(latency.generation), detail: "request to last token" },
     {
       key: "tokens",
@@ -123,6 +137,66 @@ export function summaryCards(summary: ReliabilitySummary | null | undefined): Su
       detail: `${formatCount(ingestion.ready)} ready · ${formatCount(ingestion.failed)} failed${ingestion.in_progress ? ` · ${formatCount(ingestion.in_progress)} in progress` : ""}`,
     },
   ];
+}
+
+/**
+ * A retrieval score for the candidate table: cosine and weighted fused
+ * scores (0–1) and BM25 (unbounded) read at two or three decimals; RRF
+ * scores (around 1/60) need four to tell neighbours apart. "—" when the
+ * strategy did not compute it.
+ */
+export function formatCandidateScore(score: number | null | undefined): string {
+  if (!isNumber(score)) return DASH;
+  const magnitude = Math.abs(score);
+  if (magnitude === 0) return "0";
+  if (magnitude >= 100) return score.toFixed(1);
+  if (magnitude >= 1) return score.toFixed(2);
+  if (magnitude >= 0.1) return score.toFixed(3);
+  return score.toFixed(4);
+}
+
+export interface RankMovement {
+  before: number | null;
+  after: number;
+  /** Positive: moved up (to a better rank). */
+  delta: number;
+  text: string;
+}
+
+/** "4 → 1 (up 3)" for a reranked candidate; just "1" when its rank did not change or is unknown. */
+export function rankMovement(candidate: Pick<RunCandidate, "rank" | "retrieval_rank">): RankMovement {
+  const before = isNumber(candidate.retrieval_rank) ? candidate.retrieval_rank : null;
+  const after = candidate.rank;
+  if (before == null || before === after) return { before, after, delta: 0, text: String(after) };
+  const delta = before - after;
+  return { before, after, delta, text: `${before} → ${after} (${delta > 0 ? "up" : "down"} ${Math.abs(delta)})` };
+}
+
+export type ScoreColumn = "dense_score" | "bm25_score" | "fused_score" | "rerank_score";
+
+const SCORE_COLUMNS: { key: ScoreColumn; label: string; title: string }[] = [
+  { key: "dense_score", label: "Dense", title: "Cosine similarity of the passage to the query embedding" },
+  { key: "bm25_score", label: "BM25", title: "BM25 keyword score over every passage in scope" },
+  { key: "fused_score", label: "Fused", title: "The hybrid score that ranked the candidates before reranking" },
+  { key: "rerank_score", label: "Rerank", title: "The reranker's relevance score" },
+];
+
+/**
+ * The score columns a run's candidate table needs: those any candidate
+ * has. Runs from before Phase 3 only have `retrieval_score`, shown alone.
+ */
+export function candidateScoreColumns(candidates: readonly RunCandidate[]): { key: ScoreColumn | "retrieval_score"; label: string; title: string }[] {
+  const present = SCORE_COLUMNS.filter((column) => candidates.some((candidate) => isNumber(candidate[column.key])));
+  const components = present.filter((column) => column.key !== "rerank_score");
+  if (components.length === 0) {
+    return [{ key: "retrieval_score", label: "Retrieval", title: "The score the passage was retrieved by" }, ...present];
+  }
+  return present;
+}
+
+/** Whether any candidate's rank changed between retrieval and the final order. */
+export function hasRankChanges(candidates: readonly Pick<RunCandidate, "rank" | "retrieval_rank">[]): boolean {
+  return candidates.some((candidate) => isNumber(candidate.retrieval_rank) && candidate.retrieval_rank !== candidate.rank);
 }
 
 /** A candidate as reader evidence; null when its document is gone. */
@@ -150,6 +224,13 @@ export function candidateToEvidence(candidate: RunCandidate): Evidence | null {
 export function runIdOf(message: Pick<ChatMessage, "retrieval"> | null | undefined): number | null {
   const id = message?.retrieval?.run_id;
   return typeof id === "number" && Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** "Default (dense) v2" for a run; null before pipelines. */
+export function runPipelineLabel(run: Pick<RetrievalRun, "pipeline">): string | null {
+  const pipeline = run.pipeline;
+  if (!pipeline?.name) return null;
+  return pipeline.version != null ? `${pipeline.name} v${pipeline.version}` : pipeline.name;
 }
 
 /** "2.45 s · first token 0.90 s · 908 tokens · 20 → 5 → 3" for a run row. */

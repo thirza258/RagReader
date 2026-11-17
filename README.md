@@ -123,7 +123,7 @@ executed inside the backend Docker image by `./deploy.sh` before every deploy.
 ## Workspace (documents, conversations, citations)
 
 The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`,
-`/retrieval/runs/`)
+`/retrieval/runs/`, `/pipelines/`, `/indexes/`)
 turns RAGReader into a persistent research workspace:
 
 *   **Documents** — upload PDF, DOCX, TXT or Markdown, add a web page by URL,
@@ -144,6 +144,14 @@ turns RAGReader into a persistent research workspace:
     produced the answer. The workspace's **Runs** view lists recent runs and
     reports failure rates, p50/p95 latency and ingestion success
     (`/api/v1/retrieval/runs/`).
+*   **Retrieval pipelines** — each conversation answers with a versioned
+    pipeline: dense, BM25, hybrid (weighted or reciprocal rank fusion) or
+    hybrid + reranking (Ollama or an LLM reranker), with configurable
+    candidate and final top-k, hybrid weight, generation model and
+    temperature. Editing a pipeline adds an immutable version, and every
+    answer records the version, the dense/BM25/fused/rerank scores of each
+    candidate and how reranking moved it (`/api/v1/pipelines/`). Each
+    document's index versions are listed at `/api/v1/indexes/`.
 
 Accounts have a password: `POST /api/v1/sign-up/` creates one and
 `POST /api/v1/sign-in/` signs in, each returning a bearer token that expires

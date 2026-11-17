@@ -22,24 +22,34 @@ import { formatRetrievalSummary } from "../features/chat/lib/retrievalSummary";
 import type { ChatMessage, Evidence } from "../features/chat/types";
 import DocumentReader from "../features/reader/components/DocumentReader";
 import RunsPanel from "../features/runs/components/RunsPanel";
+import { usePipelines } from "../features/pipelines/hooks/usePipelines";
+import PipelineBar from "../features/pipelines/components/PipelineBar";
+import PipelinePanel from "../features/pipelines/components/PipelinePanel";
+import { pipelineVersionLabel } from "../features/pipelines/lib/pipelineConfig";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-type Pane = "documents" | "reader" | "chat" | "runs";
+type Pane = "documents" | "reader" | "chat" | "runs" | "pipelines";
 /** What the right-hand column shows on wide screens. */
-type SidePane = "chat" | "runs";
+type SidePane = "chat" | "runs" | "pipelines";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "documents", label: "Documents" },
   { id: "reader", label: "Reader" },
   { id: "chat", label: "Chat" },
   { id: "runs", label: "Runs" },
+  { id: "pipelines", label: "Pipelines" },
 ];
 
 const SIDE_PANES: { id: SidePane; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "runs", label: "Runs" },
+  { id: "pipelines", label: "Pipelines" },
 ];
+
+function isSidePane(id: Pane): id is SidePane {
+  return id === "chat" || id === "runs" || id === "pipelines";
+}
 
 function parseId(value: string | null | undefined): number | null {
   return value && /^\d+$/.test(value) ? Number(value) : null;
@@ -174,6 +184,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   } = useDocuments(workspaceId);
   const conversations = useConversations(workspaceId);
   const { refresh: refreshConversations } = conversations;
+  const pipelines = usePipelines(workspaceId);
 
   const conversationId = parseId(conversationParam);
   const activeConversation = conversations.list.find((conversation) => conversation.id === conversationId) ?? null;
@@ -191,11 +202,15 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const [sidePane, setSidePane] = useState<SidePane>("chat");
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [runsVersion, setRunsVersion] = useState(0);
+  /** The pipeline for the next new conversation; null = the workspace default. */
+  const [draftPipelineId, setDraftPipelineId] = useState<number | null>(null);
+  const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [pipelineError, setPipelineError] = useState<ApiRequestError | null>(null);
 
-  /** Chat or Runs: a mobile tab, or the right-hand column on wide screens. */
+  /** Chat, Runs or Pipelines: a mobile tab, or the right-hand column on wide screens. */
   const showPane = useCallback((id: Pane) => {
     setPane(id);
-    if (id === "chat" || id === "runs") setSidePane(id);
+    if (isSidePane(id)) setSidePane(id);
   }, []);
 
   const search = searchParams.toString();
@@ -269,6 +284,27 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
         : "No document in this conversation's scope is ready yet."
       : null;
 
+  // ---- pipelines (PRD §17) ---------------------------------------------
+  const defaultPipelineId = pipelines.list.find((pipeline) => pipeline.is_default)?.id ?? null;
+  const draftPipeline = pipelines.list.some((pipeline) => pipeline.id === draftPipelineId) ? draftPipelineId : null;
+  const selectedPipelineId = activeConversation ? (activeConversation.pipeline_id ?? defaultPipelineId) : (draftPipeline ?? defaultPipelineId);
+  const selectPipeline = async (id: number) => {
+    setPipelineError(null);
+    if (!activeConversation) {
+      setDraftPipelineId(id === defaultPipelineId ? null : id);
+      return;
+    }
+    setPipelineBusy(true);
+    try {
+      await conversations.update(activeConversation.id, { pipeline_id: id });
+    } catch (caught) {
+      setPipelineError(toApiError(caught));
+      throw caught;
+    } finally {
+      setPipelineBusy(false);
+    }
+  };
+
   // ---- conversations ---------------------------------------------------
   const selectConversation = (id: number | null) => {
     setScopeError(null);
@@ -277,7 +313,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   };
 
   const createEmptyConversation = async () => {
-    const conversation = await conversations.create(activeConversation ? [] : draftScope);
+    const conversation = await conversations.create(activeConversation ? [] : draftScope, undefined, activeConversation ? null : draftPipeline);
     refreshWorkspaces();
     setDraftScope([]);
     navigate(pathFor(conversation.id));
@@ -285,10 +321,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   };
 
   const startConversation = async (question: string) => {
-    const conversation = await conversations.create(draftScope);
+    const conversation = await conversations.create(draftScope, undefined, draftPipeline);
     refreshWorkspaces();
     setPending({ conversationId: conversation.id, content: question });
     setDraftScope([]);
+    setDraftPipelineId(null);
     navigate(pathFor(conversation.id));
   };
 
@@ -350,11 +387,12 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   if (missing) return <MissingWorkspace />;
 
   const summary = formatRetrievalSummary(latestAnswer?.retrieval, latestAnswer?.latency_ms);
+  const answeredWith = pipelineVersionLabel(latestAnswer?.retrieval?.pipeline_version);
   const paneClass = (id: Pane) => `${isDesktop || pane === id ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden`;
   // The chat stays mounted (only hidden) while Runs is shown: unmounting it
   // would abort an answer that is still streaming.
-  const side: SidePane = isDesktop ? sidePane : pane === "runs" ? "runs" : "chat";
-  const sideVisible = isDesktop || pane === "chat" || pane === "runs";
+  const side: SidePane = isDesktop ? sidePane : isSidePane(pane) ? pane : "chat";
+  const sideVisible = isDesktop || isSidePane(pane);
   const sideLabelledBy = (id: SidePane) => (isDesktop ? `side-tab-${id}` : `tab-${id}`);
   const paneProps = (id: Pane, label: string) =>
     isDesktop
@@ -457,11 +495,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
         </section>
 
         <section
-          aria-label={isDesktop ? "Chat and runs" : undefined}
+          aria-label={isDesktop ? "Chat, runs and pipelines" : undefined}
           className={`${sideVisible ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden border-border lg:border-l`}
         >
           {isDesktop && (
-            <div role="tablist" aria-label="Chat or runs" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
+            <div role="tablist" aria-label="Chat, runs or pipelines" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
               {SIDE_PANES.map((item) => (
                 <button
                   key={item.id}
@@ -493,6 +531,28 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
               }}
               onDelete={deleteConversation}
             />
+            <PipelineBar
+              pipelines={pipelines.list}
+              loaded={pipelines.loaded}
+              selectedId={selectedPipelineId}
+              busy={pipelineBusy || waitingForConversation}
+              onSelect={(id) => void selectPipeline(id).catch(() => undefined)}
+              onConfigure={() => showPane("pipelines")}
+            />
+            {pipelineError && (
+              <div className="border-b border-border p-3">
+                <ErrorNotice
+                  title="Could not switch the pipeline"
+                  code={pipelineError.code}
+                  message={pipelineError.message}
+                  actions={
+                    <button type="button" className={buttonOutline} onClick={() => setPipelineError(null)}>
+                      Dismiss
+                    </button>
+                  }
+                />
+              </div>
+            )}
             {conversations.error && (
               <div className="border-b border-border p-3">
                 <ErrorNotice
@@ -534,6 +594,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
             {side === "runs" && sideVisible && (
               <RunsPanel
                 workspaceId={workspaceId}
+                pipelines={pipelines.list}
                 version={runsVersion}
                 selectedRunId={selectedRunId}
                 onSelectRun={setSelectedRunId}
@@ -542,12 +603,27 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
               />
             )}
           </div>
+          <div id="pane-pipelines" role="tabpanel" aria-labelledby={sideLabelledBy("pipelines")} className={`${side === "pipelines" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {side === "pipelines" && sideVisible && (
+              <PipelinePanel
+                pipelines={pipelines}
+                selectedId={selectedPipelineId}
+                conversationTitle={activeConversation ? activeConversation.title || "Untitled conversation" : null}
+                onSelect={selectPipeline}
+                onDeleted={refreshConversations}
+              />
+            )}
+          </div>
         </section>
       </div>
 
       <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-0.5 border-t border-border bg-muted px-4 py-1.5 font-mono text-[11px] text-muted-foreground">
         <span>{summary ?? "Retrieval: no answer yet in this conversation"}</span>
-        {latestAnswer?.retrieval?.pipeline?.generation_model && <span className="truncate">{latestAnswer.retrieval.pipeline.generation_model}</span>}
+        {(answeredWith || latestAnswer?.retrieval?.pipeline?.generation_model) && (
+          <span className="truncate">
+            {[answeredWith, latestAnswer?.retrieval?.pipeline?.generation_model].filter(Boolean).join(" · ")}
+          </span>
+        )}
       </footer>
     </div>
   );

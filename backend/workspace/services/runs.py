@@ -63,14 +63,16 @@ def _score(value):
 def save_run(*, user, workspace, source, status, query_original, conversation=None, message=None,
              query_rewritten="", rewrite_applied=False, rewrite_reason="", error=None, error_stage="",
              provenance=None, latency=None, usage=None, counts=None, started_at=None,
-             spans=(), candidates=()):
+             spans=(), candidates=(), pipeline_version=None):
     """Create a run with its spans and (at most MAX_RUN_CANDIDATES) candidates.
 
     `latency` maps total/rewrite/retrieval/rerank/generation/first_token to
     milliseconds; `usage` is a token-usage dict; `spans` are rows from
     `Tracer.export()`; each candidate is a dict with rank, document,
     index_version_id, chunk_id, retrieval_score, rerank_score,
-    selected_for_context, cited, citation_id, position and text.
+    selected_for_context, cited, citation_id, position and text, and
+    optionally (Phase 3) retrieval_rank, dense_score, bm25_score and
+    fused_score. `pipeline_version` is the PipelineVersion that ran.
     """
     latency, usage, counts, error = latency or {}, usage or {}, counts or {}, error or {}
     prompt, completion, total = (_int_or_none(usage.get(key)) for key in ("prompt_tokens", "completion_tokens", "total_tokens"))
@@ -83,7 +85,7 @@ def save_run(*, user, workspace, source, status, query_original, conversation=No
         error_message=error.get("message") or "",
         query_original=query_original or "", query_rewritten=query_rewritten or "",
         rewrite_applied=bool(rewrite_applied), rewrite_reason=(rewrite_reason or "")[:32],
-        provenance=provenance or {},
+        provenance=provenance or {}, pipeline_version=pipeline_version,
         total_ms=_ms(latency.get("total")), rewrite_ms=_ms(latency.get("rewrite")),
         retrieval_ms=_ms(latency.get("retrieval")), rerank_ms=_ms(latency.get("rerank")),
         generation_ms=_ms(latency.get("generation")), first_token_ms=_ms(latency.get("first_token")),
@@ -112,7 +114,11 @@ def save_run(*, user, workspace, source, status, query_original, conversation=No
             index_version_id=_int_or_none(candidate.get("index_version_id")),
             chunk_id=_int_or_none(candidate.get("chunk_id")),
             retrieval_score=_score(candidate.get("retrieval_score")),
+            dense_score=_score(candidate.get("dense_score")),
+            bm25_score=_score(candidate.get("bm25_score")),
+            fused_score=_score(candidate.get("fused_score")),
             rerank_score=_score(candidate.get("rerank_score")),
+            retrieval_rank=_int_or_none(candidate.get("retrieval_rank")),
             selected_for_context=bool(candidate.get("selected_for_context")),
             cited=bool(candidate.get("cited")),
             citation_id=_int_or_none(candidate.get("citation_id")),

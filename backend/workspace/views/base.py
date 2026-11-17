@@ -2,10 +2,10 @@
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from router.models import Document
+from router.models import Document, DocumentVector
 from workspace.auth import GuestTokenAuthentication
 from workspace.errors import ApiError, api_exception_handler
-from workspace.models import ChatSession, RetrievalRun, Workspace, default_workspace_for
+from workspace.models import ChatSession, Pipeline, PipelineVersion, RetrievalRun, Workspace, default_workspace_for
 
 # Ids above this cannot exist and make some database drivers raise instead of
 # simply finding nothing.
@@ -81,6 +81,36 @@ class OwnedAPIView(APIView):
         if run is None:
             raise not_found("Run")
         return run
+
+    def get_pipeline(self, pipeline_id):
+        pk = parse_id(pipeline_id)
+        pipeline = (
+            Pipeline.objects.select_related("workspace").filter(pk=pk, workspace__user=self.request.user).first()
+            if pk else None
+        )
+        if pipeline is None:
+            raise not_found("Pipeline")
+        return pipeline
+
+    def get_pipeline_version(self, version_id):
+        pk = parse_id(version_id)
+        version = (
+            PipelineVersion.objects.select_related("pipeline").filter(pk=pk, pipeline__workspace__user=self.request.user).first()
+            if pk else None
+        )
+        if version is None:
+            raise not_found("Pipeline version")
+        return version
+
+    def get_index(self, index_id):
+        pk = parse_id(index_id)
+        vector = (
+            DocumentVector.objects.select_related("document").filter(pk=pk, document__user=self.request.user).first()
+            if pk else None
+        )
+        if vector is None:
+            raise not_found("Index")
+        return vector
 
     def documents_in_workspace(self, workspace, document_ids, field="document_ids"):
         """Validate client-sent document ids against one of the user's workspaces.

@@ -1,7 +1,7 @@
 import React from "react";
 import ErrorNotice from "../../../components/ui/ErrorNotice";
 import type { Evidence } from "../../chat/types";
-import { describeRewrite, formatCount, formatMs, funnelText, runFunnel, stageName } from "../lib/runMetrics";
+import { describeRewrite, formatCount, formatMs, funnelText, runFunnel, runPipelineLabel, stageName, wasReranked } from "../lib/runMetrics";
 import type { RetrievalRunDetail } from "../types";
 import CandidateTable from "./CandidateTable";
 import LatencyWaterfall from "./LatencyWaterfall";
@@ -71,8 +71,17 @@ const RunTrace: React.FC<RunTraceProps> = ({ run, onOpenCandidate }) => {
         </div>
         <div className="grid grid-cols-[8.5rem_1fr] gap-2 py-1">
           <dt className="text-muted-foreground">Retrieval funnel</dt>
-          <dd className="min-w-0 font-mono">{funnelText(runFunnel(run))}</dd>
+          <dd className="min-w-0 font-mono">{funnelText(runFunnel(run, { reranked: wasReranked(run.provenance) }))}</dd>
         </div>
+        {runPipelineLabel(run) && (
+          <div className="grid grid-cols-[8.5rem_1fr] gap-2 py-1">
+            <dt className="text-muted-foreground">Pipeline</dt>
+            <dd className="min-w-0">
+              {runPipelineLabel(run)}
+              {run.pipeline_version_id == null && <span className="text-muted-foreground"> (deleted since)</span>}
+            </dd>
+          </div>
+        )}
       </dl>
 
       <Section title={`Retrieved candidates (${run.candidates.length})`}>

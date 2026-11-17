@@ -6,6 +6,8 @@ export interface RunListQuery {
   workspaceId: number;
   conversationId?: number;
   status?: RunStatus;
+  /** Phase 3: only runs of this pipeline version. */
+  pipelineVersionId?: number | null;
   limit?: number;
 }
 
@@ -17,6 +19,7 @@ export async function listRuns(query: RunListQuery, signal?: AbortSignal): Promi
         workspace_id: query.workspaceId,
         ...(query.conversationId != null ? { conversation_id: query.conversationId } : {}),
         ...(query.status ? { status: query.status } : {}),
+        ...(query.pipelineVersionId != null ? { pipeline_version_id: query.pipelineVersionId } : {}),
         ...(query.limit != null ? { limit: query.limit } : {}),
       },
       signal,

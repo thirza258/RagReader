@@ -11,32 +11,33 @@ Every turn is also traced (services/tracing.py) and recorded as a
 `RetrievalRun` — completed or failed — before the closing events, so a client
 that leaves early does not lose the trace either. Recording is guarded: if it
 fails, the answer is still delivered and saved, just without a run id.
+
+Since Phase 3 a turn runs with a pipeline version (the conversation's
+pipeline, latest version at question time; services/pipelines.py): its
+strategy, depths and reranker drive `services.retrieval.run_retrieval`, and
+its generation model and temperature drive the rewrite and the answer.
 """
-import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
 
-import numpy as np
 from django.db import transaction
 from django.utils import timezone
 
 from ai_handler.llm import StreamResult
-from common.constant import (
-    CHAT_CANDIDATE_K, CHAT_CONTEXT_K, CHAT_HISTORY_MESSAGES, CHAT_PROMPT_VERSION,
-)
-from common.embeddings import embed_texts
-from common.errors import PipelineError
+from common.constant import CHAT_HISTORY_MESSAGES
 from common.prompt_builder import cited_chat_messages, standalone_query_prompt
-from evaluation.models import Chunk
-from router.models import Conversation, ConversationHistory, DocumentVector
+from router.models import Conversation, ConversationHistory
 from workspace.errors import describe_exception
 from workspace.models import ChatMessage, ChatSession, RetrievalRun
 from workspace.serializers import message_payload
-from workspace.services import index_cache, tracing
+from workspace.services import llms, pipelines, tracing
 from workspace.services import runs as run_store
 from workspace.services.citations import evidence, mark_cited
-from workspace.services.ingestion import chat_engine, dense_engine_of
+from workspace.services.ingestion import chat_engine
+from workspace.services.retrieval import (  # noqa: F401 - chat_index/index_unavailable re-exported
+    INDEX_LOAD_SPANS, chat_index, index_unavailable, retrieval_parameters, run_retrieval,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +45,6 @@ REWRITE_MAX_CHARS = 200
 TITLE_MAX_CHARS = 80
 REWRITE_PREFIXES = ("standalone query:", "search query:", "query:", "rewritten query:")
 INTERRUPTED_MESSAGE = "The connection closed before the answer finished. Ask again to retry."
-# Per-document index loads get their own span up to this many documents; the
-# rest are only counted on the "Load indexes" span (keeps traces bounded).
-INDEX_LOAD_SPANS = 25
 REWRITE_DETAILS = {
     "first_question": "First question in the conversation",
     "rewritten": "Rewritten with the conversation context",
@@ -128,15 +126,15 @@ def _analysis_turn(user, document, query, answer, sources):
 
 # ── Rewrite ──────────────────────────────────────────────────────────────────
 
-def rewrite_question(engine, question, history, outcome=None):
+def rewrite_question(llm, question, history, outcome=None):
     """(search query, applied). Any problem keeps the original question.
 
-    `outcome`, when given, receives `reason` for the trace: `rewritten`,
-    `unchanged`, `unusable` or `failed`.
+    `llm` is the turn's generation LLM. `outcome`, when given, receives
+    `reason` for the trace: `rewritten`, `unchanged`, `unusable` or `failed`.
     """
     outcome = {} if outcome is None else outcome
     try:
-        raw = engine.llm.generate(standalone_query_prompt(question, history))
+        raw = llm.generate(standalone_query_prompt(question, history))
     except Exception:
         logger.warning("Query rewrite failed; searching with the original question", exc_info=True)
         outcome["reason"] = "failed"
@@ -164,168 +162,92 @@ class Retrieval:
     candidates: list    # RetrievalMetadata.candidates
     documents: list     # RetrievalMetadata.documents
     ranked: list = field(default_factory=list)  # every candidate, with text and position, for the run
+    rerank: dict | None = None  # services.retrieval.RetrievalResult.rerank
+    rerank_ms: int | None = None
 
 
-def chat_index(engine, document):
-    """`current_index`, else the newest ready index of the engine's method."""
-    vector = document.current_index if document.current_index_id else None
-    if vector is not None and vector.status == "ready" and vector.method == engine.method:
-        return vector
-    return (
-        DocumentVector.objects.filter(document=document, status="ready", method=engine.method)
-        .order_by("-created_at", "-id").first()
-    )
+def _score(value):
+    return round(float(value), 6) if value is not None else None
 
 
-def index_unavailable(document, reason="could not be loaded"):
-    return PipelineError(
-        "index_unavailable",
-        f"The search index for “{document.name}” {reason}. Re-index the document and ask again.",
-        retryable=False, http_status=409,
-    )
+def retrieve(engine, query, documents, timings, config, tracer=None, indexes=None):
+    """Run the pipeline's retrieval over `documents` and shape it for the turn.
 
-
-def _index_entry(document, vector):
-    """A provenance record of the index a document is searched with (§20)."""
-    return {
-        "document_id": document.pk,
-        "document_title": document.name,
-        "index_version_id": vector.pk if vector is not None else None,
-        "method": vector.method if vector is not None else None,
-        "created_at": vector.created_at.isoformat() if vector is not None and vector.created_at else None,
-        "embedding_model": (document.metadata or {}).get("embedding_model"),
-        "loaded": False,
-    }
-
-
-def _int_ids(values):
-    return [value for value in values if isinstance(value, int) and not isinstance(value, bool)]
-
-
-def retrieve(engine, query, documents, timings, tracer=None, indexes=None):
-    """Dense retrieval over `documents`.
-
-    `tracer` receives the load/embed/search/select spans; `indexes`, a list
-    the caller owns, receives one provenance entry per document as its index
-    is resolved, so it is complete up to the point of a failure.
+    `tracer` receives the retrieval spans; `indexes`, a list the caller owns,
+    receives one provenance entry per document as its index is resolved.
     """
-    tracer = tracer if tracer is not None else tracing.NullTracer()
-    indexes = [] if indexes is None else indexes
-    dense = dense_engine_of(engine)
-    loaded = []
-    with tracer.span("retrieve.load_indexes", "Load indexes", documents=len(documents)) as group:
-        hits = misses = 0
-        for position, document in enumerate(documents):
-            vector = chat_index(engine, document)
-            entry = _index_entry(document, vector)
-            if len(indexes) < run_store.MAX_RUN_INDEX_VERSIONS:
-                indexes.append(entry)
-            scope = (
-                tracer.span("index.load", f"Load index: {document.name}", document_id=document.pk, index_version_id=entry["index_version_id"])
-                if position < INDEX_LOAD_SPANS else contextlib.nullcontext(tracing.Span("index.load"))
-            )
-            with scope as span:
-                if vector is None:
-                    span.describe("No ready index")
-                    raise index_unavailable(document)
-                snapshot, hit = index_cache.fetch_snapshot(engine, vector, dense.model)
-                span.set(cache="hit" if hit else "miss")
-                if snapshot is None:
-                    span.describe("Could not be loaded")
-                    # Never built inline: an index build is minutes of embedding calls.
-                    raise index_unavailable(document)
-                span.set(chunks=len(snapshot)).describe("Cache hit" if hit else "Loaded from disk")
-            hits, misses = hits + hit, misses + (not hit)
-            group.set(cache_hits=hits, cache_misses=misses)
-            entry["loaded"] = True
-            loaded.append((document, vector, snapshot))
-
-    with tracer.span("retrieve.embed_query", "Query embedding", model=dense.model) as span:
-        started = time.monotonic()
-        query_vector = np.asarray(embed_texts(dense.client, [query], dense.model)[0], dtype=np.float32)
-        timings["embed_query"] = _ms(started)
-        span.set(dimensions=int(query_vector.shape[0]) if query_vector.ndim else 0)
-    query_vector = query_vector / (np.linalg.norm(query_vector) or 1.0)
-
-    started = time.monotonic()
-    with tracer.span("retrieve.search", "Vector search", similarity="cosine") as span:
-        pool, scored = [], 0
-        for order, (document, vector, snapshot) in enumerate(loaded):
-            if not len(snapshot):
-                continue
-            if snapshot.dimensions != query_vector.shape[0]:
-                raise index_unavailable(document, "was built with a different embedding model")
-            scores = snapshot.matrix @ query_vector
-            scored += len(scores)
-            depth = min(CHAT_CANDIDATE_K, len(scores))
-            for index in np.argpartition(-scores, depth - 1)[:depth]:
-                pool.append((float(scores[index]), order, int(index), document, vector, snapshot))
-        span.set(chunks_scored=scored, pooled=len(pool))
-
-    with tracer.span("retrieve.select", "Merge and select") as span:
-        # Highest score first; ties keep document order, then position.
-        pool.sort(key=lambda item: (-item[0], item[1], item[2]))
-        seen, kept, duplicates = set(), [], 0
-        for item in pool:
-            text = item[5].texts[item[2]]
-            key = " ".join(text.split())
-            if key in seen:
-                duplicates += 1
-                continue  # The same passage twice would waste a context slot.
-            seen.add(key)
-            kept.append(item)
-            if len(kept) == CHAT_CANDIDATE_K:
-                break
-        timings["search"] = _ms(started)
-
-        context = kept[:CHAT_CONTEXT_K]
-        all_ids = [item[5].chunk_ids[item[2]] for item in kept]
-        # Positions for every candidate, not only the context: the trace
-        # opens any of them in the reader.
-        positions = dict(Chunk.objects.filter(pk__in=_int_ids(all_ids)).values_list("pk", "metadata"))
-        chunk_ids = all_ids[:len(context)]
-        sources = [
-            evidence(
-                number, document=item[3], vector_id=item[4].pk, chunk_id=chunk_id,
-                text=item[5].texts[item[2]], score=item[0], position=positions.get(chunk_id),
-            )
-            for number, (item, chunk_id) in enumerate(zip(context, chunk_ids), 1)
-        ]
-        candidates = [
-            {"document_id": item[3].pk, "chunk_id": item[5].chunk_ids[item[2]],
-             "retrieval_score": round(item[0], 6), "rank": rank}
-            for rank, item in enumerate(kept, 1)
-        ]
-        ranked = [
-            {
-                "rank": rank, "document": item[3], "index_version_id": item[4].pk, "chunk_id": chunk_id,
-                "retrieval_score": item[0], "rerank_score": None, "text": item[5].texts[item[2]],
-                "position": positions.get(chunk_id), "selected_for_context": rank <= len(context),
-                "citation_id": rank if rank <= len(context) else None, "cited": False,
-            }
-            for rank, (item, chunk_id) in enumerate(zip(kept, all_ids), 1)
-        ]
-        span.set(candidates=len(kept), duplicates_skipped=duplicates, context=len(context))
-    used = [{"document_id": document.pk, "index_version_id": vector.pk} for document, vector, _ in loaded]
-    return Retrieval(sources=sources, candidates=candidates, documents=used, ranked=ranked)
+    measured = {}
+    try:
+        found = run_retrieval(query, documents, config, engine=engine, tracer=tracer, indexes=indexes, timings=measured)
+    finally:
+        # The message's timings keep their Phase 1 keys; reranking time is
+        # recorded on the run (`rerank_ms`) and its span.
+        for key in ("embed_query", "search"):
+            if key in measured:
+                timings[key] = measured[key]
+    context_size = len(found.context)
+    sources = []
+    for number, candidate in enumerate(found.context, 1):
+        source = evidence(
+            number, document=candidate.document, vector_id=candidate.index_version_id, chunk_id=candidate.chunk_id,
+            text=candidate.text, score=candidate.retrieval_score, position=candidate.position_metadata,
+        )
+        source["rerank_score"] = _score(candidate.rerank_score)
+        sources.append(source)
+    candidates = [
+        {"document_id": candidate.document.pk, "chunk_id": candidate.chunk_id,
+         "retrieval_score": round(candidate.retrieval_score, 6), "rank": candidate.rank,
+         "dense_score": _score(candidate.dense_score), "bm25_score": _score(candidate.bm25_score),
+         "fused_score": _score(candidate.fused_score), "rerank_score": _score(candidate.rerank_score),
+         "retrieval_rank": candidate.retrieval_rank}
+        for candidate in found.candidates
+    ]
+    ranked = [
+        {
+            "rank": candidate.rank, "retrieval_rank": candidate.retrieval_rank,
+            "document": candidate.document, "index_version_id": candidate.index_version_id,
+            "chunk_id": candidate.chunk_id, "retrieval_score": candidate.retrieval_score,
+            "dense_score": candidate.dense_score, "bm25_score": candidate.bm25_score,
+            "fused_score": candidate.fused_score, "rerank_score": candidate.rerank_score,
+            "text": candidate.text, "position": candidate.position_metadata,
+            "selected_for_context": candidate.rank <= context_size,
+            "citation_id": candidate.rank if candidate.rank <= context_size else None, "cited": False,
+        }
+        for candidate in found.candidates
+    ]
+    used = [{"document_id": entry.document.pk, "index_version_id": entry.vector.pk} for entry in found.loaded]
+    return Retrieval(sources=sources, candidates=candidates, documents=used, ranked=ranked, rerank=found.rerank,
+                     rerank_ms=measured.get("rerank"))
 
 
 # ── The run record (PRD §20, §32) ────────────────────────────────────────────
 
+def _reranker_provenance(config, rerank):
+    """Null without a reranker; else what was configured and what happened."""
+    spec = config.get("reranker")
+    if not spec:
+        return None
+    rerank = rerank or {}
+    return {
+        "provider": spec.get("provider"), "model": spec.get("model"),
+        "applied": bool(rerank.get("applied")), "fallback": bool(rerank.get("fallback")),
+        "error_code": rerank.get("error_code"),
+    }
+
+
 def _provenance(tracer, retrieval, run, history, document_count):
-    pipeline, generation = retrieval["pipeline"], run["generation"]
+    pipeline, generation, config = retrieval["pipeline"], run["generation"], run["config"]
     return {
         "schema_version": 1,
         "timestamp": tracer.started_at.isoformat(),
         "strategy": pipeline["strategy"],
         "retrieval_parameters": {
-            "candidate_k": pipeline["candidate_k"], "context_k": pipeline["top_k"],
-            "similarity": "cosine", "deduplicate": True,
+            **retrieval_parameters(config),
             "query_rewrite": bool(history), "history_messages": len(history),
             "history_limit": CHAT_HISTORY_MESSAGES,
         },
         "embedding_model": pipeline["embedding_model"],
-        "reranker": None,
+        "reranker": _reranker_provenance(config, run["rerank"]),
         # The model that answered (null until one did) and the configured one;
         # they differ when the free-model fallback was used.
         "generation_model": generation["model"],
@@ -335,6 +257,9 @@ def _provenance(tracer, retrieval, run, history, document_count):
         "prompt_version": pipeline["prompt_version"],
         "index_versions": run["indexes"][:run_store.MAX_RUN_INDEX_VERSIONS],
         "index_version_count": document_count,
+        # Phase 3: the pipeline version, with its full configuration, so the
+        # run stays reproducible after the pipeline is edited or deleted.
+        "pipeline": pipelines.snapshot(run["version"]),
     }
 
 
@@ -356,13 +281,14 @@ def _record_run(*, tracer, session, user, assistant, question, retrieval, timing
                 provenance=_provenance(tracer, retrieval, run, history, len(documents)),
                 latency={
                     "total": timings["total"], "rewrite": timings["rewrite"] if history else None,
-                    "retrieval": run["retrieval_ms"], "rerank": None,
+                    "retrieval": run["retrieval_ms"], "rerank": run["rerank_ms"],
                     "generation": timings["generation"], "first_token": timings["first_token"],
                 },
                 usage=result.usage if result is not None else None,
                 counts={"candidates": retrieval["candidate_count"], "context": retrieval["context_count"],
                         "cited": retrieval["cited_count"]},
                 started_at=tracer.started_at, spans=spans, candidates=candidates,
+                pipeline_version=run["version"],
             )
         return saved.pk
     except Exception:
@@ -384,25 +310,42 @@ def _attach_run(assistant, retrieval, run_id):
 
 # ── The turn ─────────────────────────────────────────────────────────────────
 
-def run_chat_turn(session, user, question, documents):
-    """Yield (event name, data) for one question over READY `documents`."""
+def _version_ref(version):
+    """`retrieval.pipeline_version`: which pipeline version answered (Phase 3)."""
+    return {"id": version.pk, "pipeline_id": version.pipeline_id, "name": version.pipeline.name, "number": version.number}
+
+
+def run_chat_turn(session, user, question, documents, pipeline_version=None):
+    """Yield (event name, data) for one question over READY `documents`.
+
+    `pipeline_version` defaults to the latest version of the conversation's
+    pipeline (the workspace default when it names none).
+    """
     started = time.monotonic()
     tracer = tracing.new_tracer("chat.turn", "Chat turn", origin=started)
+    if pipeline_version is None:
+        pipeline_version = pipelines.session_pipeline(session)[1]
+    config = pipeline_version.config
     timings = {"rewrite": 0, "embed_query": None, "search": None, "first_token": None, "generation": None, "total": None}
     retrieval = {
         "pipeline": {
-            "strategy": "dense", "embedding_model": None, "generation_model": None, "temperature": None,
-            "candidate_k": CHAT_CANDIDATE_K, "top_k": CHAT_CONTEXT_K, "prompt_version": CHAT_PROMPT_VERSION,
+            "strategy": config["strategy"], "embedding_model": config["embedding_model"],
+            "generation_model": config["generation_model"], "temperature": config["temperature"],
+            "candidate_k": config["candidate_k"], "top_k": config["top_k"], "prompt_version": config["prompt_version"],
         },
         "query": {"original": question, "rewritten": question, "rewrite_applied": False},
         "documents": [], "candidates": [], "candidate_count": 0, "context_count": 0, "cited_count": 0,
         "timings_ms": timings,
         "run_id": None,
+        "pipeline_version_id": pipeline_version.pk,
+        "pipeline_version": _version_ref(pipeline_version),
+        "rerank": None,
     }
     # What the run records beyond the message's retrieval metadata.
     run = {
-        "rewrite_reason": "", "retrieval_ms": None, "indexes": [], "ranked": [],
-        "generation": {"model": None, "configured_model": None, "fallback": False},
+        "rewrite_reason": "", "retrieval_ms": None, "rerank_ms": None, "indexes": [], "ranked": [], "rerank": None,
+        "generation": {"model": None, "configured_model": config["generation_model"], "fallback": False},
+        "config": config, "version": pipeline_version,
     }
     with tracer.span("prepare", "Load history and save the question"):
         history = conversation_history(session)
@@ -414,18 +357,16 @@ def run_chat_turn(session, user, question, documents):
     try:
         yield "message.created", {"user_message": message_payload(user_message), "assistant_message": message_payload(assistant)}
         engine = chat_engine()
-        dense = dense_engine_of(engine)
-        retrieval["pipeline"].update(
-            embedding_model=dense.model, generation_model=engine.llm.model, temperature=engine.llm.temperature,
-        )
-        run["generation"]["configured_model"] = engine.llm.model
+        # The engine's own LLM for its own model (the default pipeline), else
+        # a shared client for the pipeline's model; the temperature is per call.
+        llm = llms.generation_llm(engine, config["generation_model"])
 
         if history:
             yield stage_event("rewrite", "running", "Rewriting the question with the conversation context")
             with tracer.span("rewrite", "Query rewrite", history_messages=len(history)) as span:
                 began = time.monotonic()
                 outcome = {}
-                rewritten, applied = rewrite_question(engine, question, history, outcome)
+                rewritten, applied = rewrite_question(llm, question, history, outcome)
                 timings["rewrite"] = _ms(began)
                 run["rewrite_reason"] = reason = outcome.get("reason", "")
                 span.set(applied=applied, reason=reason).describe(REWRITE_DETAILS.get(reason, ""))
@@ -450,16 +391,22 @@ def run_chat_turn(session, user, question, documents):
         yield stage_event("retrieve", "running", f"Searching {len(documents)} {noun}")
         began = time.monotonic()
         with tracer.span("retrieve", "Retrieval", documents=len(documents)) as span:
-            found = retrieve(engine, retrieval["query"]["rewritten"], documents, timings,
+            found = retrieve(engine, retrieval["query"]["rewritten"], documents, timings, config,
                              tracer=tracer, indexes=run["indexes"])
             span.set(candidates=len(found.candidates), context=len(found.sources))
         run["retrieval_ms"] = _ms(began)
         run["ranked"] = found.ranked
+        run["rerank"], run["rerank_ms"] = found.rerank, found.rerank_ms
         retrieval.update(
             documents=found.documents, candidates=found.candidates,
             candidate_count=len(found.candidates), context_count=len(found.sources),
+            rerank=found.rerank,
         )
-        yield stage_event("retrieve", "completed", f"Retrieved {len(found.candidates)} candidates", run["retrieval_ms"])
+        detail = f"Retrieved {len(found.candidates)} candidates"
+        if found.rerank is not None:
+            detail += (f", reranked to {len(found.sources)}" if found.rerank["applied"]
+                       else "; the reranker failed, so the fused order was kept")
+        yield stage_event("retrieve", "completed", detail, run["retrieval_ms"])
         yield "retrieval", {
             "candidate_count": len(found.candidates), "context_count": len(found.sources),
             "citations": found.sources,
@@ -468,9 +415,10 @@ def run_chat_turn(session, user, question, documents):
         stage = "generate"
         yield stage_event("generate", "running", f"Writing the answer from {len(found.sources)} sources")
         began = time.monotonic()
-        with tracer.span("generate", "Generation", configured_model=engine.llm.model) as span:
+        with tracer.span("generate", "Generation", configured_model=config["generation_model"]) as span:
             waiting = tracer.start("generate.first_token", "Time to first token")
-            for item in engine.llm.stream_chat(cited_chat_messages(question, found.sources, history)):
+            messages = cited_chat_messages(question, found.sources, history)
+            for item in llm.stream_chat(messages, temperature=config["temperature"]):
                 if isinstance(item, StreamResult):
                     result = item
                     continue

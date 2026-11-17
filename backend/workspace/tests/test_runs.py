@@ -21,11 +21,12 @@ from workspace.tests.test_chat import LETTERS, ChatTestCase
 
 RUN_KEYS = {"id", "workspace_id", "conversation_id", "message_id", "source", "status", "query", "error", "latency_ms",
             "token_usage", "candidate_count", "context_count", "cited_count", "strategy", "generation_model",
-            "started_at", "created_at"}
+            "started_at", "created_at", "pipeline_version_id", "pipeline"}
 DETAIL_KEYS = RUN_KEYS | {"provenance", "spans", "candidates"}
 CANDIDATE_KEYS = {"rank", "document_id", "document_title", "document_available", "index_version_id", "chunk_id",
                   "page_number", "page_end", "char_start", "char_end", "text", "retrieval_score", "rerank_score",
-                  "selected_for_context", "cited", "citation_id"}
+                  "selected_for_context", "cited", "citation_id",
+                  "dense_score", "bm25_score", "fused_score", "retrieval_rank"}
 SPAN_KEYS = {"name", "label", "status", "start_ms", "duration_ms", "detail", "error_code", "data", "children"}
 EPSILON = 0.01  # ms; rounding of stored offsets
 

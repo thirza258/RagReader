@@ -81,11 +81,28 @@ class ConversationCreateInput(serializers.Serializer):
     title = serializers.CharField(max_length=200, required=False, allow_blank=True)
     workspace_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
     document_ids = _ids_field(required=False)
+    # Null or absent: the workspace's default pipeline.
+    pipeline_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
 
 
 class ConversationPatchInput(serializers.Serializer):
     title = serializers.CharField(max_length=200, required=False)
     document_ids = _ids_field(required=False)
+    # Null switches back to the workspace's default pipeline.
+    pipeline_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
+
+
+class PipelineCreateInput(serializers.Serializer):
+    name = serializers.CharField(max_length=120)
+    workspace_id = serializers.IntegerField(min_value=1, max_value=MAX_ID, required=False, allow_null=True)
+    # Any subset of the pipeline settings; the rest are the defaults.
+    config = serializers.JSONField(required=False)
+
+
+class PipelinePatchInput(serializers.Serializer):
+    name = serializers.CharField(max_length=120, required=False)
+    # Any subset of the settings, merged onto the latest version.
+    config = serializers.JSONField(required=False)
 
 
 class MessageInput(serializers.Serializer):
@@ -238,7 +255,7 @@ def preview(text):
     return text if len(text) <= PREVIEW_CHARS else text[:PREVIEW_CHARS - 1].rstrip() + "…"
 
 
-def conversation_payload(session, message_count=None, last_message=None):
+def conversation_payload(session, message_count=None, last_message=None, default_pipeline_id=None):
     if message_count is None:
         message_count = getattr(session, "message_count", None)
     if message_count is None:
@@ -249,11 +266,19 @@ def conversation_payload(session, message_count=None, last_message=None):
         else:
             latest = session.messages.order_by("-created_at", "-id").values_list("content", flat=True).first()
             last_message = latest or ""
+    pipeline_id = session.pipeline_id
+    if pipeline_id is None:
+        if default_pipeline_id is None:
+            from workspace.services.pipelines import default_pipeline_for
+            default_pipeline_id = default_pipeline_for(session.workspace).pk
+        pipeline_id = default_pipeline_id
     return {
         "id": session.pk,
         "workspace_id": session.workspace_id,
         "title": session.title,
         "document_ids": sorted(document.pk for document in session.documents.all()),
+        # The pipeline questions run with: the conversation's, else the default.
+        "pipeline_id": pipeline_id,
         "message_count": message_count,
         "last_message_preview": preview(last_message),
         "created_at": session.created_at,
@@ -334,8 +359,22 @@ def run_payload(run):
         "cited_count": run.cited_count,
         "strategy": provenance.get("strategy"),
         "generation_model": provenance.get("generation_model"),
+        # Phase 3: the pipeline version that ran (null before pipelines, and
+        # after the pipeline was deleted); `pipeline` is kept from provenance.
+        "pipeline_version_id": run.pipeline_version_id,
+        "pipeline": run_pipeline(provenance),
         "started_at": run.started_at,
         "created_at": run.created_at,
+    }
+
+
+def run_pipeline(provenance):
+    pipeline = provenance.get("pipeline")
+    if not isinstance(pipeline, dict):
+        return None
+    return {
+        "id": pipeline.get("pipeline_id"), "name": pipeline.get("name"),
+        "version": pipeline.get("version"), "version_id": pipeline.get("version_id"),
     }
 
 
@@ -368,6 +407,11 @@ def candidate_payload(candidate, text=None):
         "text": text if text is not None else candidate.snippet,
         "retrieval_score": candidate.retrieval_score,
         "rerank_score": candidate.rerank_score,
+        # Phase 3: the score components and the rank before reranking.
+        "dense_score": candidate.dense_score,
+        "bm25_score": candidate.bm25_score,
+        "fused_score": candidate.fused_score,
+        "retrieval_rank": candidate.retrieval_rank,
         "selected_for_context": candidate.selected_for_context,
         "cited": candidate.cited,
         "citation_id": candidate.citation_id,
@@ -382,4 +426,58 @@ def run_detail_payload(run, spans, candidates, texts=None):
         "provenance": run.provenance or {},
         "spans": build_tree(span_rows(spans)),
         "candidates": [candidate_payload(candidate, texts.get(candidate.pk)) for candidate in candidates],
+    }
+
+
+# ── Pipelines and index versions (Phase 3) ───────────────────────────────────
+
+def version_payload(version):
+    return {
+        "id": version.pk,
+        "pipeline_id": version.pipeline_id,
+        "number": version.number,
+        "config": version.config,
+        "config_hash": version.config_hash,
+        "created_at": version.created_at,
+    }
+
+
+def pipeline_payload(pipeline, latest, versions=None):
+    """A pipeline with its latest version and (newest first) every version's id and number."""
+    if versions is None:
+        versions = list(pipeline.versions.order_by("-number").values("id", "number", "created_at"))
+    return {
+        "id": pipeline.pk,
+        "workspace_id": pipeline.workspace_id,
+        "name": pipeline.name,
+        "is_default": pipeline.is_default,
+        "version": version_payload(latest),
+        "version_count": len(versions),
+        "versions": [{"id": row["id"], "number": row["number"], "created_at": row["created_at"]} for row in versions],
+        "created_at": pipeline.created_at,
+        "updated_at": pipeline.updated_at,
+    }
+
+
+def index_version_payload(vector, document):
+    """A DocumentVector as an index version (PRD §19).
+
+    The build settings (embedding model, chunk configuration, chunk count)
+    are recorded on the document at ingest time, so they are known for the
+    current index only; older versions report null.
+    """
+    metadata = document.metadata or {}
+    current = vector.pk == document.current_index_id
+    return {
+        "id": vector.pk,
+        "document_id": document.pk,
+        "document_title": document.name,
+        "method": vector.method,
+        "status": vector.status,
+        "is_current": current,
+        "embedding_model": metadata.get("embedding_model") if current else None,
+        "chunk_config": metadata.get("chunk_config") if current else None,
+        "chunk_count": metadata.get("chunk_count") if current else None,
+        "created_at": vector.created_at,
+        "updated_at": vector.updated_at,
     }

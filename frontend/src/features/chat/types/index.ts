@@ -6,6 +6,8 @@ export interface Conversation {
   title: string;
   /** Empty means "every READY document in the workspace". */
   document_ids: number[];
+  /** Phase 3: the pipeline questions run with (the workspace default when none was chosen). */
+  pipeline_id?: number | null;
   message_count: number;
   last_message_preview: string | null;
   created_at: string;
@@ -46,6 +48,22 @@ export interface RetrievalCandidate {
   chunk_id: number | string;
   retrieval_score: number | null;
   rank: number;
+  /** Phase 3: score components (null when the strategy did not compute one) and the rank before reranking. */
+  dense_score?: number | null;
+  bm25_score?: number | null;
+  fused_score?: number | null;
+  rerank_score?: number | null;
+  retrieval_rank?: number | null;
+}
+
+/** Phase 3: what the reranker did for an answer (null without one). */
+export interface RerankOutcome {
+  provider: string | null;
+  model: string | null;
+  applied: boolean;
+  fallback: boolean;
+  error_code: string | null;
+  duration_ms: number | null;
 }
 
 export interface RetrievalTimings {
@@ -69,6 +87,10 @@ export interface RetrievalMetadata {
   timings_ms?: RetrievalTimings;
   /** Phase 2: the retrieval run recorded for this answer (GET /retrieval/runs/{id}/). */
   run_id?: number | null;
+  /** Phase 3: the pipeline version that answered. */
+  pipeline_version_id?: number | null;
+  pipeline_version?: { id: number; pipeline_id: number; name: string; number: number } | null;
+  rerank?: RerankOutcome | null;
 }
 
 export interface TokenUsage {

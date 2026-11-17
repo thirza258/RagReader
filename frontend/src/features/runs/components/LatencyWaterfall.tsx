@@ -7,6 +7,7 @@ const BAR: Record<string, string> = {
   completed: "bg-primary/70",
   skipped: "bg-muted-foreground/30",
   failed: "bg-destructive",
+  fallback: "bg-status-warning",
 };
 
 interface LatencyWaterfallProps {
@@ -28,7 +29,14 @@ const LatencyWaterfall: React.FC<LatencyWaterfallProps> = ({ spans, totalMs }) =
   return (
     <ol className="space-y-0.5 tabular" aria-label={`Latency by step, ${formatMs(layout.scaleMs)} in total`}>
       {layout.rows.map((row) => {
-        const status = row.status === "failed" ? `, failed${row.errorCode ? ` (${row.errorCode})` : ""}` : row.status === "skipped" ? ", skipped" : "";
+        const status =
+          row.status === "failed"
+            ? `, failed${row.errorCode ? ` (${row.errorCode})` : ""}`
+            : row.status === "fallback"
+              ? `, fell back${row.errorCode ? ` (${row.errorCode})` : ""}`
+              : row.status === "skipped"
+                ? ", skipped"
+                : "";
         return (
           <li key={row.key} className="grid grid-cols-[minmax(0,10rem)_minmax(3rem,1fr)_3.75rem] items-center gap-2" title={row.detail || undefined}>
             <span className={`truncate ${row.depth === 0 ? "font-medium" : ""}`} style={{ paddingLeft: `${Math.min(row.depth, 4) * 0.75}rem` }}>
@@ -42,7 +50,7 @@ const LatencyWaterfall: React.FC<LatencyWaterfallProps> = ({ spans, totalMs }) =
             <span aria-hidden="true" className="relative h-2.5 bg-muted">
               <span className={`absolute inset-y-0 ${BAR[row.status] ?? BAR.completed}`} style={{ left: `${row.offsetPct}%`, width: `${row.widthPct}%` }} />
             </span>
-            <span aria-hidden="true" className={`text-right font-mono ${row.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
+            <span aria-hidden="true" className={`text-right font-mono ${row.status === "failed" ? "text-destructive" : row.status === "fallback" ? "text-status-warning" : "text-muted-foreground"}`}>
               {row.status === "skipped" ? "skip" : formatMs(row.durationMs)}
             </span>
           </li>

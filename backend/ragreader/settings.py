@@ -298,6 +298,9 @@ RAG_MAX_TEXT_CHARS = int(os.getenv("RAG_MAX_TEXT_CHARS", 2_000_000))
 RAG_MAX_URL_BYTES = int(os.getenv("RAG_MAX_URL_BYTES", 10 * 1024 * 1024))  # 10 MB
 # How many loaded document indexes chat keeps in memory per process.
 RAG_CHAT_INDEX_CACHE_SIZE = int(os.getenv("RAG_CHAT_INDEX_CACHE_SIZE", 8))
+# How many BM25 indexes (one per set of documents searched together) chat
+# keeps built in memory per process.
+RAG_CHAT_BM25_CACHE_SIZE = int(os.getenv("RAG_CHAT_BM25_CACHE_SIZE", 4))
 
 # ── Accounts (PRD §39) ───────────────────────────────
 # Days a bearer token issued at sign-up/sign-in stays valid.

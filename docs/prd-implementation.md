@@ -69,7 +69,8 @@ Baseline before Phase 1: backend 583 tests OK; frontend lint 0 errors and 1
 pre-existing warning (`src/components/ui/button.tsx`), 47 module tests pass,
 build OK. After Phase 1: backend 699, 91 module tests. After Phase 2: backend
 734, 102 module tests. After the security pass (passwords, token on every
-endpoint): backend 776, 118 module tests.
+endpoint): backend 776, 118 module tests. After Phase 3: backend 829, 129
+module tests.
 
 ## Backend layout
 
@@ -94,7 +95,13 @@ workspace/
     sse.py                SSE framing + WSGI/ASGI transports
     tracing.py            Phase 2: span tracer (bounded, never raises)
     runs.py               Phase 2: save_run(), percentile(), reliability_summary()
+    retrieval.py          Phase 3: run_retrieval() — dense, BM25, hybrid, hybrid + rerank
+    pipelines.py          Phase 3: pipeline configs, validation, versions, default pipeline
+    rerankers.py          Phase 3: Ollama and LLM rerankers (strict parsing)
+    llms.py               Phase 3: one shared OpenRouterLLM per pipeline model
   views/runs.py           Phase 2: retrieval runs list/detail/summary
+  views/pipelines.py      Phase 3: pipelines, versions, options
+  views/indexes.py        Phase 3: index versions (DocumentVector rows)
   tests/                  package; modules named test_*.py
 ```
 
@@ -240,6 +247,9 @@ Codes used by Phase 1 include `authentication_required` (401),
 `ingestion_in_progress` (409), `no_ready_documents` (409),
 `index_unavailable` (409), `last_workspace` (409),
 `job_queue_unavailable` (503). Pipeline errors reuse `PipelineError.code`.
+Phase 3 adds `embedding_model_mismatch` (409) and `default_pipeline` (409);
+reranker fallbacks record `reranker_unavailable`, `reranker_invalid_response`,
+`reranker_failed` or the provider's code on the `retrieve.rerank` span only.
 
 ## API (Phase 1, all under `/api/v1/`, token required)
 
@@ -717,16 +727,235 @@ candidate → evidence), components `RunTrace`, `LatencyWaterfall`,
   on selection, the run's trace; it refreshes after every chat turn.
 - `retrieval/…` paths are treated as token-protected (401 → sign in).
 
+## Phase 3 — Advanced retrieval (PRD §17–19, §45)
+
+Chat retrieval is configurable per conversation through versioned
+pipelines. Every Phase 1 and Phase 2 shape is unchanged; the additions below
+are new keys only, and the default pipeline reproduces Phase 1 exactly.
+
+### Retrieval service (`workspace/services/retrieval.py`)
+
+`run_retrieval(query, documents, config, *, engine=None, tracer=None,
+indexes=None, timings=None) -> RetrievalResult` — candidates (final order),
+context (first `top_k`), loaded snapshots, `duplicates_skipped`, `rerank`
+outcome. It generates nothing; chat calls it per question and Phase 4 can
+call it directly. `chat_index`, `index_unavailable` and the index loading
+moved here from `chat.py` (re-exported there).
+
+Strategies (`config.strategy`):
+
+| id | Ranking |
+| --- | --- |
+| `dense` | Phase 1 verbatim: cosine of the query embedding with every passage of each loaded snapshot; each document's top `candidate_k` pooled; sorted by score, ties by document order then position; identical passages (whitespace-normalised) kept once; first `candidate_k`. |
+| `bm25` | `rank_bm25.BM25Okapi` over the **union** of the in-scope snapshots' passages (one IDF and average length, so scores compare across documents), tokenised by `sparse_rag.sparse_rag.tokenize` with NLTK English stop words; passages with score ≤ 0 are not candidates; same pooling and de-duplication. No query embedding is made. |
+| `hybrid` | Both rankings, each de-duplicated and cut to `candidate_k`, fused. `weighted`: raw dense and BM25 scores min-max normalised over the passages being fused (all equal → 1), `hybrid_weight × dense + (1 − hybrid_weight) × bm25`; a retriever with weight 0 contributes no passages, so weight 1 / 0 equals the dense / BM25 ranking exactly. `rrf`: `Σ 1 / (rrf_k + rank)` over the rankings that returned the passage. Ties by document order then position; first `candidate_k`. |
+| `hybrid_rerank` | `hybrid`, then the reranker scores every candidate and they are reordered by that score (stable: ties keep the fused order). Any reranker exception keeps the fused order (rerank scores null, rank = rank before), marks `retrieve.rerank` `fallback` with the error code and never fails the turn. |
+
+The BM25 index is cached per process by the *set* of index versions it
+covers (`index_cache.fetch_bm25`, LRU `RAG_CHAT_BM25_CACHE_SIZE`, default 4);
+`index_cache.discard`/`clear` drop it with the snapshots.
+
+Rerankers (`services/rerankers.py`, `reranker_for({"provider", "model"})`):
+`ollama` wraps `hybrid_rag.get_cross_encoder(model).predict` (models from
+`RERANKER_MODELS`; any Ollama error → `reranker_unavailable`); `llm` sends
+one prompt to `llms.llm_for(model)` with every candidate numbered, each cut
+to `LLM_RERANK_PASSAGE_CHARS` (700) and to `LLM_RERANK_PROMPT_CHARS`
+(16,000) together, asking for `{"scores": [{"id", "score"}]}` with 0–10
+scores; the reply must be exactly that JSON (a bare list or a ```` ```json ````
+fence is accepted), every id once, finite scores in range, else
+`reranker_invalid_response`. LLM scores are stored divided by 10.
+
+Per candidate: `retrieval_score` (the score it was retrieved by: cosine,
+BM25 or fused), `dense_score`, `bm25_score`, `fused_score` (each null when
+the strategy did not compute it), `rerank_score`, `retrieval_rank` (before
+reranking) and `rank` (final).
+
+Spans, under `retrieve` (no new root spans, no new SSE stage ids):
+`retrieve.load_indexes` (+ `index.load`), then `retrieve.embed_query` and
+`retrieve.search` (dense strategies), `retrieve.bm25` (data `cache`
+hit/miss, `corpus_chunks`, `query_terms`, `chunks_scored`, `matched`,
+`pooled`), `retrieve.fusion` (`method`, `hybrid_weight` or `rrf_k`,
+`dense_candidates`, `bm25_candidates`, `fused`), `retrieve.select`, and
+`retrieve.rerank` (`provider`, `model`, `candidates`, `reordered`; status
+`completed` or `fallback`). The dense strategy emits exactly Phase 2's spans
+and data. Span status gains **`fallback`** (tracer `span.fallback(code,
+detail)`, `RetrievalSpan.Status.FALLBACK`): the step failed and the request
+went on with a fallback result; it does not fail its parent.
+
+### Pipelines (`workspace/services/pipelines.py`)
+
+A configuration has every one of these keys (`CONFIG_KEYS`):
+
+```json
+{"strategy": "dense", "fusion": "weighted", "hybrid_weight": 0.6, "rrf_k": 60,
+ "candidate_k": 20, "top_k": 5, "reranker": null,
+ "generation_model": "openai/gpt-4o-mini", "temperature": 0.0,
+ "prompt_version": "chat-cited-v1", "embedding_model": "openai/text-embedding-3-small"}
+```
+
+That is `default_config()`: Phase 1 chat (`CHAT_CANDIDATE_K`,
+`CHAT_CONTEXT_K`, `DEFAULT_CHAT_MODEL`, `DEFAULT_TEMPERATURE`,
+`CHAT_PROMPT_VERSION`, `INGEST_CONFIG["embedding_model"]`). Validation
+(`normalize_config(changes, base)`: `changes` merged onto `base`, the latest
+version or the defaults) rejects, with 400 `invalid_request` and one message
+per field in `details["config.<key>"]`: unknown keys; `strategy` ∉
+`PIPELINE_STRATEGY_IDS`; `fusion` ∉ `weighted`/`rrf`; `candidate_k` outside
+`CHILD_TOP_K_MIN..MAX` (1–50), `top_k` outside `TOP_K_MIN..MAX` (1–20) or
+above `candidate_k`, `rrf_k` outside `RRF_K_*`, `hybrid_weight` outside
+`HYBRID_WEIGHT_MIN..MAX` (0–1), `temperature` outside `TEMPERATURE_*`
+(non-integers, booleans and non-finite numbers are rejected, never clamped);
+`generation_model` that fails `is_valid_model_id`; `prompt_version` ≠
+`CHAT_PROMPT_VERSION`; `embedding_model` ≠ `INGEST_CONFIG["embedding_model"]`
+(indexes are built with the ingest-time model). `reranker` is `null` or
+`{"provider": "ollama" | "llm", "model"}` and exists exactly for
+`hybrid_rerank`: switching away drops the base's reranker, switching to it
+without one picks `{"provider": "ollama", "model": DEFAULT_RERANKER_MODEL}`,
+an explicit `null` for it or a reranker for another strategy is an error.
+Ollama models must be in `RERANKER_MODEL_IDS` (an `ollama/` prefix is
+stripped); LLM models must be well-formed OpenRouter ids.
+
+Generation: when `generation_model` is the chat engine's model the engine's
+own LLM answers (default pipeline = Phase 1); otherwise `llms.llm_for(model)`,
+one shared `OpenRouterLLM` per model. The rewrite uses the same LLM; the
+answer is streamed with `stream_chat(messages, temperature=config.temperature)`.
+
+### Models (migration `workspace/0004_pipelines`, depends on `workspace/0003_apitoken_expires_at`)
+
+- `Pipeline`: `workspace` FK (CASCADE, `pipelines`), `name` (max 120),
+  `is_default`, `created_at`, `updated_at`; unique constraint
+  `one_default_pipeline_per_workspace`. `default_pipeline_for(workspace)`
+  creates the default (`"Default (dense)"`, v1 = `default_config()`) on
+  first need, race-safe like `default_workspace_for`. No data migration:
+  defaults are created lazily.
+- `PipelineVersion`: `pipeline` FK (CASCADE, `versions`), `number`
+  (unique per pipeline, assigned under the pipeline's row lock), `config`
+  JSON (the full configuration), `config_hash` (sha256 of the canonical
+  JSON: sorted keys, no whitespace), `created_at`. `save()` on an existing
+  row raises `ImmutableVersionError`; the admin is read-only.
+- `ChatSession.pipeline`: FK (null, SET_NULL). Null = the workspace default
+  at question time, so existing conversations behave as before.
+- `RetrievalRun.pipeline_version`: FK (null, SET_NULL).
+- `RetrievalCandidate`: `dense_score`, `bm25_score`, `fused_score` (float,
+  null), `retrieval_rank` (null).
+- `RetrievalSpan.status` choices gain `fallback`.
+
+Editing (`update_pipeline`): a merged configuration with the same hash as
+the latest version adds nothing; a rename alone adds nothing; otherwise
+version n + 1. Deleting the default is 409 `default_pipeline`; deleting
+another moves its conversations to the default (SET_NULL) and its runs keep
+`provenance.pipeline` (their `pipeline_version_id` becomes null).
+
+### Chat turn changes
+
+`ConversationMessagesView.post` resolves the conversation's pipeline and
+its **latest version at question time** (`session_pipeline`), then, before
+streaming, refuses with **409 `embedding_model_mismatch`** a dense-using
+pipeline when a document in scope recorded another `metadata.embedding_model`
+(documents without one — backfilled legacy rows — are let through; their
+index's model stamp is still checked on load). `run_retrieval` repeats the
+check against the engine's model inside the stream (same code). BM25-only
+pipelines skip the check but still load each index through the engine, whose
+model-stamp check fails a mismatched index with `index_unavailable`. The turn is
+`run_chat_turn(session, user, question, documents, pipeline_version=None)`
+(None → the session's latest version).
+
+### Payload additions
+
+- `ChatMessage.retrieval`: `pipeline_version_id`, `pipeline_version`
+  (`{"id", "pipeline_id", "name", "number"}`), `rerank` (null, or
+  `{"provider", "model", "applied", "fallback", "error_code", "duration_ms"}`);
+  `retrieval.pipeline` keeps exactly its Phase 1 keys (values now come from
+  the version: strategy, embedding model, generation model, temperature,
+  `candidate_k`, `top_k`, prompt version); each `retrieval.candidates[]`
+  entry adds `dense_score`, `bm25_score`, `fused_score`, `rerank_score`,
+  `retrieval_rank`. `timings_ms` keeps its Phase 1 keys (rerank time is on
+  the run).
+- Evidence: `rerank_score` is filled for reranked context (key set unchanged).
+- SSE: unchanged events and stage ids; the `retrieve` completed detail adds
+  ", reranked to M" or "; the reranker failed, so the fused order was kept".
+- Conversation: `pipeline_id` (the effective pipeline: the conversation's,
+  else the workspace default). `POST`/`PATCH conversations/` accept
+  `pipeline_id` (PATCH `null` = back to the default); a pipeline of another
+  workspace or user, or an unknown id, is 400 `invalid_request` with
+  `details.pipeline_id` (same message either way).
+- Run: `pipeline_version_id`, `pipeline` (`{"id", "name", "version",
+  "version_id"}` from provenance, null before Phase 3); `latency_ms.rerank`
+  = `rerank_ms` (the `retrieve.rerank` span; `retrieval` still covers the
+  whole retrieve stage, reranking included).
+- Run candidate: `dense_score`, `bm25_score`, `fused_score`, `retrieval_rank`.
+- Provenance: `retrieval_parameters.similarity` is `cosine`, `bm25` or
+  `cosine+bm25`; hybrid adds `fusion` and `hybrid_weight` or `rrf_k` (the
+  dense dict is exactly Phase 2's); `reranker` is null or `{"provider",
+  "model", "applied", "fallback", "error_code"}`; new `pipeline`:
+  `{"pipeline_id", "name", "version_id", "version", "config", "config_hash"}`.
+
+### API (token required, owner-scoped, error envelope)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `pipelines/?workspace_id=` | `{"results": [Pipeline]}` default first (creates the default) |
+| POST | `pipelines/` | `{name, workspace_id?, config?}` → 201 Pipeline (v1 = defaults + `config`) |
+| GET | `pipelines/options/` | strategies, fusion methods, reranker providers (+ models, default model, `open`), generation models, embedding models, prompt versions, `ranges`, `defaults`, `default_reranker`, `keys` |
+| GET/PATCH/DELETE | `pipelines/{id}/` | PATCH `{name?, config?}` (partial config merged onto the latest version) → Pipeline + `version_created`; DELETE → 204, default → 409 `default_pipeline` |
+| GET | `pipelines/{id}/versions/` | `{"pipeline_id", "results": [Version]}` newest first |
+| GET | `indexes/?document_id=` | `{"results": [IndexVersion]}` newest first; without `document_id`, every index of `workspace_id`'s (or the default workspace's) documents |
+| GET | `indexes/{id}/` | IndexVersion |
+| GET | `retrieval/runs/?pipeline_version_id=` | new filter; malformed → 400, another user's version → 404 |
+
+Pipeline: `{"id", "workspace_id", "name", "is_default", "version": Version,
+"version_count", "versions": [{"id", "number", "created_at"}], "created_at",
+"updated_at"}`. Version: `{"id", "pipeline_id", "number", "config",
+"config_hash", "created_at"}`. IndexVersion (a `router.DocumentVector`):
+`{"id", "document_id", "document_title", "method", "status", "is_current",
+"embedding_model", "chunk_config", "chunk_count", "created_at", "updated_at"}`
+— the build settings come from the document's ingest metadata, so only the
+current index has them (others: null). Another user's pipeline, version,
+index or document is 404.
+
+### Frontend
+
+`src/features/pipelines/` — `api/pipelines.ts` (pipelines, options,
+versions, index versions), `types/`, `hooks/usePipelines.ts`,
+`lib/pipelineConfig.ts` (validation mirroring the server, `withStrategy`,
+`inactiveKeys`, `configChanges` = PATCH body, `diffConfigs`,
+`versionHistory`, `describeConfig`, `pipelineVersionLabel`), components
+`PipelineBar` (chat header: the conversation's pipeline + version,
+switchable), `PipelinePanel` (§17: choose, create, edit, delete),
+`PipelineForm`, `PipelineHistory` (versions with diffs). The workspace's
+right column (and mobile tabs) gain **Pipelines**; a new conversation
+inherits the pipeline chosen while none is open.
+`runs/lib/runMetrics.ts` adds `formatCandidateScore`, `rankMovement`,
+`candidateScoreColumns`, `hasRankChanges`, `wasReranked`,
+`runPipelineLabel`; the §21 funnel reads `Retrieved N → Reranked to M →
+Used K` (`Selected M` when no reranker reordered). The candidate table shows
+the score columns the run has and rank before → after; provenance shows the
+pipeline version, its configuration and the reranker outcome; the Runs view
+filters by pipeline version; the footer names the answering pipeline
+version; document rows list index versions (`documents/lib/indexVersions.ts`).
+`pipelines/` and `indexes/` are token-protected paths.
+
+### Deferred
+
+- Building extra index versions with other chunk settings or embedding
+  models. `_sync_chunks` deletes every chunk of another configuration
+  (cascading to ground truth) and indexes are keyed by method only, so a
+  second chunking would destroy the first version's chunks and the deep
+  analysis attached to them. Chunk settings and the embedding model stay
+  Tier B (ingest time); index versions are the re-index history.
+- Build settings of superseded index versions (only the current index's
+  are recorded, on the document).
+- Changing which pipeline is the workspace default.
+
 ## Reserved for later phases
 
-- Phase 2 (done, see above) added persisted retrieval runs and per-stage
-  telemetry; Phase 3 fills `rerank_ms`, `rerank_score` and
-  `provenance.reranker`, and Phase 4/5 record runs with `source`
+- Phase 2 (done) added persisted retrieval runs and per-stage telemetry;
+  Phase 3 (done) fills `rerank_ms`, `rerank_score` and
+  `provenance.reranker`; Phase 4/5 record runs with `source`
   `evaluation`/`research`.
-- Phase 3 adds pipeline configuration/versioning and makes the chat strategy
-  (`dense`, `bm25`, `hybrid`, `hybrid+rerank`) selectable; Phase 1 hardcodes
-  `dense`.
+- Phase 3 (done) made the chat strategy (`dense`, `bm25`, `hybrid`,
+  `hybrid_rerank`) selectable through versioned pipelines.
 - Phase 4 adds evaluation datasets, metrics and an experiment registry that
-  reference pipeline and index versions.
+  reference pipeline and index versions (`run_retrieval` runs a pipeline
+  version without generation).
 - Phase 5 adds Research Mode, comparison, extraction and reports on top of the
   chat and evidence model.

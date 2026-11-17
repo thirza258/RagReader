@@ -4,8 +4,9 @@
 question/answer turn `router.Conversation` stay in the router app: the deep
 analysis flow, its migrations and the evaluation app all reference them there.
 This app adds what is new around them — workspaces, API tokens, chat threads
-(`ChatSession`, called "conversation" in the API), the embedding checkpoint
-and, since Phase 2, retrieval runs (one traced RAG request each).
+(`ChatSession`, called "conversation" in the API), the embedding checkpoint,
+since Phase 2 retrieval runs (one traced RAG request each) and, since Phase 3,
+retrieval pipelines with immutable versions.
 """
 from datetime import timedelta
 
@@ -16,6 +17,7 @@ from django.utils import timezone
 
 DEFAULT_WORKSPACE_NAME = "My Workspace"
 DEFAULT_CONVERSATION_TITLE = "New conversation"
+DEFAULT_PIPELINE_NAME = "Default (dense)"
 
 
 class Workspace(models.Model):
@@ -93,6 +95,11 @@ class ChatSession(models.Model):
     title_is_auto = models.BooleanField(default=True)
     # Empty means "every READY document in the workspace at question time".
     documents = models.ManyToManyField("router.Document", blank=True, related_name="chat_sessions")
+    # Null means the workspace's default pipeline. Each question uses the
+    # pipeline's latest version at question time (Phase 3).
+    pipeline = models.ForeignKey(
+        "workspace.Pipeline", null=True, blank=True, on_delete=models.SET_NULL, related_name="conversations",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -210,6 +217,12 @@ class RetrievalRun(models.Model):
 
     # Strategy, parameters, models, prompt and index versions (§20).
     provenance = models.JSONField(default=dict, blank=True)
+    # The pipeline version that answered (Phase 3). Null for runs from before
+    # pipelines, and after the pipeline is deleted; `provenance.pipeline`
+    # keeps the full configuration either way.
+    pipeline_version = models.ForeignKey(
+        "workspace.PipelineVersion", null=True, blank=True, on_delete=models.SET_NULL, related_name="retrieval_runs",
+    )
 
     # Milliseconds; null when the step did not run or did not complete.
     total_ms = models.PositiveIntegerField(null=True, blank=True)
@@ -249,6 +262,9 @@ class RetrievalSpan(models.Model):
         COMPLETED = "completed"
         SKIPPED = "skipped"
         FAILED = "failed"
+        # Failed, but replaced by a fallback the request could use (Phase 3:
+        # a reranker failure keeps the fused order).
+        FALLBACK = "fallback"
 
     run = models.ForeignKey(RetrievalRun, on_delete=models.CASCADE, related_name="spans")
     ordinal = models.PositiveIntegerField()
@@ -288,8 +304,15 @@ class RetrievalCandidate(models.Model):
     # and a trace must not stop being storable because of it.
     index_version_id = models.BigIntegerField(null=True, blank=True)
     chunk_id = models.BigIntegerField(null=True, blank=True)
+    # The score the passage was retrieved by: cosine (dense), BM25 (bm25) or
+    # the fused score (hybrid strategies). The components are kept as well.
     retrieval_score = models.FloatField(null=True, blank=True)
+    dense_score = models.FloatField(null=True, blank=True)
+    bm25_score = models.FloatField(null=True, blank=True)
+    fused_score = models.FloatField(null=True, blank=True)
     rerank_score = models.FloatField(null=True, blank=True)
+    # Rank by retrieval score, before any reranking; `rank` is the final one.
+    retrieval_rank = models.PositiveIntegerField(null=True, blank=True)
     selected_for_context = models.BooleanField(default=False)
     cited = models.BooleanField(default=False)
     # The [n] the passage had in the prompt; null when not in the context.
@@ -305,3 +328,63 @@ class RetrievalCandidate(models.Model):
 
     def __str__(self):
         return f"Candidate {self.rank} of run {self.run_id}"
+
+
+# ── Retrieval pipelines (PRD §17–19, Phase 3) ────────────────────────────────
+
+class Pipeline(models.Model):
+    """A named retrieval + generation configuration in a workspace.
+
+    Its configuration lives in `PipelineVersion` rows: editing a pipeline adds
+    a version, and versions never change, so every answer can name exactly
+    what produced it. Every workspace has one default pipeline, created on
+    first need (`default_pipeline_for`), equivalent to Phase 1 chat.
+    """
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="pipelines")
+    name = models.CharField(max_length=120)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-is_default", "created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace"], condition=Q(is_default=True),
+                name="one_default_pipeline_per_workspace",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} (workspace {self.workspace_id})"
+
+
+class ImmutableVersionError(Exception):
+    """A saved pipeline version was about to be changed."""
+
+
+class PipelineVersion(models.Model):
+    """One immutable configuration snapshot of a pipeline (PRD §19)."""
+
+    pipeline = models.ForeignKey(Pipeline, on_delete=models.CASCADE, related_name="versions")
+    number = models.PositiveIntegerField()
+    # The full configuration (see workspace.services.pipelines.CONFIG_KEYS).
+    config = models.JSONField()
+    # sha256 of the canonical JSON of `config`.
+    config_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pipeline", "-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["pipeline", "number"], name="unique_pipeline_version_number"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ImmutableVersionError("Pipeline versions cannot be changed; edit the pipeline to add a version.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.pipeline_id} v{self.number}"

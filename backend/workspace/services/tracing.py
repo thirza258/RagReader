@@ -2,7 +2,9 @@
 
 A `Tracer` records a tree of spans: what ran, when it started (milliseconds
 from the start of the request, on the monotonic clock), how long it took,
-whether it completed, was skipped or failed (with the error code), a short
+whether it completed, was skipped, failed (with the error code) or fell back
+to a lesser result it could still use (e.g. a reranker failure that keeps the
+fused order; also with the error code), a short
 human detail and a small data payload. `export()` flattens the tree into
 rows in pre-order, each naming its parent's ordinal, which is how runs store
 it; `build_tree()` turns stored rows back into the nested shape the API
@@ -41,7 +43,9 @@ MAX_ERROR_CODE_CHARS = 80
 COMPLETED = "completed"
 SKIPPED = "skipped"
 FAILED = "failed"
-STATUSES = (COMPLETED, SKIPPED, FAILED)
+# The step failed but the request carried on with a fallback result.
+FALLBACK = "fallback"
+STATUSES = (COMPLETED, SKIPPED, FAILED, FALLBACK)
 
 
 def error_code_for(error):
@@ -129,6 +133,14 @@ class Span:
     def skip(self, detail=None):
         """Marks the step as skipped; the status sticks when the span closes."""
         self.status = SKIPPED
+        if detail is not None:
+            self.detail = detail
+        return self
+
+    def fallback(self, code, detail=None):
+        """Marks a step that failed but was replaced by a fallback result."""
+        self.status = FALLBACK
+        self.error_code = str(code)[:MAX_ERROR_CODE_CHARS]
         if detail is not None:
             self.detail = detail
         return self
