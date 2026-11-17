@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiRequestError, toApiError } from "../../../services/api/errors";
 import { getRunSummary, listRuns } from "../api/runs";
-import type { ReliabilitySummary, RetrievalRun } from "../types";
+import type { ReliabilitySummary, RetrievalRun, RunSource } from "../types";
 
 export const RUN_LIST_LIMIT = 50;
 
@@ -17,14 +17,14 @@ interface OverviewState {
  * A workspace's recent runs and its reliability summary (PRD §32, §49),
  * read together. `version` re-reads them, e.g. after a chat turn finishes.
  */
-export function useRunsOverview(workspaceId: number, days: number, version: number, pipelineVersionId: number | null = null) {
-  const key = `${workspaceId}:${days}:${version}:${pipelineVersionId ?? ""}`;
+export function useRunsOverview(workspaceId: number, days: number, version: number, pipelineVersionId: number | null = null, source: RunSource | null = null) {
+  const key = `${workspaceId}:${days}:${version}:${pipelineVersionId ?? ""}:${source ?? ""}`;
   const [state, setState] = useState<OverviewState | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      listRuns({ workspaceId, limit: RUN_LIST_LIMIT, pipelineVersionId }, controller.signal),
+      listRuns({ workspaceId, limit: RUN_LIST_LIMIT, pipelineVersionId, source }, controller.signal),
       getRunSummary(workspaceId, days, controller.signal),
     ]).then(
       ([list, summary]) => setState({ key, runs: list.results, hasMore: list.has_more, summary, error: null }),
@@ -33,7 +33,7 @@ export function useRunsOverview(workspaceId: number, days: number, version: numb
       },
     );
     return () => controller.abort();
-  }, [workspaceId, days, pipelineVersionId, key]);
+  }, [workspaceId, days, pipelineVersionId, source, key]);
 
   return {
     runs: state?.runs ?? [],

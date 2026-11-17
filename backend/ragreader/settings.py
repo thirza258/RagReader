@@ -67,6 +67,8 @@ INSTALLED_APPS = [
     "corsheaders",
     "evaluation",
     "workspace",
+    # Phase 4: evaluation datasets and experiments (not the legacy `evaluation` app).
+    "lab",
 ]
 
 def _optional_int(name, default=None):

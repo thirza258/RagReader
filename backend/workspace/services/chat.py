@@ -164,6 +164,7 @@ class Retrieval:
     ranked: list = field(default_factory=list)  # every candidate, with text and position, for the run
     rerank: dict | None = None  # services.retrieval.RetrievalResult.rerank
     rerank_ms: int | None = None
+    loaded: list = field(default_factory=list)  # services.retrieval.Loaded: the snapshots searched
 
 
 def _score(value):
@@ -217,7 +218,7 @@ def retrieve(engine, query, documents, timings, config, tracer=None, indexes=Non
     ]
     used = [{"document_id": entry.document.pk, "index_version_id": entry.vector.pk} for entry in found.loaded]
     return Retrieval(sources=sources, candidates=candidates, documents=used, ranked=ranked, rerank=found.rerank,
-                     rerank_ms=measured.get("rerank"))
+                     rerank_ms=measured.get("rerank"), loaded=list(found.loaded))
 
 
 # ── The run record (PRD §20, §32) ────────────────────────────────────────────

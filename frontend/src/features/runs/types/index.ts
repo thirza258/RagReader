@@ -172,6 +172,8 @@ export interface ReliabilitySummary {
   workspace_id: number;
   days: number;
   source: string | null;
+  /** Phase 4: sources left out when `source` was not given (evaluation runs are test traffic). */
+  excluded_sources?: string[];
   since: string;
   runs: { total: number; completed: number; failed: number };
   failure_rate: number | null;

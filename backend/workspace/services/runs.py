@@ -160,11 +160,18 @@ def _latency(values):
     return {"p50": percentile(present, 50), "p95": percentile(present, 95), "count": len(present)}
 
 
+# Test traffic: unless asked for by `source`, reliability numbers leave these
+# out (Phase 4 evaluation runs are experiments, not users' questions).
+SUMMARY_EXCLUDED_SOURCES = (RetrievalRun.Source.EVALUATION,)
+
+
 def run_window(user, workspace, *, days, source=None, now=None):
     since = (now or timezone.now()) - timedelta(days=days)
     runs = RetrievalRun.objects.filter(user=user, workspace=workspace, started_at__gte=since)
     if source:
         runs = runs.filter(source=source)
+    else:
+        runs = runs.exclude(source__in=SUMMARY_EXCLUDED_SOURCES)
     return runs, since
 
 
@@ -197,6 +204,7 @@ def reliability_summary(user, workspace, *, days, source=None, now=None):
         "workspace_id": workspace.pk,
         "days": days,
         "source": source,
+        "excluded_sources": [] if source else [str(value) for value in SUMMARY_EXCLUDED_SOURCES],
         "since": since,
         "runs": {"total": total, "completed": totals["completed"], "failed": failed},
         "failure_rate": rate(failed, total),

@@ -123,7 +123,7 @@ executed inside the backend Docker image by `./deploy.sh` before every deploy.
 ## Workspace (documents, conversations, citations)
 
 The workspace API (`/api/v1/workspaces/`, `/documents/`, `/conversations/`,
-`/retrieval/runs/`, `/pipelines/`, `/indexes/`)
+`/retrieval/runs/`, `/pipelines/`, `/indexes/`, `/evaluations/`, `/experiments/`)
 turns RAGReader into a persistent research workspace:
 
 *   **Documents** — upload PDF, DOCX, TXT or Markdown, add a web page by URL,
@@ -152,6 +152,20 @@ turns RAGReader into a persistent research workspace:
     answer records the version, the dense/BM25/fused/rerank scores of each
     candidate and how reranking moved it (`/api/v1/pipelines/`). Each
     document's index versions are listed at `/api/v1/indexes/`.
+*   **Evaluation lab** — build evaluation datasets (question, expected
+    answer, expected sources by chunk, character range or page) with
+    immutable versions, CSV/JSON import and export, or straight from a chat
+    answer with **Add to dataset**. Run a dataset version through a pipeline
+    version as an experiment in the background: Recall@K, Precision@K, Hit
+    Rate, MRR, nDCG, context recall/precision, and — reported separately —
+    faithfulness, answer relevance, answer correctness (LLM judge) and
+    citation correctness/completeness. Each experiment records its
+    configuration, index versions, seed, environment and git commit, labels
+    every failed question (retrieval, generation or dataset problem), and
+    can be resumed or rerun. Compare up to six experiments side by side with
+    baseline deltas, paired bootstrap confidence intervals, win/loss counts
+    and latency/token trade-offs (`/api/v1/evaluations/datasets/`,
+    `/api/v1/experiments/`).
 
 Accounts have a password: `POST /api/v1/sign-up/` creates one and
 `POST /api/v1/sign-in/` signs in, each returning a bearer token that expires

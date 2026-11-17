@@ -18,6 +18,8 @@ interface ChatThreadProps {
   onLatestAnswer: (message: ChatMessage | null) => void;
   onMissing: () => void;
   onDeepAnalysis: (conversationId: number, documentId: number) => void;
+  /** Phase 4: "Add to dataset" on complete answers. */
+  onAddToDataset?: (message: ChatMessage) => void;
   documentTitle: (documentId: number) => string | null;
   composerDisabledReason: string | null;
 }
@@ -35,6 +37,7 @@ const ChatThread: React.FC<ChatThreadProps> = ({
   onLatestAnswer,
   onMissing,
   onDeepAnalysis,
+  onAddToDataset,
   documentTitle,
   composerDisabledReason,
 }) => {
@@ -135,6 +138,7 @@ const ChatThread: React.FC<ChatThreadProps> = ({
               documentTitle={documentTitle}
               onRetry={index === messages.length - 1 ? retryLastFailed : undefined}
               onDeepAnalysis={onDeepAnalysis}
+              onAddToDataset={onAddToDataset}
             />
           ),
         )}

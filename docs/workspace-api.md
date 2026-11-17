@@ -544,6 +544,41 @@ time (older versions report null). Building several index versions with
 different chunk settings side by side is not supported yet (see Known
 debt).
 
+## Evaluation lab
+
+Datasets, experiments and comparison (PRD §26–31, §42). Shapes, metric
+definitions and the run lifecycle are specified in
+[the implementation contract](prd-implementation.md#phase-4--evaluation-lab-prd-2631-42-46-49);
+this is the endpoint summary. All require the token; another user's
+dataset or experiment is 404.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET / POST | `evaluations/datasets/` | List (`?workspace_id=`) / create `{name, description?, document_ids?, items?}` → 201 (version 1) |
+| POST | `evaluations/datasets/import/` | New dataset from `{format: json \| csv, content}`, `{items}` or a multipart `file` |
+| GET / PATCH / DELETE | `evaluations/datasets/{id}/` | PATCH name/description, or `items`/`document_ids` (+ `base_version`) → a new version when the content changes |
+| GET | `evaluations/datasets/{id}/versions/` | Newest first, with `checks` (items without sources, duplicate questions, missing documents) |
+| GET / POST | `evaluations/datasets/{id}/items/` | `?version=` (default latest) / add items → new version |
+| PATCH / DELETE | `evaluations/datasets/{id}/items/{item_id}/` | Edit or remove one item → new version |
+| POST | `evaluations/datasets/{id}/import/` | Append or `mode: replace` |
+| GET | `evaluations/datasets/{id}/export/?format=json\|csv&version=` | Attachment |
+| GET | `evaluations/datasets/{id}/items/from-message/?message_id=` | Draft item from a chat answer (cited evidence pre-selected, expected answer left empty) |
+| GET / POST | `experiments/` | Registry (`?workspace_id=&dataset_id=&status=`) / create → 202 queued (201 with `draft: true`; 503 `job_queue_unavailable` with the failed experiment when the worker is unreachable) |
+| GET | `experiments/compare/?ids=1,2&baseline=&metric=&seed=` | 2–6 experiments on one dataset |
+| GET / PATCH / DELETE | `experiments/{id}/` | Detail with config, index versions, environment and `reproducibility`; PATCH name/hypothesis/conclusion; DELETE also deletes its evaluation runs |
+| POST | `experiments/{id}/start/`, `cancel/`, `rerun/` | Start a draft or resume a failed/cancelled run (completed items are kept); cancel; rerun with the stored configuration |
+| GET | `experiments/{id}/items/?status=&category=&label=&offset=&limit=` | Per-item results with metrics, null reasons and failure labels |
+
+Experiments run in the Celery worker (`lab.tasks.run_experiment_task`,
+60 min soft limit). Every item is recorded as a retrieval run with
+`source="evaluation"`; the reliability summary
+(`retrieval/runs/summary/`) leaves those out unless `?source=evaluation`
+is given and says so in `excluded_sources`. An experiment that stops
+beating for 35 minutes fails as `experiment_stalled` on read and can be
+resumed. When `query_rewrite` is off, items with history still compute the
+rewrite (one non-generating call) so `query_mismatch` can be detected;
+their runs record `rewrite_reason: "disabled"`.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -614,3 +649,8 @@ depth and the prompt version of the default pipeline are constants there too
   ≤ 50 candidates with 300-character snippets).
 * A producer killed mid-turn (worker restart) leaves no run; its message is
   shown as failed after 10 minutes.
+* **Evaluation lab limits.** A rerun searches each document's *current*
+  index (pinning an old index version is not supported; the experiment
+  records `index_version_changed` instead); there is no pricing data, so
+  `cost.usd` is null; the judge's own token use is not reported; LLM
+  sampling is not seeded (the seed drives the bootstrap).

@@ -26,12 +26,14 @@ import { usePipelines } from "../features/pipelines/hooks/usePipelines";
 import PipelineBar from "../features/pipelines/components/PipelineBar";
 import PipelinePanel from "../features/pipelines/components/PipelinePanel";
 import { pipelineVersionLabel } from "../features/pipelines/lib/pipelineConfig";
+import EvaluationPanel from "../features/evaluation/components/EvaluationPanel";
+import AddToDatasetDialog from "../features/evaluation/components/AddToDatasetDialog";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-type Pane = "documents" | "reader" | "chat" | "runs" | "pipelines";
+type Pane = "documents" | "reader" | "chat" | "runs" | "pipelines" | "evaluation";
 /** What the right-hand column shows on wide screens. */
-type SidePane = "chat" | "runs" | "pipelines";
+type SidePane = "chat" | "runs" | "pipelines" | "evaluation";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "documents", label: "Documents" },
@@ -39,16 +41,18 @@ const PANES: { id: Pane; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "runs", label: "Runs" },
   { id: "pipelines", label: "Pipelines" },
+  { id: "evaluation", label: "Evaluation" },
 ];
 
 const SIDE_PANES: { id: SidePane; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "runs", label: "Runs" },
   { id: "pipelines", label: "Pipelines" },
+  { id: "evaluation", label: "Evaluation" },
 ];
 
 function isSidePane(id: Pane): id is SidePane {
-  return id === "chat" || id === "runs" || id === "pipelines";
+  return id === "chat" || id === "runs" || id === "pipelines" || id === "evaluation";
 }
 
 function parseId(value: string | null | undefined): number | null {
@@ -206,11 +210,18 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   const [draftPipelineId, setDraftPipelineId] = useState<number | null>(null);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [pipelineError, setPipelineError] = useState<ApiRequestError | null>(null);
+  /** Phase 4: the answer being added to a dataset, and what the lab should re-read. */
+  const [datasetMessage, setDatasetMessage] = useState<ChatMessage | null>(null);
+  const [datasetsVersion, setDatasetsVersion] = useState(0);
+  const [datasetNotice, setDatasetNotice] = useState<string | null>(null);
+  /** The lab stays mounted once opened, so its place (dataset, experiment) survives tab switches. */
+  const [evaluationOpened, setEvaluationOpened] = useState(false);
 
-  /** Chat, Runs or Pipelines: a mobile tab, or the right-hand column on wide screens. */
+  /** Chat, Runs, Pipelines or Evaluation: a mobile tab, or the right-hand column on wide screens. */
   const showPane = useCallback((id: Pane) => {
     setPane(id);
     if (isSidePane(id)) setSidePane(id);
+    if (id === "evaluation") setEvaluationOpened(true);
   }, []);
 
   const search = searchParams.toString();
@@ -342,6 +353,10 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
     setRunsVersion((value) => value + 1);
   }, [refreshConversations]);
   const onDeepAnalysis = useCallback((legacyConversationId: number, documentId: number) => navigate(`/ground-truth/${legacyConversationId}/${documentId}`), [navigate]);
+  const onAddToDataset = useCallback((message: ChatMessage) => {
+    setDatasetNotice(null);
+    setDatasetMessage(message);
+  }, []);
 
   // ---- documents -------------------------------------------------------
   const onCreated = (document: WorkspaceDocument) => {
@@ -393,6 +408,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
   // would abort an answer that is still streaming.
   const side: SidePane = isDesktop ? sidePane : isSidePane(pane) ? pane : "chat";
   const sideVisible = isDesktop || isSidePane(pane);
+  // The lab's tables need room: its column widens while it is shown.
+  const gridColumns =
+    isDesktop && side === "evaluation"
+      ? "lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.25fr)]"
+      : "lg:grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(330px,420px)] xl:grid-cols-[320px_minmax(0,1fr)_460px]";
   const sideLabelledBy = (id: SidePane) => (isDesktop ? `side-tab-${id}` : `tab-${id}`);
   const paneProps = (id: Pane, label: string) =>
     isDesktop
@@ -439,7 +459,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
       </header>
 
       {!isDesktop && (
-        <div role="tablist" aria-label="Workspace panes" className="flex shrink-0 border-b border-border" onKeyDown={onTabKeyDown}>
+        <div role="tablist" aria-label="Workspace panes" className="flex shrink-0 overflow-x-auto border-b border-border" onKeyDown={onTabKeyDown}>
           {PANES.map((item) => (
             <button
               key={item.id}
@@ -450,7 +470,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
               aria-controls={`pane-${item.id}`}
               tabIndex={pane === item.id ? 0 : -1}
               onClick={() => showPane(item.id)}
-              className={`flex-1 border-b-2 px-3 py-2 text-sm transition-colors ${focusRing} ${
+              className={`flex-1 shrink-0 whitespace-nowrap border-b-2 px-2.5 py-2 text-sm transition-colors ${focusRing} ${
                 pane === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -461,7 +481,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
       )}
 
       {/* One row that fills the height, so each pane scrolls inside itself. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(330px,420px)] xl:grid-cols-[320px_minmax(0,1fr)_460px]">
+      <div className={`grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden ${gridColumns}`}>
         <section {...paneProps("documents", "Documents")} className={`${paneClass("documents")} border-border lg:border-r`}>
           <DocumentLibrary
             workspaceId={workspaceId}
@@ -495,11 +515,11 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
         </section>
 
         <section
-          aria-label={isDesktop ? "Chat, runs and pipelines" : undefined}
+          aria-label={isDesktop ? "Chat, runs, pipelines and evaluation" : undefined}
           className={`${sideVisible ? "flex" : "hidden"} min-h-0 min-w-0 flex-col overflow-hidden border-border lg:border-l`}
         >
           {isDesktop && (
-            <div role="tablist" aria-label="Chat, runs or pipelines" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
+            <div role="tablist" aria-label="Chat, runs, pipelines or evaluation" className="flex shrink-0 border-b border-border" onKeyDown={onSideTabKeyDown}>
               {SIDE_PANES.map((item) => (
                 <button
                   key={item.id}
@@ -553,6 +573,17 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
                 />
               </div>
             )}
+            {datasetNotice && (
+              <p role="status" className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5 text-xs">
+                <span className="text-foreground">{datasetNotice}</span>
+                <button type="button" className="link" onClick={() => showPane("evaluation")}>
+                  Open Evaluation
+                </button>
+                <button type="button" className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => setDatasetNotice(null)}>
+                  Dismiss
+                </button>
+              </p>
+            )}
             {conversations.error && (
               <div className="border-b border-border p-3">
                 <ErrorNotice
@@ -578,6 +609,7 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
                 onLatestAnswer={setLatestAnswer}
                 onMissing={() => selectConversation(null)}
                 onDeepAnalysis={onDeepAnalysis}
+                onAddToDataset={onAddToDataset}
                 documentTitle={documentTitle}
                 composerDisabledReason={composerDisabledReason}
               />
@@ -614,8 +646,26 @@ function WorkspaceView({ workspaceId }: { workspaceId: number }) {
               />
             )}
           </div>
+          <div id="pane-evaluation" role="tabpanel" aria-labelledby={sideLabelledBy("evaluation")} className={`${side === "evaluation" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+            {evaluationOpened && (
+              <EvaluationPanel workspaceId={workspaceId} documents={documents} pipelines={pipelines} datasetsVersion={datasetsVersion} onOpenCandidate={openSource} />
+            )}
+          </div>
         </section>
       </div>
+
+      {datasetMessage && (
+        <AddToDatasetDialog
+          workspaceId={workspaceId}
+          message={datasetMessage}
+          onClose={() => setDatasetMessage(null)}
+          onSaved={(dataset, version) => {
+            setDatasetMessage(null);
+            setDatasetsVersion((value) => value + 1);
+            setDatasetNotice(`Added to “${dataset.name}” as version ${version}.`);
+          }}
+        />
+      )}
 
       <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-0.5 border-t border-border bg-muted px-4 py-1.5 font-mono text-[11px] text-muted-foreground">
         <span>{summary ?? "Retrieval: no answer yet in this conversation"}</span>

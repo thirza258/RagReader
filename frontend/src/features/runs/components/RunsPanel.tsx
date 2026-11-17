@@ -8,7 +8,7 @@ import type { Pipeline } from "../../pipelines/types";
 import { useRunDetail } from "../hooks/useRunDetail";
 import { RUN_LIST_LIMIT, useRunsOverview } from "../hooks/useRunsOverview";
 import { runLine, runPipelineLabel, stageName, summaryCards } from "../lib/runMetrics";
-import type { RetrievalRun } from "../types";
+import type { RetrievalRun, RunSource } from "../types";
 import RunTrace from "./RunTrace";
 
 const WINDOWS = [7, 30, 90];
@@ -102,7 +102,9 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, 
   const [days, setDays] = useState(30);
   const [refresh, setRefresh] = useState(0);
   const [pipelineVersionId, setPipelineVersionId] = useState<number | null>(null);
-  const overview = useRunsOverview(workspaceId, days, version + refresh, pipelineVersionId);
+  // Evaluation runs (Phase 4) are test traffic: the list shows chat runs unless asked.
+  const [source, setSource] = useState<RunSource>("chat");
+  const overview = useRunsOverview(workspaceId, days, version + refresh, pipelineVersionId, source);
 
   if (selectedRunId != null) {
     return <RunDetail runId={selectedRunId} onBack={() => onSelectRun(null)} onOpenCandidate={onOpenCandidate} onOpenConversation={onOpenConversation} />;
@@ -160,6 +162,9 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, 
           ))}
         </dl>
       )}
+      {overview.summary?.excluded_sources?.includes("evaluation") && (
+        <p className="mt-1 text-[11px] text-muted-foreground">Evaluation runs (experiments) are not counted here.</p>
+      )}
       {overview.summary && overview.summary.ingestion.not_indexed > 0 && (
         <p className="mt-1 text-[11px] text-muted-foreground">
           {overview.summary.ingestion.not_indexed} older document{overview.summary.ingestion.not_indexed === 1 ? " was" : "s were"} never indexed and {overview.summary.ingestion.not_indexed === 1 ? "is" : "are"} not counted.
@@ -168,7 +173,19 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, 
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">Recent runs</h3>
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <label className="shrink-0 text-xs text-muted-foreground" htmlFor={`runs-source-${workspaceId}`}>
+            Source
+          </label>
+          <select
+            id={`runs-source-${workspaceId}`}
+            className={`${inputSmall} text-xs`}
+            value={source}
+            onChange={(event) => setSource(event.target.value === "evaluation" ? "evaluation" : "chat")}
+          >
+            <option value="chat">Chat</option>
+            <option value="evaluation">Evaluation</option>
+          </select>
           <label className="shrink-0 text-xs text-muted-foreground" htmlFor={`runs-pipeline-${workspaceId}`}>
             Pipeline
           </label>
@@ -193,7 +210,11 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, 
       </div>
       {overview.everLoaded && overview.runs.length === 0 && !overview.error && (
         <p className="mt-1 text-xs text-muted-foreground">
-          {pipelineVersionId != null ? "No runs with this pipeline version." : "No runs yet. Every question asked in this workspace is recorded here with its trace."}
+          {pipelineVersionId != null
+            ? "No runs with this pipeline version."
+            : source === "evaluation"
+              ? "No evaluation runs yet. Every question of an experiment is recorded here with its trace."
+              : "No runs yet. Every question asked in this workspace is recorded here with its trace."}
         </p>
       )}
       {overview.runs.length > 0 && (

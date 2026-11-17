@@ -27,7 +27,7 @@ export function setUnauthorizedHandler(next: Handler | null) {
 const PROTECTED = new RegExp(
   "^/?(?:api/v\\d+/)?(?:" +
     [
-      "workspaces", "documents", "conversations", "retrieval", "pipelines", "indexes",
+      "workspaces", "documents", "conversations", "retrieval", "pipelines", "indexes", "evaluations", "experiments",
       "insert-data", "insert-text", "insert-url", "open-chat", "job-status", "query",
       "start-analysis", "analysis-status", "document", "conversation-history", "conversation",
       "chunk", "ground-truth-chunk", "ground-truth-response", "evaluate",

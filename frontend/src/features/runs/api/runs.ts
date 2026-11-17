@@ -1,6 +1,6 @@
 import { apiClient } from "../../../services/apiClient";
 import { unwrap } from "../../../services/api/request";
-import type { ReliabilitySummary, RetrievalRunDetail, RunList, RunStatus } from "../types";
+import type { ReliabilitySummary, RetrievalRunDetail, RunList, RunSource, RunStatus } from "../types";
 
 export interface RunListQuery {
   workspaceId: number;
@@ -8,6 +8,8 @@ export interface RunListQuery {
   status?: RunStatus;
   /** Phase 3: only runs of this pipeline version. */
   pipelineVersionId?: number | null;
+  /** Phase 4: only runs of this source (the Runs view asks for `chat`); every source when omitted. */
+  source?: RunSource | null;
   limit?: number;
 }
 
@@ -19,6 +21,7 @@ export async function listRuns(query: RunListQuery, signal?: AbortSignal): Promi
         workspace_id: query.workspaceId,
         ...(query.conversationId != null ? { conversation_id: query.conversationId } : {}),
         ...(query.status ? { status: query.status } : {}),
+        ...(query.source ? { source: query.source } : {}),
         ...(query.pipelineVersionId != null ? { pipeline_version_id: query.pipelineVersionId } : {}),
         ...(query.limit != null ? { limit: query.limit } : {}),
       },
