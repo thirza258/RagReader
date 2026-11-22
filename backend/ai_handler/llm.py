@@ -39,19 +39,35 @@ OPENROUTER_HEADERS = {
 FREE_OPENROUTER_MODELS = [
     "google/gemma-4-26b-a4b-it:free",
     "nvidia/nemotron-3.5-lightning:free",
-    "cohere/north-mini-code:free",
-    "recursive/flint-v1.0:free",
-    "xingchen-agi/xing4.0-29b-a4b:free",
+    "google/gemma-4-31b-it:free",
     "nvidia/nemotron-3.5-super-vl:free",
+    "cohere/north-mini-code:free",
     "dots-studio/dots-3-note-preview:free",
+    "liquid/lfm-3-1.7b:free",
+    "baidu/ernie-5.5-flash-preview:free",
+    "inclusionai/ling-3.2-flash:free",
+    "particle-ai/particle-1:free",
+    "thinkingmachines/inkling-2-small:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "google/gemma-4-31b-it:free",
+    "recursive/flint-v1.0:free",
+]
+
+FREE_OPENROUTER_EMBEDDING_MODELS = [
+    "nvidia/nemotron-3.5-embed-1b:free",
+    "nvidia/nemotron-3-embed-1b:free",
+    "nvidia/nemotron-3.5-embed-8b:free",
 ]
 
 
 def get_shuffled_free_models() -> list[str]:
     models = list(FREE_OPENROUTER_MODELS)
+    random.shuffle(models)
+    return models
+
+
+def get_shuffled_free_embedding_models() -> list[str]:
+    models = list(FREE_OPENROUTER_EMBEDDING_MODELS)
     random.shuffle(models)
     return models
 
@@ -74,7 +90,9 @@ def is_credit_exhausted_error(exc_or_status: Any, message: str = "") -> bool:
     if code == 402:
         return True
 
-    if "rate limit" in msg_str and not any(k in msg_str for k in ("credit", "payment", "balance")):
+    if code in (429, 503) or any(k in msg_str for k in ("429", "rate limit", "temporarily unavailable", "high load", "503")):
+        if ":free" in msg_str or code in (429, 503):
+            return True
         return False
 
     credit_keywords = (

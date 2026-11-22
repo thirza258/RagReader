@@ -36,7 +36,7 @@ You add a document (PDF, URL, or raw text), ask a question, and get an answer fr
 A PDF file, a web page URL (the HTML is fetched and stripped to text), or text pasted directly into the form.
 
 ### Which retrieval methods and LLM models are benchmarked?
-Dense retrieval (openai/text-embedding-3-small), Sparse retrieval (BM25), and Hybrid retrieval (dense + sparse candidates reranked by cross-encoder/ms-marco-MiniLM-L6-v2). Each runs against GPT-4o mini, Gemini 3 Flash, and Claude Haiku 4.5 via OpenRouter.
+Dense retrieval (nvidia/nemotron-3.5-embed-1b:free), Sparse retrieval (BM25), and Hybrid retrieval (dense + sparse candidates reranked by cross-encoder/ms-marco-MiniLM-L6-v2). Each runs against GPT-4o mini, Gemini 3 Flash, and Claude Haiku 4.5 via OpenRouter.
 
 ### Which evaluation metrics are reported?
 Retrieval quality: Precision@K, Recall@K, F1@K, with K matching the saved run's retrieval depth. Answer quality uses only Ragas faithfulness, response relevance, and factual correctness (F1) through the selected OpenRouter judge.

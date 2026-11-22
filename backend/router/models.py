@@ -216,7 +216,7 @@ class Job(models.Model):
 class Metadata(models.Model):
     llm_model = models.CharField(max_length=100, default="gpt-4o", help_text="LLM for answer generation")
     temperature = models.FloatField(default=0.0, help_text="LLM temperature (0.0 = deterministic)")
-    embedding_model = models.CharField(max_length=100, default="text-embedding-3-small", help_text="OpenAI embedding model")
+    embedding_model = models.CharField(max_length=100, default="nvidia/nemotron-3.5-embed-1b:free", help_text="OpenRouter embedding model")
     top_k = models.IntegerField(default=5, help_text="Number of documents to retrieve")
     chunk_strategy = models.CharField(max_length=32, default="paragraph", help_text='Chunking strategy, e.g., "fixed", "paragraph", "semantic"')
     chunk_size = models.IntegerField(default=500, help_text="Max characters per chunk")

@@ -2,7 +2,7 @@
 "llm_model": "gpt-4o",              # LLM for answer generation  
 "temperature": 0.0,                 # LLM temperature (0.0 = deterministic)  
 # Embedding Settings  
-"model": "text-embedding-3-small",  # OpenAI embedding model  
+"model": "nvidia/nemotron-3.5-embed-1b:free",  # OpenRouter free embedding model  
 # Retrieval Settings  
 "top_k": 5,                         # Number of documents to retrieve  
 # Chunking Strategy  

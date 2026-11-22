@@ -48,7 +48,7 @@ LLM_MODELS = [
 ]
 MODEL_IDS = [m["id"] for m in LLM_MODELS]
 
-DEFAULT_CHAT_MODEL = MODEL_IDS[0]
+DEFAULT_CHAT_MODEL = os.getenv("RAG_CHAT_MODEL", MODEL_IDS[0])
 
 # The single (method, model) pair that answers in the normal chat, and the one
 # candidate pooling borrows when it needs a query rewriter.
@@ -183,7 +183,7 @@ DEFAULT_MODEL_LIMIT = max(1, MAX_VARIANTS // len(METHOD_IDS))
 # Set these in the environment; they take effect for documents indexed after
 # the change. See the module docstring for why they are not per-run.
 
-DEFAULT_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+DEFAULT_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "nvidia/nemotron-3.5-embed-1b:free")
 DEFAULT_CHUNK_STRATEGY = os.getenv("RAG_CHUNK_STRATEGY", "fixed")
 DEFAULT_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "512"))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "50"))

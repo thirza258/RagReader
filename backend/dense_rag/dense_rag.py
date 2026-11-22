@@ -19,7 +19,7 @@ class DenseRAG(BaseRAG):
         Config arguments:
         - top_k: (int) Number of chunks to retrieve.
         - embedding_model: (str) OpenRouter embedding model
-                 (e.g., "openai/text-embedding-3-small", "qwen/qwen3-embedding-8b").
+                 (e.g., "nvidia/nemotron-3.5-embed-1b:free", "openai/text-embedding-3-small", "qwen/qwen3-embedding-8b").
                  Also accepted as "model", the engine's original spelling.
         """
         super().__init__(config)

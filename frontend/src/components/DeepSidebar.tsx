@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2, Search } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, Search } from "lucide-react";
+import { chattyDeskURL } from "../constant";
 import service from "../services/service";
 import ModuleCompatibilityPanel from "./ModuleCompatibilityPanel";
 import {
@@ -57,7 +58,7 @@ const FALLBACK_OPTIONS: AnalysisConfigOptions = {
   rrf_k: { min: 1, max: 1000, default: 60 },
   judge_model: { default: "mistralai/mistral-nemo" },
   ingest: {
-    embedding_model: "openai/text-embedding-3-small",
+    embedding_model: "nvidia/nemotron-3.5-embed-1b:free",
     chunk_strategy: "fixed",
     chunk_size: 512,
     overlap: 50,
@@ -415,6 +416,19 @@ const DeepSidebar: React.FC<DeepSidebarProps> = ({
                   </>
                 )}
               </p>
+
+              <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                <a
+                  href={`${chattyDeskURL}/models`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                  title="View full latency, throughput and cost benchmarks for these models on ChattyDesk"
+                >
+                  <span>Model benchmarks &amp; latency on ChattyDesk</span>
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              </div>
 
               <div className="custom-scrollbar mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
                 {visibleModels.length === 0 && (

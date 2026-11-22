@@ -11,7 +11,7 @@ const STEPS = [
   },
   {
     title: "Dual indexing",
-    desc: "openai/text-embedding-3-small vectors alongside a BM25 sparse index.",
+    desc: "nvidia/nemotron-3.5-embed-1b:free vectors alongside a BM25 sparse index.",
   },
   {
     title: "Retrieval and fusion",

@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Activity, Compass, ExternalLink, FlaskConical, GitBranch, Shuffle } from "lucide-react";
+import { chattyDeskURL } from "../constant";
 
 import { SubmitPayload } from "../types/types";
 import { createDocument } from "../features/documents/api/documents";
@@ -18,11 +20,12 @@ import BackToTop from "../components/landing/BackToTop";
 const REPO_URL = "https://github.com/thirza258/RagReader";
 
 const SUMMARY = [
-  { term: "Retrieval methods", def: "Dense, sparse (BM25), hybrid with cross-encoder reranking" },
-  { term: "Language models", def: "Any model OpenRouter serves; GPT-4o mini, Gemini 3 Flash and Claude Haiku 4.5 are the defaults" },
-  { term: "Pipelines per run", def: "Every selected method × every selected model, up to a fixed cap" },
-  { term: "Metrics per pipeline", def: "Three retrieval, three Ragas answer metrics" },
-  { term: "Results transport", def: "Streamed over a WebSocket as each pipeline finishes" },
+  { term: "Retrieval methods", def: "Dense, sparse (BM25), weighted hybrid & RRF with cross-encoder / LLM reranking" },
+  { term: "Zero-cost free tier", def: "OpenRouter free embeddings & generation with automatic multi-model shuffled failover" },
+  { term: "RAG Observability", def: "Full latency waterfalls, candidate provenance, and 'Why this answer?' inspector" },
+  { term: "Evaluation Lab", def: "Golden test datasets, automated batch experiments, and bootstrap confidence intervals" },
+  { term: "Research Platform", def: "Multi-document claim verification, matrix comparisons, and structured report synthesis" },
+  { term: "Pipeline Versioning", def: "Immutable configuration versions for reproducible benchmarks across documents" },
   { term: "Licence", def: "MIT, self-hostable with Docker Compose" },
 ];
 
@@ -61,7 +64,10 @@ const SAMPLE_METRICS: { group: string; rows: [string, string][] }[] = [
 const CONTENTS = [
   { id: "how-it-works", label: "How it works" },
   { id: "retrieval", label: "Retrieval methods" },
-  { id: "models", label: "Models" },
+  { id: "observability", label: "RAG observability & traces" },
+  { id: "evaluation-lab", label: "Evaluation lab & datasets" },
+  { id: "research", label: "Deep research platform" },
+  { id: "models", label: "Models & free-tier failover" },
   { id: "metrics", label: "Evaluation metrics" },
   { id: "ground-truth", label: "Ground truth" },
   { id: "configure", label: "What you can change per run" },
@@ -77,23 +83,25 @@ const RETRIEVAL_METHODS = [
     name: "Dense retrieval",
     summary: "Semantic vector search over embeddings.",
     detail:
-      "Every chunk is embedded with openai/text-embedding-3-small and ranked by cosine similarity against the embedded query. This is also the method that answers in the normal chat.",
+      "Every chunk is embedded with nvidia/nemotron-3.5-embed-1b:free (with automatic failover to compatible 2048-dim free embeddings) and ranked by cosine similarity against the embedded query. This is also the default method that answers in the normal workspace chat.",
   },
   {
     name: "Sparse retrieval",
     summary: "BM25 keyword search.",
     detail:
-      "BM25Okapi over a corpus that is lowercased, stripped of punctuation and filtered through NLTK's English stopword list. Exact terms, names and numbers survive here even when embeddings blur them.",
+      "BM25Okapi over a corpus that is lowercased, stripped of punctuation and filtered through NLTK's English stopword list. Exact terms, names, code identifiers and numbers survive here even when embeddings blur them.",
   },
   {
     name: "Hybrid retrieval",
-    summary: "Dense and sparse candidates, reranked by a cross-encoder.",
+    summary: "Dense + sparse candidates fused and reranked.",
     detail:
-      "Both engines contribute candidates (at least 10 each), duplicates are dropped, and the cross-encoder/ms-marco-MiniLM-L6-v2 reranker scores every survivor against the query before the top-K is cut.",
+      "Both engines contribute candidates (at least 10 each). They are combined through min-max weighted fusion (customizable dense-vs-sparse balance) or Reciprocal Rank Fusion (RRF), and then optionally reranked by Ollama cross-encoders or an OpenRouter LLM reranker before top-K selection.",
   },
 ];
 
 const MODELS = [
+  { label: "Gemma 4 26B (Free)", id: "google/gemma-4-26b-a4b-it:free", provider: "Google" },
+  { label: "Nemotron 3.5 (Free)", id: "nvidia/nemotron-3.5-lightning:free", provider: "NVIDIA" },
   { label: "GPT-4o mini", id: "openai/gpt-4o-mini", provider: "OpenAI" },
   { label: "Gemini 3 Flash", id: "google/gemini-3-flash-preview", provider: "Google" },
   { label: "Claude Haiku 4.5", id: "anthropic/claude-haiku-4.5", provider: "Anthropic" },
@@ -101,14 +109,19 @@ const MODELS = [
 
 const SUPPORTING_MODELS = [
   {
-    role: "Embeddings",
-    id: "openai/text-embedding-3-small",
-    note: "Vectors for dense retrieval and for hybrid's dense half.",
+    role: "Free Embeddings",
+    id: "nvidia/nemotron-3.5-embed-1b:free",
+    note: "High-capacity vector embeddings at zero cost, with automatic failover between compatible 2048-dim free embedding models (e.g. nvidia/nemotron-3-embed-1b:free).",
   },
   {
-    role: "Reranker",
+    role: "Dynamic Free Fallback Pool",
+    id: "14 OpenRouter Free Models",
+    note: "Automatic shuffled fallback across Gemma 4, Nemotron 3.5/Nano/Ultra, Cohere North, Flint, Ling, Ernie, and Particle whenever rate limits (429) or credit exhaustion (402) occur.",
+  },
+  {
+    role: "Local Reranker",
     id: "cross-encoder/ms-marco-MiniLM-L6-v2",
-    note: "The cross-encoder that makes hybrid different from dense + sparse.",
+    note: "The cross-encoder that makes hybrid different from dense + sparse (runs locally via Ollama).",
   },
   {
     role: "Evaluation judge",
@@ -156,41 +169,51 @@ const CONFIGURABLE = [
 ];
 
 const STACK = [
-  { name: "OpenRouter", note: "Every LLM and embedding call, one API key" },
-  { name: "Django + DRF", note: "REST API and persistence" },
-  { name: "Channels + Daphne", note: "WebSocket streaming of analysis results" },
-  { name: "Celery + Redis", note: "Indexing and analysis run as background jobs" },
-  { name: "PostgreSQL", note: "Documents, chunks, batches, results" },
-  { name: "rank-bm25 + NLTK", note: "Sparse retrieval and tokenization" },
-  { name: "Ollama", note: "Remote embedding reranking" },
-  { name: "Ragas + OpenAI SDK", note: "Remote answer evaluation through OpenRouter" },
-  { name: "React + Vite + Tailwind", note: "This interface" },
+  { name: "OpenRouter Free Tier", note: "Zero-cost embeddings and generation with 14-model shuffled failover" },
+  { name: "Django + DRF", note: "REST API, workspace persistence, and auth" },
+  { name: "Channels + Daphne", note: "WebSocket streaming of analysis results and live updates" },
+  { name: "Celery + Redis", note: "Background document indexing, evaluation experiments, and research tasks" },
+  { name: "PostgreSQL", note: "Workspaces, documents, chunks, pipeline versions, runs, and datasets" },
+  { name: "rank-bm25 + NLTK", note: "Sparse keyword retrieval and tokenization" },
+  { name: "Ollama", note: "Local cross-encoder and embedding reranking" },
+  { name: "Evaluation Lab", note: "Golden datasets, batch matrix experiments, and paired bootstrap CIs" },
+  { name: "Research Engine", note: "Multi-document claim verification, synthesis, and citation auditing" },
+  { name: "Observability Tracer", note: "Per-span latency waterfalls, provenance tracking, and Why-This-Answer" },
+  { name: "React + Vite + Tailwind", note: "Fast, academic-style responsive interface" },
 ];
 
 const FAQ = [
   {
     q: "What does RAGReader actually do?",
-    a: "You add documents to a workspace, ask a question, and get a streamed answer from dense retrieval with citations you can click to read the passage. From an answer about a single document, Deep analysis re-runs the same question through every combination of retrieval method and LLM you selected — up to nine pipelines — and scores each one against ground truth.",
+    a: "You add documents to a workspace, ask questions, and get streamed answers with citations linking back to exact source text. From there, you can trace retrieval latency and provenance ('Why this answer?'), compare nine retrieval pipelines in Deep Analysis, run batch benchmarks in the Evaluation Lab, or launch autonomous multi-document Deep Research tasks.",
+  },
+  {
+    q: "How does the zero-cost free model tier and shuffling work?",
+    a: "RAGReader defaults to OpenRouter's free models for both embeddings (nvidia/nemotron-3.5-embed-1b:free) and answer generation (Gemma 4 26B, Nemotron 3.5 Lightning, etc.). If a free model hits a provider rate limit (429) or temporary load spike, our dynamic engine automatically shuffles and fails over across 14 free OpenRouter models before the stream begins, ensuring reliable and cost-free operation.",
+  },
+  {
+    q: "What is the Evaluation Lab?",
+    a: "The Evaluation Lab allows you to upload golden reference datasets (CSV/JSON), curate test queries from live chat answers, and execute automated batch experiments. It scores retrieval metrics (Recall, Precision, Hit Rate, nDCG, MRR) and generation metrics (Ragas faithfulness, answer relevance, correctness), and provides side-by-side run comparisons with paired bootstrap confidence intervals.",
+  },
+  {
+    q: "What does the Deep Research platform do?",
+    a: "The Research tab conducts background multi-document investigations: verifying factual claims against document evidence (calculating confidence and stance per passage), asking synthesizing questions across multiple papers, generating dimensional comparison matrices, extracting structured data, and drafting comprehensive Markdown research reports with verifiable citations.",
+  },
+  {
+    q: "How does RAG observability and 'Why this answer?' work?",
+    a: "Every chat turn instruments a bounded trace: query rewriting, vector embedding, index cache lookup, search candidates, and generation latency. Clicking 'Why this answer?' reveals the full waterfall breakdown, candidate score distributions across Dense and BM25 retrievers, and explains why specific passages were chosen or dropped.",
   },
   {
     q: "What can I upload?",
-    a: "A PDF, Word (DOCX), plain-text or Markdown file up to 25 MB, a web page URL (the page is fetched on the server and reduced to text), or text pasted straight into the form. Each becomes a document in your workspace library, processed in the background.",
+    a: "A PDF, Word (DOCX), plain-text or Markdown file up to 25 MB, a web page URL (fetched and stripped to clean text on the server), or text pasted straight into the form. Each becomes a document in your workspace library, indexed in the background.",
   },
   {
     q: "Do I need my own API keys?",
-    a: "Not on the hosted app. If you self-host, one OPENROUTER_API_KEY covers every model — the LLMs, the embeddings and the evaluation judge all go through OpenRouter. That single key is also why the model selector can offer OpenRouter's whole catalogue rather than a fixed list.",
-  },
-  {
-    q: "How many pipelines run at once?",
-    a: "Three retrieval methods times however many models you select — nine by default. Narrow either axis in the deep-analysis sidebar and the run gets smaller; widen the model list and it grows, up to a cap, because every extra variant is another full retrieve-generate-judge cycle. The configuration you used is stored with the batch, so a result always records how it was produced.",
-  },
-  {
-    q: "Is this a benchmark I can cite?",
-    a: "It's a comparison on your document with your ground truth, which is exactly what a public benchmark can't give you — and exactly why the numbers aren't transferable. Retrieval metrics are set overlap rather than rank-aware, and Ragas answer metrics depend on the selected judge and embedding models.",
+    a: "Not on the hosted app — it runs on OpenRouter's free tier with automated multi-model shuffling. If you self-host, a single OPENROUTER_API_KEY covers all generation, free embeddings, and evaluation judges.",
   },
   {
     q: "Is it open source?",
-    a: "Yes — MIT licensed, on GitHub, and it runs locally with Docker Compose.",
+    a: "Yes — MIT licensed, on GitHub, and self-hostable with Docker Compose.",
   },
 ];
 
@@ -443,8 +466,8 @@ const LandingPage: React.FC = () => {
         <Section
           id="retrieval"
           number={2}
-          title="Retrieval methods"
-          lede="The three methods disagree in interesting ways — semantics catches paraphrase, keywords catch exact names, and the reranker arbitrates. Running all three on your document is how you find out which one your content rewards."
+          title="Retrieval methods & pipelines"
+          lede="The retrieval methods disagree in interesting ways — semantics catches paraphrase, keywords catch exact names, and the reranker arbitrates. Running all three on your document is how you find out which one your content rewards."
         >
           <dl className="border-t border-border">
             {RETRIEVAL_METHODS.map((method) => (
@@ -466,18 +489,134 @@ const LandingPage: React.FC = () => {
           </dl>
         </Section>
 
-        {/* --- 3. Models --- */}
+        {/* --- 3. Observability & Traces --- */}
+        <Section
+          id="observability"
+          number={3}
+          title="RAG observability & traces"
+          lede="Every question instruments a full execution trace with per-step latency and candidate provenance. See exactly how an answer was derived instead of trusting an opaque pipeline."
+        >
+          <div className="grid gap-6 md:grid-cols-3">
+            <Panel>
+              <div className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-foreground">Latency Waterfall</h3>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Per-span millisecond breakdown: query rewrite, vector embedding, index cache lookup, candidate search, reranking, and Time-To-First-Token (TTFT).
+              </p>
+            </Panel>
+            <Panel>
+              <div className="flex items-center gap-2">
+                <Compass className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-foreground">Candidate Funnel</h3>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Inspect every candidate passage considered across Dense, BM25, and fused stages. Discover exactly why specific chunks scored high or were filtered out.
+              </p>
+            </Panel>
+            <Panel>
+              <div className="flex items-center gap-2">
+                <GitBranch className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-foreground">“Why this answer?”</h3>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                One-click inspector embedded in chat turns that reveals the answering model, active pipeline version, index hash, token usage, and citation mapping.
+              </p>
+            </Panel>
+          </div>
+        </Section>
+
+        {/* --- 4. Evaluation Lab --- */}
+        <Section
+          id="evaluation-lab"
+          number={4}
+          title="Evaluation lab & datasets"
+          lede="Move beyond single-query tests: maintain version-controlled test datasets, launch batch matrix experiments in Celery, and compare pipelines side-by-side with statistical rigor."
+        >
+          <div className="grid gap-6 md:grid-cols-2">
+            <Panel>
+              <h3 className="font-semibold text-foreground">Golden Reference Datasets</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Upload CSV or JSON test sets or curate real questions directly from workspace conversations. Every dataset is content-hashed and versioned, guaranteeing reproducible evaluation runs across document revisions.
+              </p>
+            </Panel>
+            <Panel>
+              <h3 className="font-semibold text-foreground">Paired Bootstrap Comparisons</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Compare 2–6 experiments simultaneously. Calculates win/loss margins, baseline metric deltas, and 95% paired bootstrap confidence intervals alongside latency and token cost trade-offs.
+              </p>
+            </Panel>
+          </div>
+
+          {/* AI Evaluation Suite Companion Card */}
+          <div className="mt-6 border border-border/80 bg-accent/30 p-5 rounded-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase font-semibold tracking-wider px-2 py-0.5 bg-primary/10 text-primary border border-primary/20">
+                    AI Evaluation Suite
+                  </span>
+                  <span className="text-xs font-semibold text-foreground">
+                    Looking for Foundation Model Benchmarks?
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
+                  RagReader evaluates retrieval and document faithfulness. To benchmark foundational LLM reasoning (MMLU-Pro, GSM8K, HumanEval), latency distributions (P50/P95), and token pricing across 400+ models, visit our companion lab <strong>ChattyDesk</strong>.
+                </p>
+              </div>
+              <a
+                href={chattyDeskURL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-sm bg-foreground text-background px-4 py-2 text-xs font-semibold hover:bg-foreground/90 transition-colors shadow-xs"
+              >
+                <span>ChattyDesk Model Lab</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          </div>
+        </Section>
+
+        {/* --- 5. Deep Research Platform --- */}
+        <Section
+          id="research"
+          number={5}
+          title="Deep research platform"
+          lede="Autonomous background agents that investigate, cross-verify, and synthesize knowledge across multiple documents in your workspace."
+        >
+          <div className="grid gap-6 md:grid-cols-2">
+            <Panel>
+              <div className="flex items-center gap-2">
+                <FlaskConical className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-foreground">Claim Verification</h3>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Submit any hypothesis or statement. The engine searches all documents, identifies supporting and contradicting passages, and calculates an objective verdict and confidence score based on citation stances.
+              </p>
+            </Panel>
+            <Panel>
+              <div className="flex items-center gap-2">
+                <Shuffle className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-foreground">Cross-Document Synthesis</h3>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Inquire across multi-document libraries: generate comparison matrices along user-defined dimensions, extract typed structured fields, spot contradictory statements, and export comprehensive Markdown reports.
+              </p>
+            </Panel>
+          </div>
+        </Section>
+
+        {/* --- 6. Models & Free-Tier Failover --- */}
         <Section
           id="models"
-          number={3}
-          title="Models"
-          lede="Each pipeline is end-to-end: the model rewrites your question into a search query, retrieves with its assigned method, and generates at temperature 0 — so its scores reflect the whole chain, query rewriting included. All traffic is routed through OpenRouter with a single API key, which is what lets the selector offer any model OpenRouter serves rather than a fixed three."
+          number={6}
+          title="Models & free-tier failover"
+          lede="Zero operational costs out of the box: OpenRouter's free embedding and generation models with dynamic multi-model shuffling for seamless rate-limit and quota resilience."
         >
-          <h3 className="text-lg font-semibold">Defaults</h3>
+          <h3 className="text-lg font-semibold">Free-Tier & Generation Models</h3>
           <p className="prose-note measure mt-2 text-base">
-            These three are pre-selected. Swap in any other OpenRouter model from
-            the deep-analysis sidebar — the list there is fetched live, with price
-            and context length, and searchable.
+            Default configurations connect directly to OpenRouter's free tier. If any model experiences provider rate limits (429) or credit exhaustion (402), our client dynamically shuffles across 14 free fallback models before the first token streams.
           </p>
           <table className="mt-4 w-full border-t border-border text-sm">
             <caption className="sr-only">Default generation models</caption>
@@ -499,12 +638,12 @@ const LandingPage: React.FC = () => {
             </tbody>
           </table>
 
-          <h3 className="mt-12 text-lg font-semibold">Supporting models</h3>
+          <h3 className="mt-12 text-lg font-semibold">Supporting & Embedding Models</h3>
           <dl className="mt-4 border-t border-border">
             {SUPPORTING_MODELS.map((item) => (
               <div
                 key={item.id}
-                className="grid gap-1 border-b border-border py-4 sm:grid-cols-[11rem_1fr] sm:gap-6"
+                className="grid gap-1 border-b border-border py-4 sm:grid-cols-[13rem_1fr] sm:gap-6"
               >
                 <dt className="text-sm font-medium">{item.role}</dt>
                 <dd>
@@ -516,10 +655,10 @@ const LandingPage: React.FC = () => {
           </dl>
         </Section>
 
-        {/* --- 4. Metrics --- */}
+        {/* --- 7. Metrics --- */}
         <Section
           id="metrics"
-          number={4}
+          number={7}
           title="Evaluation metrics"
           lede="Retrieval and generation fail differently, so they are scored separately: a pipeline can retrieve perfectly and still answer badly, and the metrics will say so."
         >
@@ -568,11 +707,11 @@ const LandingPage: React.FC = () => {
           </div>
         </Section>
 
-        {/* --- 5. Ground truth --- */}
+        {/* --- 8. Ground truth --- */}
         <Section
           id="ground-truth"
-          number={5}
-          title="Ground truth"
+          number={8}
+          title="Ground truth & consensus"
           lede="Retrieval metrics are only as good as the set they are scored against, so RAGReader makes that choice explicit and stores it with the run — by hand, or by consensus."
         >
           <GroundTruthVisualizer />
@@ -588,10 +727,10 @@ const LandingPage: React.FC = () => {
           </div>
         </Section>
 
-        {/* --- 6. Configuration --- */}
+        {/* --- 9. Configuration --- */}
         <Section
           id="configure"
-          number={6}
+          number={9}
           title="What you can change per run"
           lede="The deep-analysis sidebar narrows the matrix before it runs, and whatever you pick is saved on the batch — so every stored result records the configuration that produced it."
         >
@@ -632,30 +771,30 @@ const LandingPage: React.FC = () => {
           </Panel>
         </Section>
 
-        {/* --- 7. Worked example --- */}
+        {/* --- 10. Worked example --- */}
         <Section
           id="benchmark"
-          number={7}
+          number={10}
           title="Worked example"
           lede="Inspect sample retrieval results and answer text for each method and model. Run your own analysis to calculate the three Ragas answer metrics."
         >
           <InteractiveBenchmarkSimulator />
         </Section>
 
-        {/* --- 8. Comparison --- */}
+        {/* --- 11. Comparison --- */}
         <Section
           id="comparison"
-          number={8}
+          number={11}
           title="Comparison with adjacent tools"
           lede="Where RAGReader differs from a plain vector store and from a general document-chat tool."
         >
           <ComparisonMatrix />
         </Section>
 
-        {/* --- 9. Implementation --- */}
+        {/* --- 12. Implementation --- */}
         <Section
           id="stack"
-          number={9}
+          number={12}
           title="Implementation"
           lede="No hidden services: the whole thing runs from one Docker Compose file and one OpenRouter key."
         >
@@ -669,20 +808,20 @@ const LandingPage: React.FC = () => {
           </dl>
         </Section>
 
-        {/* --- 10. Quick start --- */}
+        {/* --- 13. Quick start --- */}
         <Section
           id="quickstart"
-          number={10}
+          number={13}
           title="Running it yourself"
           lede="Clone the repository, add an OpenRouter key, and bring up Docker Compose."
         >
           <QuickStartCode />
         </Section>
 
-        {/* --- 11. FAQ --- */}
+        {/* --- 14. FAQ --- */}
         <Section
           id="faq"
-          number={11}
+          number={14}
           title="Questions"
         >
           <dl className="border-t border-border">
@@ -820,6 +959,12 @@ const LandingPage: React.FC = () => {
                 <li>
                   <a href={`${REPO_URL}/issues`} className="link" target="_blank" rel="noreferrer">
                     Issue tracker
+                  </a>
+                </li>
+                <li>
+                  <a href={chattyDeskURL} className="link inline-flex items-center gap-1" target="_blank" rel="noreferrer">
+                    <span>ChattyDesk (Model Lab)</span>
+                    <ExternalLink className="h-2.5 w-2.5 text-muted-foreground" />
                   </a>
                 </li>
                 <li>

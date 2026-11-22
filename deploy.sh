@@ -48,8 +48,8 @@ fi
 
 # ── 1. Build backend image ───────────────────────────────────────────────────
 
-log "Building backend image..."
-docker compose build backend
+log "Building backend and worker images..."
+docker compose build backend worker
 
 # ── 2. Backend test gate ─────────────────────────────────────────────────────
 
@@ -63,6 +63,8 @@ if [ "$MODE" != "skip-tests" ]; then
         -e DEBUG=False \
         -e RAG_DISABLE_ENGINE_INIT=1 \
         -e DATABASE_URL= \
+        -e RAG_EMBEDDING_MODEL=openai/text-embedding-3-small \
+        -e RAG_CHAT_MODEL=openai/gpt-4o-mini \
         backend \
         python manage.py test --noinput -v 2 \
         || fail "backend tests failed — deploy aborted"

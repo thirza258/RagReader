@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Menu, X, LogOut, FolderOpen } from "lucide-react";
+import { Menu, X, LogOut, FolderOpen, ExternalLink } from "lucide-react";
+import { chattyDeskURL } from "../constant";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -103,6 +104,17 @@ const Navbar: React.FC = () => {
             className="text-muted-foreground transition-colors hover:text-foreground"
           >
             GitHub
+          </a>
+          <a
+            href={chattyDeskURL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-accent/40 px-3 py-1 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-foreground/30 shadow-xs"
+            title="ChattyDesk: Foundation Model Benchmarking Lab & Playground"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>ChattyDesk (Model Lab)</span>
+            <ExternalLink className="h-3 w-3 text-muted-foreground" />
           </a>
         </div>
 
@@ -209,6 +221,18 @@ const Navbar: React.FC = () => {
             className="text-muted-foreground hover:text-foreground"
           >
             GitHub repository
+          </a>
+          <a
+            href={chattyDeskURL}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-between text-muted-foreground hover:text-foreground py-1 text-sm"
+          >
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              ChattyDesk (Model Lab &amp; Benchmarks)
+            </span>
+            <ExternalLink className="h-3.5 w-3.5" />
           </a>
 
           <div className="h-px bg-border" />

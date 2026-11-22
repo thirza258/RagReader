@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { ExternalLink } from "lucide-react";
+import { chattyDeskURL } from "../../../constant";
 import { focusRing } from "../../../components/ui/classes";
 import type { Evidence } from "../../chat/types";
 import type { WorkspaceDocument } from "../../documents/types";
@@ -66,25 +68,51 @@ const EvaluationPanel: React.FC<EvaluationPanelProps> = ({ workspaceId, document
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div role="tablist" aria-label="Evaluation" className="flex shrink-0 gap-1 border-b border-border px-3 pt-1.5" onKeyDown={onTabKeyDown}>
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            id={`evaluation-tab-${item.id}`}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            aria-controls={`evaluation-panel-${item.id}`}
-            tabIndex={tab === item.id ? 0 : -1}
-            onClick={() => setTab(item.id)}
-            className={`border-b-2 px-2 py-1 text-xs transition-colors ${focusRing} ${
-              tab === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {item.label}
-            {item.id === "compare" && compareIds.length > 0 ? ` (${compareIds.length})` : ""}
-          </button>
-        ))}
+      <div role="tablist" aria-label="Evaluation" className="flex shrink-0 items-center justify-between border-b border-border px-3 pt-1.5" onKeyDown={onTabKeyDown}>
+        <div className="flex gap-1">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              id={`evaluation-tab-${item.id}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              aria-controls={`evaluation-panel-${item.id}`}
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => setTab(item.id)}
+              className={`border-b-2 px-2 py-1 text-xs transition-colors ${focusRing} ${
+                tab === item.id ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {item.label}
+              {item.id === "compare" && compareIds.length > 0 ? ` (${compareIds.length})` : ""}
+            </button>
+          ))}
+        </div>
+        <a
+          href={`${chattyDeskURL}/benchmarks`}
+          target="_blank"
+          rel="noreferrer"
+          className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors pb-1"
+          title="Benchmark raw model performance, latency & cost on ChattyDesk"
+        >
+          <span>ChattyDesk Model Lab</span>
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+      <div className="border-b border-border/60 bg-muted/20 px-3 py-1 flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>
+          <strong className="font-semibold text-foreground">AI Evaluation Suite:</strong> RAG &amp; retrieval evaluation.
+        </span>
+        <a
+          href={`${chattyDeskURL}/benchmarks`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary hover:underline font-mono inline-flex items-center gap-0.5 text-[10px]"
+        >
+          <span>Benchmark LLMs</span>
+          <span>↗</span>
+        </a>
       </div>
       <div id={`evaluation-panel-${tab}`} role="tabpanel" aria-labelledby={`evaluation-tab-${tab}`} className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {tab === "datasets" &&
