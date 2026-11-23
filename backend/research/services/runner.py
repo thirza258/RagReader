@@ -313,6 +313,8 @@ def run_task(task_id, token):
             status=Status.RUNNING, started_at=now, heartbeat_at=now, updated_at=now):
         return False
     task = ResearchTask.objects.select_related("workspace", "workspace__user", "pipeline_version__pipeline").get(pk=task_id)
+    # A retried task replaces the run of its earlier attempt.
+    previous_run = task.run_id
     config = (task.pipeline or {}).get("config") or {}
     tracer = tracing.new_tracer("research.task", Kind(task.kind).label, origin=began)
 
@@ -347,6 +349,7 @@ def run_task(task_id, token):
                 status=Status.COMPLETED, run_token=None, result=result, evidence=evidence, run=run,
                 progress={}, latency_ms=_ms(began), finished_at=timezone.now(), updated_at=timezone.now(),
             )
+            _drop_previous_run(previous_run, run)
         return True
     except LostOwnership:
         return False
@@ -355,14 +358,24 @@ def run_task(task_id, token):
         if not isinstance(exc, (ApiError, PipelineError)):
             logger.warning("Research task %s failed", task_id, exc_info=True)
         tracer.close(error=error["code"])
-        run = _record_run(task, session, config, status=RetrievalRun.Status.FAILED, error=error, stage=stage) \
-            if session is not None else None
-        ResearchTask.objects.filter(pk=task_id, status=Status.RUNNING, run_token=token).update(
-            status=Status.FAILED, run_token=None, error_code=error["code"][:80], error_message=error["message"],
-            error_stage=stage, retryable=bool(error.get("retryable")), run=run, progress={},
-            latency_ms=_ms(began), finished_at=timezone.now(), updated_at=timezone.now(),
-        )
+        with transaction.atomic():
+            # A worker that lost the task (cancelled, retried, deleted) records nothing.
+            if not ResearchTask.objects.filter(pk=task_id, status=Status.RUNNING, run_token=token).exists():
+                return False
+            run = _record_run(task, session, config, status=RetrievalRun.Status.FAILED, error=error, stage=stage) \
+                if session is not None else None
+            ResearchTask.objects.filter(pk=task_id).update(
+                status=Status.FAILED, run_token=None, error_code=error["code"][:80], error_message=error["message"],
+                error_stage=stage, retryable=bool(error.get("retryable")), run=run, progress={},
+                latency_ms=_ms(began), finished_at=timezone.now(), updated_at=timezone.now(),
+            )
+            _drop_previous_run(previous_run, run)
         return False
+
+
+def _drop_previous_run(previous_run, run):
+    if previous_run and (run is None or previous_run != run.pk):
+        RetrievalRun.objects.filter(pk=previous_run, source=RetrievalRun.Source.RESEARCH).delete()
 
 
 def fail_timeout(task_id, token):

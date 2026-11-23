@@ -21,10 +21,13 @@ interface ResearchResultProps {
   onDeleted: () => void;
 }
 
+// The project's desaturated status tokens (tailwind.config.js). No `dark:`
+// variants: the app has no dark theme, so they would fire on a light page
+// whenever the OS prefers dark.
 const TONES = {
-  good: "border-emerald-600/40 bg-emerald-600/10 text-emerald-800 dark:text-emerald-300",
-  bad: "border-destructive/40 bg-destructive/10 text-destructive",
-  mixed: "border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+  good: "border-status-success/40 bg-status-success/10 text-status-success",
+  bad: "border-status-error/40 bg-status-error/10 text-status-error",
+  mixed: "border-status-warning/40 bg-status-warning/10 text-status-warning",
   unknown: "border-border bg-muted text-muted-foreground",
 };
 

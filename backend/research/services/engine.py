@@ -13,6 +13,7 @@ verdict and a confidence, so the same stances always give the same verdict.
 """
 import json
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -99,6 +100,10 @@ class EvidenceBook:
     def cited_in(self, text):
         return cited_ids(text or "", len(self.items))
 
+    def cited_from(self, text, document_id):
+        """The passages `text` cites that come from `document_id` (PRD §23: document-specific evidence)."""
+        return [number for number in self.cited_in(text) if self.items[number - 1]["document_id"] == document_id]
+
     def mark(self, cited):
         cited = set(cited)
         for item in self.items:
@@ -140,6 +145,17 @@ def parse_json_object(text):
 
 def clip(text, limit=MAX_TEXT_CHARS):
     return " ".join(str(text).split())[:limit] if isinstance(text, str) and text.strip() else None
+
+
+def document_id_of(value):
+    """A document id from a model reply: an integer, or digits in a string."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 # ── Verdicts (§22) ───────────────────────────────────────────────────────────
@@ -208,9 +224,11 @@ class Session:
         for attempt in range(2):
             began = time.monotonic()
             with self.tracer.span("generate", name, attempt=attempt + 1) as span:
-                text = self.llm.generate(prompt if attempt == 0 else (
-                    f"{prompt}\n\nYour previous reply was rejected: {last_error} Reply with the JSON object only."))
-                self.generation_ms += _ms(began)
+                try:
+                    text = self.llm.generate(prompt if attempt == 0 else (
+                        f"{prompt}\n\nYour previous reply was rejected: {last_error} Reply with the JSON object only."))
+                finally:
+                    self.generation_ms += _ms(began)
                 try:
                     return validate(parse_json_object(text))
                 except OutputInvalid as exc:
@@ -317,8 +335,9 @@ def ask(session, data):
             raise OutputInvalid('"per_document" must be a list.')
         answers = {}
         for entry in entries:
-            if isinstance(entry, dict) and isinstance(entry.get("document_id"), int):
-                answers[entry["document_id"]] = clip(entry.get("answer"))
+            document_id = document_id_of(entry.get("document_id")) if isinstance(entry, dict) else None
+            if document_id is not None:
+                answers[document_id] = clip(entry.get("answer"))
         return answers, clip(raw.get("comparison")), clip(raw.get("synthesis"))
 
     answers, comparison, synthesis = session.ask("Multi-document answer", (
@@ -330,7 +349,9 @@ def ask(session, data):
     rows, cited = [], []
     for document in session.documents:
         answer = answers.get(document.pk)
-        citations = book.cited_in(answer)
+        # Only this document's passages count as its evidence; an answer that
+        # cites none of them is shown as not addressed.
+        citations = book.cited_from(answer, document.pk)
         found = bool(answer) and bool(citations)
         rows.append({"document_id": document.pk, "document_title": document.name,
                      "answer": answer if found else None, "found": found, "citation_ids": citations if found else []})
@@ -363,8 +384,9 @@ def compare(session, data):
                 continue
             findings = {}
             for finding in entry.get("findings") or []:
-                if isinstance(finding, dict) and isinstance(finding.get("document_id"), int):
-                    findings[finding["document_id"]] = clip(finding.get("finding"), 1500)
+                document_id = document_id_of(finding.get("document_id")) if isinstance(finding, dict) else None
+                if document_id is not None:
+                    findings[document_id] = clip(finding.get("finding"), 1500)
             by_name[entry["name"].strip().lower()] = (findings, clip(entry.get("difference"), 1500))
         return by_name, clip(raw.get("summary"))
 
@@ -381,8 +403,9 @@ def compare(session, data):
         cells = []
         for document in session.documents:
             text = findings.get(document.pk)
-            citations = book.cited_in(text)
-            # Evidence-backed only: an uncited finding is shown as not stated.
+            citations = book.cited_from(text, document.pk)
+            # Evidence-backed only: a finding citing none of this document's
+            # passages is shown as not stated.
             status = "found" if text and citations else "not_stated"
             cells.append({"document_id": document.pk, "finding": text if status == "found" else None,
                           "citation_ids": citations if status == "found" else [], "status": status})
@@ -403,13 +426,17 @@ def coerce(value, kind):
     if kind == "number":
         if isinstance(value, bool):
             return None, False
-        if isinstance(value, (int, float)):
+        if isinstance(value, int):
             return value, True
+        if isinstance(value, float):
+            return (value, True) if math.isfinite(value) else (None, False)
         if isinstance(value, str):
             cleaned = value.replace(",", "").strip()
             try:
                 number = float(cleaned)
             except ValueError:
+                return None, False
+            if not math.isfinite(number):  # "NaN", "inf": not storable as JSON
                 return None, False
             return int(number) if number.is_integer() else number, True
         return None, False

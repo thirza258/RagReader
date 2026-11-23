@@ -181,10 +181,11 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, 
             id={`runs-source-${workspaceId}`}
             className={`${inputSmall} text-xs`}
             value={source}
-            onChange={(event) => setSource(event.target.value === "evaluation" ? "evaluation" : "chat")}
+            onChange={(event) => setSource(event.target.value === "evaluation" || event.target.value === "research" ? event.target.value : "chat")}
           >
             <option value="chat">Chat</option>
             <option value="evaluation">Evaluation</option>
+            <option value="research">Research</option>
           </select>
           <label className="shrink-0 text-xs text-muted-foreground" htmlFor={`runs-pipeline-${workspaceId}`}>
             Pipeline
@@ -214,7 +215,9 @@ const RunsPanel: React.FC<RunsPanelProps> = ({ workspaceId, pipelines, version, 
             ? "No runs with this pipeline version."
             : source === "evaluation"
               ? "No evaluation runs yet. Every question of an experiment is recorded here with its trace."
-              : "No runs yet. Every question asked in this workspace is recorded here with its trace."}
+              : source === "research"
+                ? "No research runs yet. Every research task is recorded here with its trace."
+                : "No runs yet. Every question asked in this workspace is recorded here with its trace."}
         </p>
       )}
       {overview.runs.length > 0 && (
