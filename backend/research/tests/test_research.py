@@ -306,6 +306,76 @@ class LifecycleAndAccessTests(ResearchTestCase):
         self.assertFalse(RetrievalRun.objects.filter(source="research").exists())
 
 
+class ReverificationTests(ResearchTestCase):
+    """Regressions found when Phase 5 was re-verified."""
+
+    def letters_and_rivers_ids(self, task):
+        by_document = {}
+        for item in task["evidence"]:
+            by_document.setdefault(item["document_id"], []).append(item["citation_id"])
+        return by_document[self.letters["id"]], by_document[self.rivers["id"]]
+
+    def test_a_document_answer_must_cite_that_documents_own_passages(self):
+        def reply(prompt):
+            # The letters passages are searched first, so [1] is a letters passage.
+            return {"per_document": [{"document_id": str(self.letters["id"]), "answer": "Alpha is first [1]."},
+                                     {"document_id": self.rivers["id"], "answer": "Rivers agree [1]."}],
+                    "comparison": "Same [1].", "synthesis": "Done."}
+        self.script.replies["multi-document answer"] = reply
+        task = self.run_kind(kind="ask", question="Which letter is first?")
+        letters_ids, _rivers_ids = self.letters_and_rivers_ids(task)
+        self.assertIn(1, letters_ids)
+        rows = {row["document_id"]: row for row in task["result"]["per_document"]}
+        self.assertTrue(rows[self.letters["id"]]["found"])  # a numeric-string id is accepted
+        self.assertEqual((rows[self.rivers["id"]]["found"], rows[self.rivers["id"]]["citation_ids"]), (False, []))
+
+    def test_a_comparison_finding_must_cite_that_documents_own_passages(self):
+        def reply(prompt):
+            return {"dimensions": [{"name": "methodology", "findings": [
+                {"document_id": self.letters["id"], "finding": "Letters [1]."},
+                {"document_id": self.rivers["id"], "finding": "Borrowed [1]."}]}], "summary": ""}
+        self.script.replies["document comparison"] = reply
+        task = self.run_kind(kind="compare", document_ids=[self.letters["id"], self.rivers["id"]], dimensions=["methodology"])
+        cells = {cell["document_id"]: cell for cell in task["result"]["dimensions"][0]["findings"]}
+        self.assertEqual(cells[self.letters["id"]]["status"], "found")
+        self.assertEqual(cells[self.rivers["id"]]["status"], "not_stated")
+
+    def test_non_finite_numbers_are_invalid(self):
+        for value in ("NaN", "inf", float("nan"), "1e400"):
+            with self.subTest(value=value):
+                self.assertEqual(engine.coerce(value, "number"), (None, False))
+
+    def test_a_retry_replaces_the_earlier_attempts_run(self):
+        self.script.replies["counter-query"] = "alpha"
+        self.script.replies["claim assessment"] = ["bad", "bad"]
+        failed = self.run_kind(kind="verify_claim", claim="Alpha is first", document_ids=[self.letters["id"]])
+        first_run = failed["run_id"]
+        self.assertIsNotNone(first_run)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.post(f"/api/v1/research/tasks/{failed['id']}/retry/")
+        self.script.replies["claim assessment"] = [{"assessments": [{"id": 1, "stance": "supports"}], "conclusion": "Yes [1]."}]
+        self.run_task(failed["id"])
+        retried = self.task(failed["id"])
+        self.assertEqual(retried["status"], "completed")
+        self.assertNotEqual(retried["run_id"], first_run)
+        self.assertFalse(RetrievalRun.objects.filter(pk=first_run).exists())
+        self.assertEqual(RetrievalRun.objects.filter(source="research").count(), 1)
+
+    def test_a_worker_that_lost_the_task_records_no_failed_run(self):
+        created = self.create(kind="verify_claim", claim="Alpha is first", document_ids=[self.letters["id"]])
+        token = ResearchTask.objects.get(pk=created["id"]).run_token
+
+        def cancel_then_fail(prompt):
+            ResearchTask.objects.filter(pk=created["id"]).update(status="cancelled", run_token=None)
+            raise RuntimeError("provider down")
+
+        self.script.replies["counter-query"] = "alpha"
+        self.script.replies["claim assessment"] = cancel_then_fail
+        self.assertFalse(runner.run_task(created["id"], token))
+        self.assertEqual(self.task(created["id"])["status"], "cancelled")
+        self.assertFalse(RetrievalRun.objects.filter(source="research").exists())
+
+
 from django.test import TransactionTestCase, override_settings  # noqa: E402
 
 from router.models import GuestUser  # noqa: E402

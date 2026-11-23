@@ -4,5 +4,5 @@
  */
 export const chattyDeskURL =
   import.meta.env.VITE_CHATTYDESK_URL ||
-  (typeof window !== "undefined" && (window as any).CHATTYDESK_URL) ||
+  (typeof window !== "undefined" && (window as Window & { CHATTYDESK_URL?: string }).CHATTYDESK_URL) ||
   "https://chatty.nevatal.id";

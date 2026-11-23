@@ -1,8 +1,20 @@
-"""Bounded remote embedding requests with strict response alignment."""
+"""Bounded remote embedding requests with strict response alignment.
+
+An index is only meaningful against the model that built it: every document
+records its embedding model, and questions are embedded with that same model.
+So a failing request is never retried with a *different* model (the vectors
+would land in another embedding space and similarities would be silently
+meaningless). Transient failures — rate limits, timeouts, 5xx — are retried
+with the same model after a short backoff (honouring Retry-After); anything
+else fails with a retryable error, and ingestion resumes from its embedding
+checkpoint when retried.
+"""
 import logging
 import numbers
-import random
+import time
+
 import numpy as np
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from common.errors import PipelineError, provider_error
 
@@ -10,18 +22,45 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_BATCH_SIZE = 64
 EMBEDDING_TIMEOUT_SECONDS = 45.0
+# Extra attempts after the client's own retry, and the wait before each.
+RETRY_DELAYS_SECONDS = (1.0, 3.0)
+MAX_RETRY_AFTER_SECONDS = 10.0
+TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+_sleep = time.sleep  # replaced in tests
 
-FREE_OPENROUTER_EMBEDDING_MODELS = [
-    "nvidia/nemotron-3.5-embed-1b:free",
-    "nvidia/nemotron-3-embed-1b:free",
-    "nvidia/nemotron-3.5-embed-8b:free",
-]
+
+def is_transient(exc):
+    """True for failures the same model may not repeat: rate limits, timeouts, 5xx."""
+    if isinstance(exc, (APITimeoutError, APIConnectionError)):
+        return True
+    return isinstance(exc, APIStatusError) and exc.status_code in TRANSIENT_STATUSES
 
 
-def get_shuffled_free_embedding_models() -> list[str]:
-    models = list(FREE_OPENROUTER_EMBEDDING_MODELS)
-    random.shuffle(models)
-    return models
+def retry_delay(exc, default):
+    """Seconds to wait: the provider's Retry-After when given (capped), else `default`."""
+    response = getattr(exc, "response", None)
+    header = getattr(response, "headers", {}).get("retry-after") if response is not None else None
+    try:
+        return max(0.0, min(float(header), MAX_RETRY_AFTER_SECONDS)) if header is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _create(client, batch, model):
+    """One provider call for `batch`, retried with the same model on transient failures."""
+    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
+        try:
+            return client.embeddings.create(input=batch, model=model)
+        except PipelineError:
+            raise
+        except Exception as exc:
+            if attempt < len(RETRY_DELAYS_SECONDS) and is_transient(exc):
+                delay = retry_delay(exc, RETRY_DELAYS_SECONDS[attempt])
+                logger.warning("Embedding with %s failed transiently (%s); retrying the same model in %.1fs",
+                               model, exc.__class__.__name__, delay)
+                _sleep(delay)
+                continue
+            raise provider_error(exc, "Embedding", model) from exc
 
 
 def validate_vectors(vectors, count, dimensions=None):
@@ -47,8 +86,8 @@ def embed_texts(client, texts, model, *, dimensions=None):
     vectors = []
     for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
         batch = [text.replace("\n", " ") for text in texts[start:start + EMBEDDING_BATCH_SIZE]]
+        response = _create(client, batch, model)
         try:
-            response = client.embeddings.create(input=batch, model=model)
             rows = response.data
             if not isinstance(rows, list) or len(rows) != len(batch):
                 raise ValueError("Embedding count mismatch")
@@ -63,35 +102,6 @@ def embed_texts(client, texts, model, *, dimensions=None):
             raise
         except (ValueError, TypeError, AttributeError) as exc:
             raise PipelineError("invalid_embeddings", "OpenRouter returned an invalid embedding response. Retry indexing the document.", retryable=True, http_status=502) from exc
-        except Exception as exc:
-            exc_str = str(exc).lower()
-            is_credit = any(k in exc_str for k in ("402", "credit", "payment required", "insufficient", "quota", "balance"))
-            is_free_rate_limit = ":free" in str(model) and any(k in exc_str for k in ("429", "rate limit", "502", "503", "timeout", "temporarily unavailable", "overloaded"))
-            if is_credit or is_free_rate_limit:
-                logger.warning("Embedding with %s failed (%s); retrying with free models", model, exc)
-                succeeded = False
-                for fb_model in get_shuffled_free_embedding_models():
-                    if fb_model == model:
-                        continue
-                    try:
-                        logger.info("Retrying embeddings with free model: %s", fb_model)
-                        fb_response = client.embeddings.create(input=batch, model=fb_model)
-                        fb_rows = fb_response.data
-                        if not isinstance(fb_rows, list) or len(fb_rows) != len(batch):
-                            continue
-                        fb_ordered = [row.embedding for row in sorted(fb_rows, key=lambda row: row.index)]
-                        values = validate_vectors(fb_ordered, len(batch), dimensions)
-                        dimensions = values.shape[1]
-                        vectors.extend(values.tolist())
-                        succeeded = True
-                        logger.info("Embedding fallback succeeded with %s", fb_model)
-                        break
-                    except Exception as fb_exc:
-                        logger.warning("Free embedding model %s failed: %s", fb_model, fb_exc)
-                        continue
-                if succeeded:
-                    continue
-            raise provider_error(exc, "Embedding", model) from exc
         dimensions = values.shape[1]
         vectors.extend(values.tolist())
     return vectors

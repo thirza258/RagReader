@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# The test suite is hermetic and its fixtures are built against these models;
+# a deployment default (or a developer's .env) must not change what it tests.
+# Set before any app module reads them (common/constant.py at import time).
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    os.environ["RAG_EMBEDDING_MODEL"] = "openai/text-embedding-3-small"
+    os.environ["RAG_CHAT_MODEL"] = "openai/gpt-4o-mini"
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
