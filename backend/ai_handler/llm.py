@@ -53,11 +53,6 @@ FREE_OPENROUTER_MODELS = [
     "recursive/flint-v1.0:free",
 ]
 
-FREE_OPENROUTER_EMBEDDING_MODELS = [
-    "nvidia/nemotron-3.5-embed-1b:free",
-    "nvidia/nemotron-3-embed-1b:free",
-    "nvidia/nemotron-3.5-embed-8b:free",
-]
 
 
 def get_shuffled_free_models() -> list[str]:
@@ -65,11 +60,6 @@ def get_shuffled_free_models() -> list[str]:
     random.shuffle(models)
     return models
 
-
-def get_shuffled_free_embedding_models() -> list[str]:
-    models = list(FREE_OPENROUTER_EMBEDDING_MODELS)
-    random.shuffle(models)
-    return models
 
 
 def is_credit_exhausted_error(exc_or_status: Any, message: str = "") -> bool:

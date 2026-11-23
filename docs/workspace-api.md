@@ -284,6 +284,19 @@ document that already has deep-analysis ground truth is re-indexed, its
 original extracted text is indexed verbatim so its chunks — and the ground
 truth attached to them — survive (its citations then carry no page numbers).
 
+### Embedding failures
+
+An index is searched with the model that built it, so embedding requests
+never switch to another model: vectors from a different model live in a
+different space, and mixing them gives meaningless similarities with no
+error. Rate limits, timeouts and 5xx answers are retried with the same
+model (two extra attempts after 1 s and 3 s, or the provider's
+`Retry-After`, capped at 10 s); after that, or on any other provider error
+(e.g. exhausted credits), ingestion fails retryably and resumes from its
+embedding checkpoint when retried, and a question fails with a retryable
+error. Generation (the chat model) may still fall back to a free model; the
+answer records which model replied.
+
 ## URL ingestion security
 
 URL documents are fetched by the worker, never by the API request, through a
