@@ -37,20 +37,15 @@ OPENROUTER_HEADERS = {
 }
 
 FREE_OPENROUTER_MODELS = [
-    "google/gemma-4-26b-a4b-it:free",
-    "nvidia/nemotron-3.5-lightning:free",
-    "google/gemma-4-31b-it:free",
-    "nvidia/nemotron-3.5-super-vl:free",
-    "cohere/north-mini-code:free",
+    "openrouter/free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
     "dots-studio/dots-3-note-preview:free",
+    "recursive/flint-v1.0:free",
     "liquid/lfm-3-1.7b:free",
     "baidu/ernie-5.5-flash-preview:free",
-    "inclusionai/ling-3.2-flash:free",
-    "particle-ai/particle-1:free",
-    "thinkingmachines/inkling-2-small:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-    "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "recursive/flint-v1.0:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
 ]
 
 
